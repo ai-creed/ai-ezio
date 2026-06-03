@@ -1,3 +1,4 @@
 [submodule "vendor/hax"]
 	path = vendor/hax
-	url = https://github.com/OleksandrChekhovskyi/hax
+	url = git@github.com:ai-creed/hax.git
+	branch = emitter
