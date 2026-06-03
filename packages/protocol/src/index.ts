@@ -8,6 +8,33 @@
  * transport land in M3 (see docs/protocol.md and docs/superpowers/plans).
  */
 
+export type {
+	AssistantDeltaEvent,
+	AssistantTurnFinishedEvent,
+	AssistantTurnStartedEvent,
+	ErrorEvent,
+	EventType,
+	IdleEvent,
+	ProtocolEvent,
+	ReadyEvent,
+	ToolCallFinishedEvent,
+	ToolCallStartedEvent,
+	UserTurnStartedEvent,
+} from "./events.js";
+export type {
+	ControlType,
+	CopyLastResponseControl,
+	InterruptControl,
+	M3Control,
+	NewConversationControl,
+	ProtocolControl,
+	StatusControl,
+	SubmitControl,
+} from "./controls.js";
+export { encodeControl, encodeEvent, JsonlDecoder, MalformedLineError } from "./codec.js";
+export type { Transport } from "./transport.js";
+export { FdTransport } from "./transport-fd.js";
+
 /** Protocol version this harness speaks. Bump major only on breaking changes. */
 export const PROTOCOL_VERSION = "0.1.0";
 
