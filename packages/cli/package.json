@@ -1,0 +1,35 @@
+{
+	"name": "ai-ezio",
+	"version": "0.1.0",
+	"description": "ai-ezio: hax-derived, workflow-native coding agent",
+	"license": "MIT",
+	"type": "module",
+	"bin": {
+		"ai-ezio": "bin/ai-ezio.mjs"
+	},
+	"haxBaseCommit": "8fd139b5db49bd0b1d552c2530a18b547b3f4f4c",
+	"exports": {
+		".": {
+			"types": "./dist/cli.d.ts",
+			"import": "./dist/cli.js"
+		}
+	},
+	"files": [
+		"dist",
+		"bin"
+	],
+	"dependencies": {
+		"@ai-ezio/harness": "workspace:*",
+		"@ai-ezio/protocol": "workspace:*"
+	},
+	"optionalDependencies": {
+		"@ai-ezio/hax-darwin-arm64": "workspace:*",
+		"@ai-ezio/hax-darwin-x64": "workspace:*",
+		"@ai-ezio/hax-linux-x64": "workspace:*",
+		"@ai-ezio/hax-linux-arm64": "workspace:*"
+	},
+	"scripts": {
+		"build": "tsc --build",
+		"test": "vitest run"
+	}
+}

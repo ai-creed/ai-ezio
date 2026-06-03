@@ -1,0 +1,5 @@
+# Source-only formatting — never format generated output or the vendored engine.
+vendor/
+**/dist/
+node_modules/
+pnpm-lock.yaml

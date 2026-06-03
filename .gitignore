@@ -15,6 +15,10 @@ vendor/hax/build-asan/
 artifacts/
 *.node
 
+# staged per-platform hax binaries (build artifacts; populated by the CI
+# cross-compile matrix or scripts/stage-host-binary.mjs — never committed)
+packaging/*/bin/
+
 # logs / debug (hax HAX_TRACE / HAX_TRANSCRIPT dumps)
 *.log
 .DS_Store

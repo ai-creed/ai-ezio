@@ -1,0 +1,15 @@
+{
+	"name": "@ai-ezio/hax-linux-x64",
+	"version": "0.1.0",
+	"description": "Prebuilt hax engine binary for ai-ezio (linux/x64)",
+	"license": "MIT",
+	"os": [
+		"linux"
+	],
+	"cpu": [
+		"x64"
+	],
+	"files": [
+		"bin"
+	]
+}

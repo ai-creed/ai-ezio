@@ -1,0 +1,9 @@
+{
+	"files": [],
+	"references": [
+		{ "path": "packages/protocol" },
+		{ "path": "packages/harness" },
+		{ "path": "packages/adapter" },
+		{ "path": "packages/cli" }
+	]
+}

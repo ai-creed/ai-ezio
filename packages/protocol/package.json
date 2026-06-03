@@ -1,0 +1,20 @@
+{
+	"name": "@ai-ezio/protocol",
+	"version": "0.1.0",
+	"description": "ai-ezio JSONL machine protocol: schema, codec, transport seam",
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc --build",
+		"test": "vitest run"
+	}
+}

@@ -1,0 +1,15 @@
+{
+	"name": "@ai-ezio/hax-darwin-x64",
+	"version": "0.1.0",
+	"description": "Prebuilt hax engine binary for ai-ezio (darwin/x64)",
+	"license": "MIT",
+	"os": [
+		"darwin"
+	],
+	"cpu": [
+		"x64"
+	],
+	"files": [
+		"bin"
+	]
+}
