@@ -1,0 +1,30 @@
+ai-ezio
+=======
+
+ai-ezio is a downstream, hax-derived workflow-native coding agent for the
+ai-creed / ai-whisper ecosystem.
+
+Lineage
+-------
+
+ai-ezio is derived from hax, a minimalist terminal coding assistant in C,
+originally authored by Oleksandr Chekhovskyi.
+
+  Upstream:  hax        https://github.com/OleksandrChekhovskyi/hax
+  Base:      commit 8fd139b5db49bd0b1d552c2530a18b547b3f4f4c (2026-05-29)
+
+ai-ezio retains hax's core provider / tool / streaming architecture (vendored
+as a git submodule under `vendor/hax`) and adds:
+
+  - a machine-readable JSONL protocol emitted from hax via a small C patch;
+  - a TypeScript harness for mounted / machine-controlled sessions;
+  - an ai-whisper adapter for workflow handoffs and handbacks;
+  - first-class skills discoverability UX.
+
+License
+-------
+
+hax is MIT-licensed (Copyright (c) 2026 Oleksandr Chekhovskyi). ai-ezio is
+distributed under the same MIT license. The original copyright notice and
+permission notice are preserved in LICENSE and in every vendored hax source
+file (SPDX-License-Identifier: MIT).

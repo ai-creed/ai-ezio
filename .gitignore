@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# vendored hax C build trees (submodule builds locally)
+vendor/hax/build/
+vendor/hax/build-asan/
+
+# packaged single-binary artifacts
+artifacts/
+*.node
+
+# logs / debug (hax HAX_TRACE / HAX_TRANSCRIPT dumps)
+*.log
+.DS_Store
+
+# editor / OS
+.idea/
+.vscode/
+*.swp
