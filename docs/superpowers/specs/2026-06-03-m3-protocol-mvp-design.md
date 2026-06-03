@@ -213,9 +213,16 @@ harden the version-mismatch teardown path (graceful refusal + clear error, beyon
 M3a's basic major-version assertion); decide whether `assistant_delta` becomes
 opt-in. No rewrite — only widened observer/codec coverage.
 
-**Done when:** the full M3 event/control set in `docs/protocol.md` flows over the
-fds under the mock provider, tool events and errors included, with the human
-REPL still byte-for-byte unaffected when the protocol is off.
+**Done when:** the **explicit M3 set** flows over the fds under the mock
+provider — events `ready`, `user_turn_started`, `assistant_turn_started`,
+`assistant_delta`, `tool_call_started`, `tool_call_finished`,
+`assistant_turn_finished{content}`, `error`, `idle`, plus the controls `submit`
+and `interrupt` — with the version-mismatch teardown path exercised, and the
+human REPL still byte-for-byte unaffected when the protocol is off. The M4
+controls (`copy_last_response`, `new_conversation`, `status`) are explicitly NOT
+required to function in M3; only their documented groundwork (per the bullet
+above) is in scope. Acceptance is judged against this enumerated set, not the
+literal full control list in `docs/protocol.md` (which includes the M4 controls).
 
 ## Testing
 
