@@ -27,9 +27,14 @@ and `--version --json` reports both versions.
 - Study how skills are shared across Claude, Codex, hax, and ai-ezio (open item).
 - Document skill directories ai-ezio honors.
 - `ai-ezio skill list` / `skill dirs` (+ possibly `skill install`).
-- Interactive `/skills`.
 - Make missing skills easy to diagnose (`doctor` integration).
 - Verify ai-whisper skills can be installed into ai-ezio's expected directory.
+
+> Interactive `/skills` was moved out of M2 to **M4** (mounted mode): the human
+> REPL is currently raw hax passthrough, and injecting a `/skills` command needs
+> the control/input channel that lands with the protocol (M3) and mounted mode
+> (M4). Adding it in M2 would require scraping or growing the hax patch beyond
+> the emitter seam (`UPSTREAM.md`). See `docs/skills.md`.
 
 **Done when:** a user can discover, list, and diagnose skills, and an ai-whisper
 skill installs into ai-ezio cleanly.
@@ -55,6 +60,9 @@ human REPL is byte-for-byte unaffected when the protocol is off.
   `assistant_turn_finished.content`.
 - `copy_last_response` so handback never needs the clipboard.
 - `new_conversation`, `status` controls.
+- Interactive `/skills` (moved from M2): now that ai-ezio owns a control/input
+  channel, surface the discovered-skills list in the REPL. Reuses the M2 skill
+  discovery (`ai-ezio skill list`).
 
 **Done when:** a programmatic client submits and receives handback text purely
 over the protocol, no clipboard, no scraping.

@@ -72,6 +72,8 @@ path is wired in M6; M2 only verifies discovery of a correctly-placed skill.
   and engine-visibility.
 - `ai-ezio doctor` — engine binary resolution + skill directory health.
 
-Interactive `/skills` in the REPL is deferred until the protocol/mount mode
-(M3/M4) gives ai-ezio a control channel — adding it now would mean scraping or
-growing the hax patch beyond the emitter seam (`UPSTREAM.md`).
+Interactive `/skills` in the REPL is **moved out of M2 to M4 (mounted mode)**,
+which is where ai-ezio first owns a control/input channel (built on the M3
+protocol). Adding it in M2 would mean scraping or growing the hax patch beyond
+the emitter seam (`UPSTREAM.md`). It reuses this module's discovery, so it is
+purely a UX surface in M4. See `docs/milestones.md` (M4) and the plan.
