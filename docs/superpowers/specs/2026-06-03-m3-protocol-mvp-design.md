@@ -202,8 +202,8 @@ The harness reads `ready.protocol` and asserts a matching **major** version
 and observes `ready → user_turn_started → assistant_turn_started →
 assistant_delta… → assistant_turn_finished{content} → idle` over fd 3, reading
 `content` as the handback with no stdout parsing; an `interrupt` aborts a live
-turn and returns to `idle`; and with no fds wired the human REPL output is
-byte-for-byte unchanged.
+turn and returns to `idle`; and with no fds wired the **interactive** human REPL
+output is byte-for-byte unchanged (verified on the interactive path, not `-p`).
 
 ### M3b — full MVP (same mechanism, widened)
 
@@ -233,8 +233,13 @@ literal full control list in `docs/protocol.md` (which includes the M4 controls)
   malformed-line surfacing; `ready.protocol` major-version gate.
 - **TS e2e:** the harness drives a full mock turn over the fds, asserting the
   event sequence, the `content`, and the `interrupt` path.
-- **Regression:** with no fds wired, hax's human REPL output is byte-for-byte
-  identical to pre-patch (guards "protocol only active when fds are wired").
+- **Regression:** with no fds wired, hax's **interactive** human REPL output is
+  byte-for-byte identical to pre-patch (guards "protocol only active when fds are
+  wired"). The patch modifies the interactive `agent_run` path (input-source
+  swap, stream tick), **not** the `-p` one-shot path — so this regression MUST
+  exercise the interactive REPL (drive it through a PTY with a scripted mock
+  session and compare against a pre-patch baseline binary), not a `-p` one-shot.
+  A one-shot check does not satisfy this requirement.
 
 ## Engine boundary guardrail
 
