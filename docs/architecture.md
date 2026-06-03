@@ -23,12 +23,20 @@ ai-creed and ai-whisper.
 | Repo layout     | Monorepo `ai-ezio` + hax as git submodule (`vendor/hax`)         | One clone, one build pipeline, simplest path to a single bundled artifact. |
 | Transport       | Inherited file descriptors (fd 3 events, fd 4 controls)          | Bundled app owns its child; no socket path/port/cleanup; child dies with parent. |
 | Transport seam  | Pluggable — socket / stdio framing addable later                 | Wire format (JSONL) is identical across transports; not a lock-in. |
-| Distribution    | Single artifact — hax binary embedded in the ezio bundle         | Users install one thing; never manage hax separately. |
-| Targets         | macOS + Linux                                                    | hax is Unix-first; extra-fd inheritance is clean on Unix. |
+| Distribution    | Single install — hax binary embedded in the ezio bundle          | Users install one thing; never manage hax separately. |
+| Packaging form  | npm package + prebuilt per-platform hax binary (esbuild/swc-style) | Serves both consumers (standalone CLI + ai-whisper import) from one artifact; matches Node/pnpm. |
+| Runtime         | Node LTS                                                         | Matches ai-whisper (pnpm, node-pty native module); no second toolchain. |
+| Targets         | macOS + Linux (arm64 + x64)                                      | hax is Unix-first; extra-fd inheritance is clean on Unix. |
 | Visibility      | Private                                                          | Pre-implementation. |
 
-Open (decided later): final packaging form (Node SEA vs `bun build --compile`
-vs npm prebuilt per-platform binaries) — decided at Milestone 1.
+ai-ezio is consumed two ways, which is why a compiled single-file (Node SEA /
+`bun build --compile`) was rejected: it serves the CLI but cannot be `import`ed
+as a library by ai-whisper, forcing a second artifact. The npm-package model
+serves both from one.
+
+- **Standalone CLI** — `npm i -g ai-ezio`; end user runs `ai-ezio`.
+- **Library** — ai-whisper imports the adapter (like `adapter-codex` today,
+  which spawns its agent by executable path — the same pattern ai-ezio uses).
 
 ## The hybrid
 
@@ -116,10 +124,39 @@ terminal chrome when ai-ezio can report it explicitly over the protocol.
 
 ## Distribution model
 
-One installable artifact. Build pipeline: compile the patched hax for each
-target, embed the binary as an asset inside the ezio bundle, ship one install.
-The harness locates and spawns the embedded binary; users never see or install
-hax. Final packaging form is chosen at Milestone 1.
+One install. Packaging follows the esbuild/swc pattern: a main `ai-ezio` package
+(JS launcher + harness + protocol) declares per-platform binary packages as
+`optionalDependencies`, each gated by `os`/`cpu` so npm installs only the match.
+
+```text
+ai-ezio                         main pkg; `bin` = JS launcher that resolves + spawns hax
+  optionalDependencies:
+    @ai-ezio/hax-darwin-arm64   } one compiled hax binary per os/cpu,
+    @ai-ezio/hax-darwin-x64     } "os"/"cpu" fields restrict install to the
+    @ai-ezio/hax-linux-x64      } matching platform
+    @ai-ezio/hax-linux-arm64    }
+```
+
+`npm i -g ai-ezio` pulls the one matching binary package; users never see or
+install hax. The same package is `import`-able by ai-whisper.
+
+### Binary lookup resolver
+
+The harness resolves the hax binary path in this order:
+
+1. `AI_EZIO_HAX_BIN` env override (dev / CI / tests);
+2. matching `@ai-ezio/hax-<platform>` package via `require.resolve`;
+3. local `vendor/hax/build/hax` (dev fallback after `meson compile`).
+
+If none resolve, fail with a clear message pointing at `ai-ezio doctor`.
+
+### Build pipeline
+
+`meson compile -C vendor/hax/build` produces the binary; a publish step copies
+each target's binary into its platform package. **Cross-compiling hax C for each
+target is the one genuinely involved piece** and needs a CI build matrix
+(darwin-arm64/x64, linux-x64/arm64). For local development the resolver's
+dev fallback (#3) is sufficient — the publish matrix can be finished last.
 
 ## What stays in hax vs ai-ezio
 

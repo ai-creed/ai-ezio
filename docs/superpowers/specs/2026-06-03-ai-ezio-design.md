@@ -41,10 +41,11 @@ integration — without turning hax into a bigger product.
 | Language split | Engine = C (hax); harness = TypeScript                      |
 | Repo layout    | Monorepo `ai-ezio` + hax as git submodule (`vendor/hax`)    |
 | Transport      | Inherited fds (fd 3 events, fd 4 controls), pluggable seam  |
-| Distribution   | Single artifact; hax binary embedded in the ezio bundle     |
-| Targets        | macOS + Linux                                               |
+| Distribution   | Single install; hax binary embedded in the ezio bundle      |
+| Packaging form | npm package + prebuilt per-platform hax binary (esbuild/swc-style) |
+| Runtime        | Node LTS (matches ai-whisper)                               |
+| Targets        | macOS + Linux (arm64 + x64)                                 |
 | Visibility     | Private                                                     |
-| Packaging form | Deferred to M1 (Node SEA vs bun --compile vs npm prebuilt)  |
 
 ## Architecture (summary)
 
@@ -70,6 +71,20 @@ Build plan: `docs/milestones.md`. Upstream policy: `UPSTREAM.md`.
 - `packages/cli` — `ai-ezio` binary: REPL passthrough, `--mount-mode`,
   `--version --json`, `doctor`, skills UX.
 - `vendor/hax` — C engine submodule; emitter patch on the `emitter` branch.
+
+## Distribution
+
+One install, npm-package model (esbuild/swc-style): a main `ai-ezio` package
+declares per-platform binary packages (`@ai-ezio/hax-<os>-<cpu>`) as
+`optionalDependencies`, gated by `os`/`cpu`. `npm i -g ai-ezio` pulls the one
+matching hax binary; users never install hax separately. The same package is
+`import`-able by ai-whisper, so one artifact serves both the standalone CLI and
+the ai-whisper adapter. Compiled single-file approaches (Node SEA, `bun
+--compile`) were rejected: they can't be imported as a library, forcing a second
+artifact. Runtime is Node LTS (matches ai-whisper). Harness resolves the binary
+via `AI_EZIO_HAX_BIN` → platform package → `vendor/hax/build/hax` (dev). The one
+involved piece is a CI matrix cross-compiling hax C per target. Full detail in
+`docs/architecture.md`.
 
 ## Downstream change surface in hax (keep tiny)
 
@@ -99,7 +114,6 @@ M4 mounted mode · M5 ai-whisper adapter · M6 workflow integration. See
 
 ## Open questions
 
-- Final single-artifact packaging form (M1).
 - `assistant_delta` streaming opt-in; need for `tool_call_delta`.
 - Status event payload shape.
 - >2 mounted agents in ai-whisper vs ai-ezio as a replacement role.

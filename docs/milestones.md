@@ -9,9 +9,11 @@ emitter is part of the protocol milestone (M3), not the foundation.
 - Stand up the pnpm monorepo: `packages/{protocol,harness,adapter,cli}` skeletons.
 - ESLint + Prettier + `.editorconfig` (tabs, double quotes, semicolons, trailing
   commas; source-only formatting).
-- Build pipeline that compiles hax and embeds the binary into the ezio bundle —
-  **pick the final packaging form here** (Node SEA vs `bun build --compile` vs
-  npm prebuilt per-platform binaries).
+- Build pipeline that compiles hax and embeds the binary into the ezio bundle,
+  using the decided packaging model: npm main package + per-platform
+  `@ai-ezio/hax-<os>-<cpu>` binary packages (optionalDependencies), Node LTS
+  runtime, binary resolved via `AI_EZIO_HAX_BIN` → platform package →
+  `vendor/hax/build/hax` dev fallback. CI cross-compile matrix can land last.
 - `ai-ezio` CLI launches: interactive REPL passthrough + `-p` one-shot, both
   delegating to the embedded hax.
 - `ai-ezio --version --json` → ezio version + hax base commit.
@@ -79,7 +81,6 @@ full workflow as a role.
 
 ## Open study questions (carried from the plan)
 
-- Final packaging form for the single artifact (resolve in M1).
 - How much hax core (if any) needs splitting for clean protocol hooks beyond the
   `on_event` seam.
 - Streaming opt-in (`assistant_delta`) and whether `tool_call_delta` is needed.
