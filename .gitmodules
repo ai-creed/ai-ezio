@@ -1,0 +1,3 @@
+[submodule "vendor/hax"]
+	path = vendor/hax
+	url = https://github.com/OleksandrChekhovskyi/hax
