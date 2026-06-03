@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readVersionInfo, wantsVersionJson } from "./cli.js";
+import { isNativeSubcommand, wantsVersionJson } from "./cli.js";
+import { readVersionInfo } from "./version.js";
 
 describe("wantsVersionJson", () => {
 	it("is true only when both --version and --json are present", () => {
@@ -8,6 +9,15 @@ describe("wantsVersionJson", () => {
 		expect(wantsVersionJson(["--version"])).toBe(false);
 		expect(wantsVersionJson(["-p", "hello"])).toBe(false);
 		expect(wantsVersionJson([])).toBe(false);
+	});
+});
+
+describe("isNativeSubcommand", () => {
+	it("intercepts skill and doctor, passes everything else to hax", () => {
+		expect(isNativeSubcommand(["skill", "list"])).toBe(true);
+		expect(isNativeSubcommand(["doctor"])).toBe(true);
+		expect(isNativeSubcommand(["-p", "hi"])).toBe(false);
+		expect(isNativeSubcommand([])).toBe(false);
 	});
 });
 

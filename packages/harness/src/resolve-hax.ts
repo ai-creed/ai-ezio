@@ -36,6 +36,22 @@ export interface ResolveHaxOptions {
 	devRoot?: string | undefined;
 }
 
+/** Which resolution branch produced the binary path. */
+export type HaxBinarySource = "env-override" | "platform-package" | "dev-fallback";
+
+/** The outcome of attempting to locate the hax binary, without throwing. */
+export interface HaxResolution {
+	ok: boolean;
+	/** Absolute path to the binary when `ok`. */
+	path?: string;
+	/** Which branch matched when `ok`. */
+	source?: HaxBinarySource;
+	/** Human-readable trace of every branch tried (for `ai-ezio doctor`). */
+	attempts: string[];
+	/** Error message when not `ok`. */
+	error?: string;
+}
+
 /** The npm package name carrying the prebuilt hax binary for a platform. */
 export function platformPackageName(platform: string, arch: string): string {
 	return `@ai-ezio/hax-${platform}-${arch}`;
@@ -60,7 +76,12 @@ function findDevRoot(): string | undefined {
 	return undefined;
 }
 
-export function resolveHaxBinary(options: ResolveHaxOptions = {}): string {
+/**
+ * Locate the hax binary, reporting the full resolution trace instead of
+ * throwing. `ai-ezio doctor` uses this to explain what matched (or why nothing
+ * did); `resolveHaxBinary` wraps it for the spawn path.
+ */
+export function describeHaxBinary(options: ResolveHaxOptions = {}): HaxResolution {
 	const env = options.env ?? process.env;
 	const platform = options.platform ?? process.platform;
 	const arch = options.arch ?? process.arch;
@@ -72,10 +93,16 @@ export function resolveHaxBinary(options: ResolveHaxOptions = {}): string {
 	// 1. explicit override
 	const override = env.AI_EZIO_HAX_BIN;
 	if (override !== undefined && override !== "") {
-		if (fileExists(override)) return override;
-		throw new HaxBinaryNotFoundError(
-			`AI_EZIO_HAX_BIN is set to "${override}" but no file exists there.`,
-		);
+		if (fileExists(override)) {
+			attempts.push(`AI_EZIO_HAX_BIN=${override} (exists)`);
+			return { ok: true, path: override, source: "env-override", attempts };
+		}
+		attempts.push(`AI_EZIO_HAX_BIN=${override} (missing)`);
+		return {
+			ok: false,
+			attempts,
+			error: `AI_EZIO_HAX_BIN is set to "${override}" but no file exists there.`,
+		};
 	}
 	attempts.push("AI_EZIO_HAX_BIN (unset)");
 
@@ -84,7 +111,10 @@ export function resolveHaxBinary(options: ResolveHaxOptions = {}): string {
 	try {
 		const pkgJson = resolvePackageJson(`${pkg}/package.json`);
 		const bin = join(dirname(pkgJson), "bin", "hax");
-		if (fileExists(bin)) return bin;
+		if (fileExists(bin)) {
+			attempts.push(`${pkg} (found ${bin})`);
+			return { ok: true, path: bin, source: "platform-package", attempts };
+		}
 		attempts.push(`${pkg} (resolved, but ${bin} missing)`);
 	} catch {
 		attempts.push(`${pkg} (not installed)`);
@@ -94,14 +124,24 @@ export function resolveHaxBinary(options: ResolveHaxOptions = {}): string {
 	const devRoot = "devRoot" in options ? options.devRoot : findDevRoot();
 	if (devRoot !== undefined) {
 		const devBin = join(devRoot, "vendor", "hax", "build", "hax");
-		if (fileExists(devBin)) return devBin;
+		if (fileExists(devBin)) {
+			attempts.push(`${devBin} (dev fallback)`);
+			return { ok: true, path: devBin, source: "dev-fallback", attempts };
+		}
 		attempts.push(`${devBin} (dev fallback missing)`);
 	} else {
 		attempts.push("vendor/hax/build/hax (no dev root)");
 	}
 
-	throw new HaxBinaryNotFoundError(
-		`Could not locate the hax binary. Tried: ${attempts.join("; ")}. ` +
-			`Run "ai-ezio doctor" for help.`,
-	);
+	return {
+		ok: false,
+		attempts,
+		error: `Could not locate the hax binary. Tried: ${attempts.join("; ")}.`,
+	};
+}
+
+export function resolveHaxBinary(options: ResolveHaxOptions = {}): string {
+	const result = describeHaxBinary(options);
+	if (result.ok && result.path !== undefined) return result.path;
+	throw new HaxBinaryNotFoundError(`${result.error} Run "ai-ezio doctor" for help.`);
 }

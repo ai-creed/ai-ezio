@@ -5,8 +5,11 @@
  * spawn the engine). The protocol-driven session/turn state machine lands in M3.
  */
 export {
+	describeHaxBinary,
 	HaxBinaryNotFoundError,
 	platformPackageName,
 	resolveHaxBinary,
+	type HaxBinarySource,
+	type HaxResolution,
 	type ResolveHaxOptions,
 } from "./resolve-hax.js";

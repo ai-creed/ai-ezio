@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { HaxBinaryNotFoundError, platformPackageName, resolveHaxBinary } from "./resolve-hax.js";
+import {
+	describeHaxBinary,
+	HaxBinaryNotFoundError,
+	platformPackageName,
+	resolveHaxBinary,
+} from "./resolve-hax.js";
 
 const PLATFORM = "darwin";
 const ARCH = "arm64";
@@ -74,5 +79,47 @@ describe("resolveHaxBinary", () => {
 				fileExists: () => false,
 			}),
 		).toThrow(/Could not locate the hax binary/);
+	});
+});
+
+describe("describeHaxBinary", () => {
+	it("reports the env-override source and a trace", () => {
+		const r = describeHaxBinary({
+			env: { AI_EZIO_HAX_BIN: "/opt/hax" },
+			platform: PLATFORM,
+			arch: ARCH,
+			fileExists: (p) => p === "/opt/hax",
+		});
+		expect(r).toMatchObject({ ok: true, path: "/opt/hax", source: "env-override" });
+		expect(r.attempts.length).toBeGreaterThan(0);
+	});
+
+	it("reports the platform-package source", () => {
+		const r = describeHaxBinary({
+			env: {},
+			platform: PLATFORM,
+			arch: ARCH,
+			resolvePackageJson: () => "/store/@ai-ezio/hax-darwin-arm64/package.json",
+			fileExists: (p) => p === "/store/@ai-ezio/hax-darwin-arm64/bin/hax",
+			devRoot: undefined,
+		});
+		expect(r.source).toBe("platform-package");
+		expect(r.ok).toBe(true);
+	});
+
+	it("reports failure with an error and the full attempt trace, without throwing", () => {
+		const r = describeHaxBinary({
+			env: {},
+			platform: PLATFORM,
+			arch: ARCH,
+			resolvePackageJson: () => {
+				throw new Error("MODULE_NOT_FOUND");
+			},
+			devRoot: undefined,
+			fileExists: () => false,
+		});
+		expect(r.ok).toBe(false);
+		expect(r.error).toMatch(/Could not locate the hax binary/);
+		expect(r.attempts).toContain("@ai-ezio/hax-darwin-arm64 (not installed)");
 	});
 });
