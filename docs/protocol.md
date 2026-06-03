@@ -19,11 +19,14 @@ through it, ai-whisper). Replaces TUI scraping with structured messages.
 hax is launched with the fds wired:
 
 ```sh
-hax --mount-mode --protocol-fd=3 --control-fd=4
+hax --protocol-fd=3 --control-fd=4
 ```
 
-The harness opens the pipes and passes them as fds 3 and 4 to the child. When
-the parent exits, the child exits (no orphaned engine).
+There is **no `--mount-mode` flag in M3** — the presence of `--control-fd` makes
+hax read `submit`/`interrupt` from the control fd instead of the TTY. REPL chrome
+suppression (a `--mount-mode` behavior) is deferred to M4. The harness opens the
+pipes and passes them as fds 3 and 4 to the child. When the parent exits, the
+child exits (no orphaned engine).
 
 ## Versioning
 

@@ -28,6 +28,12 @@ export interface TurnResult {
 	content: string;
 }
 
+export interface SessionOptions {
+	/** Observer (tee) called for every event, in order, before consumption.
+	 * Non-consuming — useful for recording the full sequence in tests/loggers. */
+	onEvent?: (event: ProtocolEvent) => void;
+}
+
 export class Session {
 	private spawned?: SpawnedHax;
 	private transport?: Transport;
@@ -36,7 +42,10 @@ export class Session {
 	private ended = false;
 	ready?: ReadyEvent;
 
+	constructor(private readonly options: SessionOptions = {}) {}
+
 	private deliver(event: ProtocolEvent | null): void {
+		if (event && this.options.onEvent) this.options.onEvent(event);
 		const w = this.waiters.shift();
 		if (w) w(event);
 		else if (event) this.queue.push(event);
@@ -49,7 +58,8 @@ export class Session {
 		return new Promise((resolve) => this.waiters.push(resolve));
 	}
 
-	private async waitFor(type: ProtocolEvent["type"]): Promise<ProtocolEvent> {
+	/** Consume events until one of the given type arrives. */
+	async waitForEvent(type: ProtocolEvent["type"]): Promise<ProtocolEvent> {
 		for (;;) {
 			const e = await this.next();
 			if (e === null) throw new Error(`engine ended before "${type}"`);
@@ -75,7 +85,7 @@ export class Session {
 			}
 		})();
 
-		const ready = (await this.waitFor("ready")) as ReadyEvent;
+		const ready = (await this.waitForEvent("ready")) as ReadyEvent;
 		if (!isProtocolCompatible(ready.protocol, PROTOCOL_VERSION)) {
 			this.close();
 			throw new ProtocolVersionError(ready.protocol, PROTOCOL_VERSION);
@@ -87,6 +97,11 @@ export class Session {
 	private control(control: ProtocolControl): void {
 		if (!this.transport) throw new Error("session not started");
 		this.transport.send(control);
+	}
+
+	/** Send a user turn without waiting (pair with waitForEvent/interrupt). */
+	submit(text: string): void {
+		this.control({ type: "submit", text });
 	}
 
 	/** Submit a user turn and resolve with its authoritative content at idle. */

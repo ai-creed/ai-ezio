@@ -51,6 +51,10 @@ def drive(binary):
         "HAX_PROVIDER": "mock",
         "HAX_NO_SESSION": "1",
         "TERM": "xterm-256color",
+        # Force a UTF-8 locale so the prompt glyph (❯) is deterministic and the
+        # input-sync below can detect "the prompt has (re)appeared".
+        "LANG": "en_US.UTF-8",
+        "LC_ALL": "en_US.UTF-8",
     }
     proc = subprocess.Popen(
         [binary],
@@ -63,10 +67,12 @@ def drive(binary):
     )
     os.close(slave)
 
-    # Quiescence-synced script: send each input only after the program has been
-    # quiet for `quiet_s`, so the captured byte ORDER is identical across both
-    # binaries regardless of absolute timing (the mock answers instantly).
+    # Prompt-synced script: send input N only after the (N+1)th prompt glyph has
+    # appeared AND the program is quiet. Gating on the prompt eliminates the
+    # startup race (never type before the banner/prompt is printed), so the
+    # captured byte ORDER is identical across both binaries regardless of timing.
     inputs = [b"say hello\r", b"\x04"]  # type a prompt, then Ctrl-D to exit
+    prompt = b"\xe2\x9d\xaf"  # ❯
     quiet_s = 0.4
     out = bytearray()
     idx = 0
@@ -85,7 +91,8 @@ def drive(binary):
             last_data = time.monotonic()
             continue
         quiet = time.monotonic() - last_data
-        if quiet >= quiet_s:
+        prompts_seen = out.count(prompt)
+        if quiet >= quiet_s and prompts_seen > idx:
             if idx < len(inputs):
                 try:
                     os.write(master, inputs[idx])
@@ -93,9 +100,9 @@ def drive(binary):
                     pass
                 idx += 1
                 last_data = time.monotonic()  # wait for the response to this input
-            elif proc.poll() is not None:
-                break
-        if time.monotonic() - start > 10.0:
+        elif quiet >= quiet_s and idx >= len(inputs) and proc.poll() is not None:
+            break
+        if time.monotonic() - start > 12.0:
             proc.kill()
             break
     os.close(master)
