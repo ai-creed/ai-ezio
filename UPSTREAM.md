@@ -26,17 +26,28 @@ vendor/hax
 
 ### Downstream change surface (keep it tiny)
 
-The emitter is deliberately minimal so it survives upstream churn and can be
-proposed back upstream:
+The change is deliberately minimal and rides stable seams so it survives upstream
+churn. It has two parts — an **upstreamable seam** and a **downstream emitter**:
 
-- one new file: `src/protocol/emit.c` (+ header), hooking the existing
-  `turn` `on_event(struct stream_event *)` callback;
-- two new CLI flags: `--protocol-fd=<n>` and `--control-fd=<n>`;
-- ~2-3 lines in existing files to register the callback and parse the flags;
-- one line in `meson.build` to compile the new source.
+**Upstreamable (propose to hax):**
+- one new file `src/agent_observer.h` — a general `struct agent_observer` of
+  optional agent-loop lifecycle hooks (`on_ready`, `on_user_turn`,
+  `on_assistant_begin`, `on_turn_finished`, `on_idle`); mirrors the existing
+  `struct provider` / `struct tool` seams. Justified for any embedder
+  (loggers, TUIs, automation), not just ai-ezio;
+- ~5 invocation points in `agent_run` where that data is already in scope;
+- two new CLI flags `--protocol-fd=<n>` / `--control-fd=<n>`.
 
-Anything beyond this seam is a smell — push it into the TypeScript harness
-instead.
+**Downstream (ai-ezio's emitter, kept here):**
+- one new file `src/protocol/emit.c` (+ header) implementing `agent_observer`,
+  serializing JSONL to the protocol fd, and reading controls from the control
+  fd; plus a single `on_event` hook for stream events (deltas/tools/error),
+  the input-source swap for `submit`, the tick control-read for `interrupt`,
+  and one `meson.build` line.
+
+> Earlier drafts described this as "one file + 2–3 lines"; the accurate surface
+> is the above. Anything beyond it is a smell — push it into the TypeScript
+> harness instead.
 
 ## Keeping up with hax updates
 

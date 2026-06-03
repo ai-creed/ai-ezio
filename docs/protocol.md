@@ -97,14 +97,40 @@ Rules:
 - `copy_last_response` exists so a handback can be re-fetched without re-running
   a turn (and without clipboard access).
 
+## M3 decisions (locked)
+
+- **`assistant_turn_finished` cardinality:** one per **user** turn. `content` is
+  the **last assistant message of the user turn** (the final answer the user
+  reads); empty string if the turn produced no assistant text (e.g. a tool-only
+  turn). Intermediate prose across hax's inner model→tool→model loop remains
+  available via `assistant_delta`. `assistant_turn_started` may therefore appear
+  more than once per user turn; `assistant_turn_finished` and `idle` fire once.
+- **`content` source:** hax's own finalized assistant text, delivered through the
+  `agent_observer` `on_turn_finished` callback — never reconstructed from deltas.
+- **`assistant_delta`:** always-on in M3 (no opt-in control yet); revisit in a
+  later milestone.
+
 ## Engine-side implementation note
 
-The emitter (`vendor/hax/src/protocol/emit.c`) hooks hax's existing
-`turn` `on_event(struct stream_event *)` callback and translates each
-`stream_event` (text delta, tool-call start/delta/end, reasoning, done, error)
-into the JSONL events above, writing to the protocol fd. Controls are read from
-the control fd and injected into the same input path the REPL uses. Keep this
-surface tiny and upstreamable (see `UPSTREAM.md`).
+Two seams carry the protocol, keeping the downstream patch minimal and the
+upstream surface clean:
+
+- **Lifecycle** (`ready`, `user_turn_started`, `assistant_turn_started`,
+  `assistant_turn_finished`, `idle`) rides a new, upstreamable
+  `struct agent_observer` seam in hax (`vendor/hax/src/agent_observer.h`) — a
+  general-purpose set of optional agent-loop hooks (mirrors `struct provider` /
+  `struct tool`). The agent invokes the hooks at well-defined points in
+  `agent_run`; `on_turn_finished` passes hax's finalized assistant text.
+- **Stream events** (`assistant_delta`, `tool_call_started`/`finished`, `error`)
+  ride hax's existing `on_event(struct stream_event *)` callback via a single
+  added hook.
+
+The downstream emitter (`vendor/hax/src/protocol/emit.c`) implements
+`agent_observer`, translates the relevant `stream_event`s, serializes everything
+to JSONL on the protocol fd, and reads/parses controls from the control fd
+(blocking read for `submit` at the input-source swap; non-blocking poll for
+`interrupt` from the stream tick). Keep this surface tiny and upstreamable (see
+`UPSTREAM.md`).
 
 ## Open questions
 

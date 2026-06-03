@@ -69,11 +69,21 @@ deltas, tool-call start/end, reasoning, done, and error events. The emitter
 hooks that callback and writes JSONL to a file descriptor. hax already links
 **jansson**, so JSON encoding adds no dependency.
 
+But the lifecycle events the protocol needs (engine ready, a user turn accepted,
+a turn finished with its authoritative final text, engine idle) have **no**
+public seam in hax today — only per-stream events do. So the change has two
+parts: a small **upstreamable seam** plus a **downstream emitter** (full
+rationale in `docs/superpowers/specs/2026-06-03-m3-protocol-mvp-design.md`).
+
 Downstream change surface (kept minimal — see `UPSTREAM.md`):
 
-- `src/protocol/emit.c` (+ header) — translate `stream_event` → JSONL, write fd.
-- `--protocol-fd=<n>` / `--control-fd=<n>` CLI flags.
-- ~2-3 lines registering the callback + parsing flags; one `meson.build` line.
+- **Upstreamable:** `src/agent_observer.h` — a general `struct agent_observer` of
+  optional agent-loop lifecycle hooks (mirrors `struct provider`/`struct tool`),
+  invoked at ~5 points in `agent_run`; plus `--protocol-fd` / `--control-fd`.
+- **Downstream:** `src/protocol/emit.c` (+ header) implementing the observer +
+  translating `stream_event` → JSONL on the fd + reading controls; one
+  `on_event` hook, the input-source swap, the tick control-read, one
+  `meson.build` line.
 
 ## Components (TypeScript harness)
 
