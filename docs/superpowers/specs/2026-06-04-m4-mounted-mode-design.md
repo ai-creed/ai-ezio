@@ -175,17 +175,29 @@ expected cost of mounted mode and is recorded in `UPSTREAM.md`.
 
 - **Deterministic:** `HAX_PROVIDER=mock`.
 - **C (engine):**
-  - the slash seam: registering a command makes `slash_dispatch` route to it;
-    `/skills` lists a known fixture skill (set up a temp `.agents/skills/<name>/`).
+  - the slash seam: registering a command makes `slash_dispatch` route to it.
+  - `/skills` listing — **REQUIRED to cover the ai-ezio-global dir, not just
+    project**: with a fixture skill in the **ai-ezio-global** dir (point its
+    resolution at a temp `${XDG_CONFIG_HOME}/ai-ezio/skills/<name>/SKILL.md`),
+    assert `/skills` output includes that ai-ezio-global skill. (Also covers a
+    project `.agents/skills/<name>/` skill.) A regression where `/skills` omits
+    ai-ezio-global entries must fail this test.
   - the engine-visibility bridge: with `HAX_EXTRA_SKILLS_DIR` pointed at a fixture
     dir containing a skill, the model's "# Skills" prompt section includes that
     skill (assert via `agent_env` build output / the `HAX_TRANSCRIPT` mirror) —
     proving ezio's own skills reach the model, not just the listing.
   - controls over real fds: `copy_last_response` re-emits the prior
     `assistant_turn_finished.content` with **zero** new turns
-    (no `user_turn_started`/`assistant_turn_started`); `new_conversation` →
-    `idle` and a following turn starts fresh; `status` → a `status` event with
-    the expected fields.
+    (no `user_turn_started`/`assistant_turn_started`); a `copy_last_response`
+    **before any completed turn** yields a turn-less `error{message:"no previous
+    response"}`; `new_conversation` → `idle` and a following turn starts fresh;
+    `status` → a `status` event with the expected fields.
+  - **`--mount-mode` chrome suppression — REQUIRED:** spawn hax with
+    `--mount-mode` + the fds and stdout/stderr **captured** (not ignored), drive a
+    mock turn, and assert the child's stdout/stderr contain **no** startup banner
+    and **no** per-turn usage/"resume with:" lines (chrome suppressed). Contrast:
+    the same run **without** `--mount-mode` does print them — so a regression that
+    keeps emitting chrome under `--mount-mode` fails this test.
 - **TS (harness + protocol):**
   - `StatusEvent` type + codec round-trip; harness methods
     `copyLastResponse()`, `newConversation()`, `status()`;
