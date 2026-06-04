@@ -33,7 +33,11 @@ emit({
 	haxBaseCommit: "fake",
 });
 
-if (mode === "bad-major") {
+if (mode === "exit-after-ready") {
+	// Emit ready (above), then exit so start() resolves first and the child-exit
+	// drives Session.onExit afterwards.
+	setTimeout(() => process.exit(0), 10);
+} else if (mode === "bad-major") {
 	// Stay alive; the harness rejects on the version gate and kills us.
 	setInterval(() => {}, 1 << 30);
 } else {

@@ -63,9 +63,20 @@ export class Session {
 	private readonly waiters: Array<(e: ProtocolEvent | null) => void> = [];
 	private ended = false;
 	private closed = false;
+	private readonly exitHandlers: Array<
+		(info: { code: number | null; signal: NodeJS.Signals | null }) => void
+	> = [];
 	ready?: ReadyEvent;
 
 	constructor(private readonly options: SessionOptions = {}) {}
+
+	/** Subscribe to engine child-exit (workflow-agnostic lifecycle signal for
+	 * adapters that surface provider exit). Fires once per child exit. */
+	onExit(
+		handler: (info: { code: number | null; signal: NodeJS.Signals | null }) => void,
+	): void {
+		this.exitHandlers.push(handler);
+	}
 
 	private deliver(event: ProtocolEvent | null): void {
 		if (event && this.options.onEvent) this.options.onEvent(event);
@@ -98,6 +109,9 @@ export class Session {
 	async start(options: SpawnHaxOptions = {}): Promise<ReadyEvent> {
 		const spawned = spawnHax(options);
 		this.spawned = spawned;
+		spawned.child.on("exit", (code, signal) => {
+			for (const handler of this.exitHandlers) handler({ code, signal });
+		});
 		const transport = new FdTransport(spawned.eventStream, spawned.controlStream);
 		this.transport = transport;
 		void (async () => {
