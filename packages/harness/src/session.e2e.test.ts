@@ -114,9 +114,21 @@ describe.runIf(Boolean(HAX))("Session e2e over inherited fds (mock provider)", (
 			expect(finished.status).toBe("ok");
 			expect(finished.callId).toBe(started.callId); // matching callId
 		}
-		// started precedes finished
+		// Lifecycle-relative ordering: the tool events must sit *inside* the
+		// assistant turn — after user_turn_started + assistant_turn_started and
+		// before assistant_turn_finished + idle — not merely before idle.
 		const seq = events.map((e) => e.type);
-		expect(seq.indexOf("tool_call_started")).toBeLessThan(seq.indexOf("tool_call_finished"));
+		expect(
+			hasOrderedSubsequence(seq, [
+				"ready",
+				"user_turn_started",
+				"assistant_turn_started",
+				"tool_call_started",
+				"tool_call_finished",
+				"assistant_turn_finished",
+				"idle",
+			]),
+		).toBe(true);
 	}, 20000);
 });
 
