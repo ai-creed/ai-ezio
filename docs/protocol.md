@@ -112,6 +112,18 @@ Rules:
   `agent_observer` `on_turn_finished` callback — never reconstructed from deltas.
 - **`assistant_delta`:** always-on in M3 (no opt-in control yet); revisit in a
   later milestone.
+- **`tool_call_started` / `tool_call_finished` semantics:** these report the
+  **model's tool-call stream lifecycle** — `tool_call_started` when the call
+  begins (`EV_TOOL_CALL_START`), `tool_call_finished` when its args are finalized
+  (`EV_TOOL_CALL_END`). They are **not** the tool's *execution* outcome. In M3,
+  `status` is `"ok"` meaning "the call was fully formed"; it does **not** indicate
+  whether the tool ran successfully (that happens later in hax's dispatch loop).
+  Reporting execution result is a future enhancement (a `tool_result` event or a
+  richer `status`), out of scope for M3.
+- **`error` event:** turn-scoped — `error{message,turnId}` is emitted, then the
+  engine returns to `idle` (so the turn's `assistant_turn_finished`/`idle` still
+  fire); the harness surfaces it as recoverable. A fatal/startup failure ends the
+  engine, which the harness observes as fd-3 EOF (the authoritative fatal signal).
 
 ## Engine-side implementation note
 

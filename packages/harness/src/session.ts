@@ -21,6 +21,27 @@ export class ProtocolVersionError extends Error {
 	}
 }
 
+/** A turn-scoped, recoverable error: the engine reported `error` during a turn
+ * but returned to `idle`, so the session remains usable for further submits. */
+export class TurnError extends Error {
+	constructor(
+		message: string,
+		public readonly turnId?: string,
+	) {
+		super(message);
+		this.name = "TurnError";
+	}
+}
+
+/** A fatal session failure: fd 3 reached EOF (the engine exited). Authoritative —
+ * no further submits are valid after this. */
+export class EngineExitedError extends Error {
+	constructor(message = "engine exited (fd-3 EOF)") {
+		super(message);
+		this.name = "EngineExitedError";
+	}
+}
+
 /** A completed user turn. */
 export interface TurnResult {
 	turnId: string;
@@ -40,6 +61,7 @@ export class Session {
 	private readonly queue: ProtocolEvent[] = [];
 	private readonly waiters: Array<(e: ProtocolEvent | null) => void> = [];
 	private ended = false;
+	private closed = false;
 	ready?: ReadyEvent;
 
 	constructor(private readonly options: SessionOptions = {}) {}
@@ -58,13 +80,14 @@ export class Session {
 		return new Promise((resolve) => this.waiters.push(resolve));
 	}
 
-	/** Consume events until one of the given type arrives. */
+	/** Consume events until one of the given type arrives. Fatal EOF →
+	 * EngineExitedError; a turn-scoped `error` → TurnError. */
 	async waitForEvent(type: ProtocolEvent["type"]): Promise<ProtocolEvent> {
 		for (;;) {
 			const e = await this.next();
-			if (e === null) throw new Error(`engine ended before "${type}"`);
+			if (e === null) throw new EngineExitedError(`engine exited before "${type}"`);
 			if (e.type === "error" && type !== "error") {
-				throw new Error(`engine error: ${e.message}`);
+				throw new TurnError(e.message, e.turnId);
 			}
 			if (e.type === type) return e;
 		}
@@ -104,19 +127,26 @@ export class Session {
 		this.control({ type: "submit", text });
 	}
 
-	/** Submit a user turn and resolve with its authoritative content at idle. */
+	/**
+	 * Submit a user turn and resolve with its authoritative content at idle.
+	 * A turn-scoped `error` is captured and the loop **drains to `idle`** (so the
+	 * session settles at a clean boundary and a later submit works), then rejects
+	 * with TurnError. A fatal fd-3 EOF mid-turn rejects with EngineExitedError.
+	 */
 	async submitAndWait(text: string): Promise<TurnResult> {
 		this.control({ type: "submit", text });
 		let result: TurnResult | undefined;
+		let turnError: TurnError | undefined;
 		for (;;) {
 			const e = await this.next();
-			if (e === null) throw new Error("engine ended mid-turn");
+			if (e === null) throw new EngineExitedError("engine exited mid-turn");
 			if (e.type === "assistant_turn_finished") {
 				result = { turnId: e.turnId, content: e.content };
-			} else if (e.type === "idle") {
-				return result ?? { turnId: "", content: "" };
 			} else if (e.type === "error") {
-				throw new Error(`engine error: ${e.message}`);
+				turnError = new TurnError(e.message, e.turnId); // keep draining to idle
+			} else if (e.type === "idle") {
+				if (turnError) throw turnError;
+				return result ?? { turnId: "", content: "" };
 			}
 		}
 	}
@@ -126,8 +156,12 @@ export class Session {
 		this.control({ type: "interrupt" });
 	}
 
-	/** Close the control channel (shuts the engine down) and stop the child. */
+	/** Close the control channel (shuts the engine down) and stop the child.
+	 * Idempotent — safe to call from both the version-gate teardown and the
+	 * caller. */
 	close(): void {
+		if (this.closed) return;
+		this.closed = true;
 		try {
 			this.transport?.close();
 		} catch {

@@ -14,4 +14,11 @@ export {
 	type ResolveHaxOptions,
 } from "./resolve-hax.js";
 export { spawnHax, type SpawnedHax, type SpawnHaxOptions } from "./spawn.js";
-export { ProtocolVersionError, Session, type SessionOptions, type TurnResult } from "./session.js";
+export {
+	EngineExitedError,
+	ProtocolVersionError,
+	Session,
+	type SessionOptions,
+	TurnError,
+	type TurnResult,
+} from "./session.js";
