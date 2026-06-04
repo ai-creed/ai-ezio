@@ -51,8 +51,8 @@ serves both from one.
 │    owns the child, exposes protocol  │ events │    hooks turn on_event()         │
 │  packages/protocol                   │──fd4──►│    reads controls                │
 │    JSONL schema + codec + transport  │ ctrls  │  (the only downstream patch)     │
-│  packages/adapter                    │        │                                  │
-│    ai-whisper handoff / handback     │        │  everything else = upstream hax  │
+│  (adapter-ai-ezio lives in ai-whisper│        │                                  │
+│   — workflow glue, imports harness)  │        │  everything else = upstream hax  │
 └─────────────────────────────────────┘        └──────────────────────────────────┘
               stdout / stderr stay human-only (terminal UI untouched)
 ```
@@ -104,12 +104,14 @@ controls (submit, interrupt, copy_last_response, new_conversation, status).
 This is where "readiness, turn boundaries, and handback text" become explicit.
 Depends on: `protocol`.
 
-### `packages/adapter`
-ai-whisper glue. Spawns ai-ezio in mounted mode and uses the harness/protocol
-for handoff delivery and response capture — no clipboard as the primary
-handback path. Implements whatever ai-whisper's shared `AgentType` contract
-requires.
-Depends on: `harness`.
+### ~~`packages/adapter`~~ — retired (lives in ai-whisper as of M5)
+The ai-whisper adapter is **workflow-serving glue**, so per the M5 decision it
+lives in the ai-whisper repo as `packages/adapter-ai-ezio` (importing
+`@ai-ezio/harness`), **not** in ai-ezio. ai-ezio's own `packages/adapter`
+placeholder is retired. The rule: `@ai-ezio/harness` stays workflow-agnostic so
+ai-ezio runs standalone (a Codex drop-in); anything that exists only to serve an
+ai-whisper workflow lives in ai-whisper. See
+`docs/superpowers/specs/2026-06-04-m5-adapter-design.md`.
 
 ### `packages/cli`
 The `ai-ezio` user-facing binary. Interactive REPL passthrough for humans,
@@ -121,13 +123,16 @@ Depends on: `harness`.
 ## Data flow (mounted turn)
 
 ```text
-ai-whisper ──► adapter.submit(text)
+ai-whisper adapter-ai-ezio ──► harness session.submit(text)
                   └► harness.send({type:"submit", text})  ──fd4──►  hax reads control
 hax runs the turn, emit.c streams events ──fd3──►  protocol.decode  ──►  harness
   ready / user_turn_started / assistant_turn_started / assistant_delta*
   / tool_call_started / tool_call_finished / assistant_turn_finished / idle
-harness surfaces assistant_turn_finished.content as the handback text  ──► adapter ──► ai-whisper
+harness surfaces assistant_turn_finished.content as the handback text  ──► adapter-ai-ezio ──► ai-whisper
 ```
+
+(The `adapter-ai-ezio` package lives in the ai-whisper repo; ai-ezio ships only
+`protocol` + `harness` + `cli`.)
 
 The rule restated: ai-whisper must never infer readiness or response text from
 terminal chrome when ai-ezio can report it explicitly over the protocol.

@@ -45,7 +45,7 @@ replacement) for users who don't want ai-whisper's workflows. Therefore:
 | Harness coupling | `@ai-ezio/harness` stays workflow-agnostic (no `@ai-whisper/shared` dependency) |
 | Integration depth | **Protocol-native drive path** in the ai-whisper mount layer: handoff via `submit()`, readiness/idle from the explicit `idle` event — not output quiescence; an `ai-ezio` `submit-strategy` that bypasses keystream/paste typing |
 | Operator visibility | The mounted session renders the streamed `assistant_delta` text (and tool events) to shared stdout so the dashboard shows ai-ezio working |
-| `handleWork` | Implemented (direct-packet): `submitAndWait` → `ProviderReply{kind,content,transitionIntent}` (no scraping) |
+| `handleWork` | Implemented (direct-packet): `submitAndWait` → `ProviderReply{kind,content,transitionIntent}` (no scraping). **Empty-content rule** below guarantees a valid (`min 1`) reply even on tool-only turns |
 | Session model | One **persistent** `Session` per mount (conversation continuity across handoffs) |
 | Relay interception (`@@other`) | Declared `false` for M5; deferred to M6 |
 | Working model | Both repos driven from one session: link local `@ai-ezio/harness` into ai-whisper; branch in ai-whisper before changes; commits land in each repo separately |
@@ -103,6 +103,18 @@ placeholder `packages/adapter`.
     `instruction` (+ artifact handle when present), `submitAndWait`, and map the
     `assistant_turn_finished.content` to `ProviderReply{ kind: "success", content,
     transitionIntent }`. No output parsing.
+  - **Empty-content rule (required):** the protocol allows an empty
+    `assistant_turn_finished.content` for a tool-only turn (see
+    `docs/protocol.md` M3 decisions), but `ProviderReply.content` is
+    `z.string().min(1)`. The adapter must never emit an invalid reply. Mapping:
+    - non-empty `content` → `ProviderReply{ kind: "success", content, … }`.
+    - empty `content` **with** an `error` event on the turn → `kind: "error"`
+      with `content` = the error text (non-empty).
+    - empty `content` with **no** error (a legitimately silent tool-only turn) →
+      `kind: "success"` with a deterministic non-empty fallback string
+      (e.g. `"(no textual response; tool-only turn)"`), so a valid protocol
+      event can never yield an invalid `ProviderReply`. The exact `kind`
+      vocabulary is taken from the live `mockProviderReplySchema` `replyKinds`.
 - **`createAiEzioLiveSession(input) → InteractiveSessionController`:**
   - `start()` spawns `ai-ezio --mount-mode` via `@ai-ezio/harness` `Session`
     (the harness resolves the ai-ezio binary).
@@ -157,6 +169,11 @@ No typing, no scraping, no idle-by-quiescence guessing.
   resolves a handoff on the `idle` event and renders the assistant stream;
   driven against `@ai-ezio/harness` with `HAX_PROVIDER=mock` (and/or the
   harness's fake-engine seam).
+- **Empty-content mapping (deterministic):** a tool-only turn with empty
+  `assistant_turn_finished.content` yields a **valid** `ProviderReply`
+  (`content.length >= 1`) — the non-empty fallback for the silent case, and the
+  `kind: "error"` path when the turn carried an `error` event. Asserts a valid
+  protocol event can never produce a schema-invalid reply.
 - **End-to-end (the M5 done-when):** a real `whisper collab mount ai-ezio` plus
   **one relay handoff** delivered via `submit()` and its response captured over
   the protocol — observed, not scraped.

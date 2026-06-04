@@ -69,12 +69,19 @@ over the protocol, no clipboard, no scraping.
 
 ## M5 — ai-whisper adapter
 
-- `packages/adapter` (ships as ai-whisper's `adapter-ai-ezio`).
+- `packages/adapter-ai-ezio` **in the ai-whisper repo** (imports
+  `@ai-ezio/harness`); ai-ezio's `packages/adapter` placeholder is retired. The
+  harness stays workflow-agnostic — workflow glue lives in ai-whisper.
 - Spawn ai-ezio in mounted mode; use the protocol for handoff delivery and
   response capture.
-- Run a manual relay handoff end to end.
+- Add the minimum ai-whisper mount-runtime plumbing (an `ai-ezio` `AgentType` +
+  submit-strategy that calls `submit()`, idle from the explicit `idle` event) to
+  drive one real relay handoff end to end.
 
 **Done when:** a single relay handoff runs through ai-ezio via the protocol.
+
+See `docs/superpowers/specs/2026-06-04-m5-adapter-design.md` for the full design
+and the M5/M6 boundary.
 
 ## M6 — Workflow integration
 
