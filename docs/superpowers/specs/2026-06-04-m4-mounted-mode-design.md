@@ -203,6 +203,19 @@ expected cost of mounted mode and is recorded in `UPSTREAM.md`.
     `copyLastResponse()`, `newConversation()`, `status()`;
   - fake-engine / real-hax e2e: `copyLastResponse` returns the stored content
     without a new turn; `newConversation` resets; `status` resolves the payload.
+- **TS (launch paths — REQUIRED, not just the raw engine):**
+  - **Public `ai-ezio --mount-mode`:** running the actual `ai-ezio` CLI bin with
+    `--mount-mode` (mock provider) must produce a working mounted session — verify
+    the CLI exposes the flag and passes `--mount-mode` to the spawned hax, and the
+    child's captured stdout/stderr is chrome-suppressed (no banner/usage/resume).
+    A regression where hax supports the flag but the CLI never exposes/passes it
+    must fail. (This is the public-command verification; the C test above only
+    covers raw hax.)
+  - **Both launch paths set `HAX_EXTRA_SKILLS_DIR`:** assert that
+    `packages/harness` `spawnHax` **and** the `packages/cli` human-REPL launch
+    each set `HAX_EXTRA_SKILLS_DIR` to the resolved ai-ezio-global skills dir when
+    they spawn hax (inspect the spawn env / args). A regression where the raw
+    engine bridge works but a launch path never sets the env var must fail.
 - **Regression:** the no-fd **interactive** REPL stays byte-for-byte unchanged
   for normal use; a separate check exercises `/skills` rendering (the new slash
   path) and confirms it only affects output when `/skills` is typed.
