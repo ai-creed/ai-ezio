@@ -216,8 +216,9 @@ error, fatal EOF (`EngineExitedError`), and bad-major version mismatch.
 
 **M3b done when (spec):** the full enumerated M3 set is verified — lifecycle +
 tool events + `submit`/`interrupt` over fds under mock; `error` via the C
-emitter unit test + the TS fake-engine e2e; version-mismatch teardown by a
-committed test; no-fd interactive REPL still byte-for-byte unchanged.
+emitter unit test + the TS turn-scoped fake-engine e2e; **fatal fd-3 EOF**
+surfaced as `EngineExitedError` by a committed test; version-mismatch teardown by
+a committed test; no-fd interactive REPL still byte-for-byte unchanged.
 
 ## File inventory (the guardrail budget)
 
