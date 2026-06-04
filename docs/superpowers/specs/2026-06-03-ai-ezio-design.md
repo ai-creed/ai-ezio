@@ -67,7 +67,11 @@ Build plan: `docs/milestones.md`. Upstream policy: `UPSTREAM.md`.
 - `packages/protocol` — JSONL schema, codec, transport interface (fd impl first).
 - `packages/harness` — owns the hax child + session/turn lifecycle; exposes a
   typed protocol API; forwards controls.
-- `packages/adapter` — ai-whisper handoff/handback glue (`adapter-ai-ezio`).
+- ai-whisper handoff/handback glue is **not an ai-ezio package** — per the M5
+  decision it lives in the ai-whisper repo as `packages/adapter-ai-ezio`
+  (imports `@ai-ezio/harness`); ai-ezio's `packages/adapter` placeholder is
+  retired so the harness stays workflow-agnostic. See
+  `docs/superpowers/specs/2026-06-04-m5-adapter-design.md`.
 - `packages/cli` — `ai-ezio` binary: REPL passthrough, `--mount-mode`,
   `--version --json`, `doctor`, skills UX.
 - `vendor/hax` — C engine submodule; emitter patch on the `emitter` branch.

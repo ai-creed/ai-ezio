@@ -101,20 +101,26 @@ placeholder `packages/adapter`.
   - `getHealthState()` → derived from the `Session` (e.g. `status` / liveness).
   - `handleWork(request, context?)` → build the prompt from the request
     `instruction` (+ artifact handle when present), `submitAndWait`, and map the
-    `assistant_turn_finished.content` to `ProviderReply{ kind: "success", content,
+    `assistant_turn_finished.content` to `ProviderReply{ kind: "answer", content,
     transitionIntent }`. No output parsing.
+  - **`kind` vocabulary (live schema):** `ProviderReply.kind` must be one of the
+    live `replyKinds` — `"answer" | "review" | "clarification" | "failure"`
+    (`@ai-whisper/shared` `literals.ts`); there is **no** `"success"`/`"error"`
+    kind. M5 uses `"answer"` for a normal handback and `"failure"` for an error
+    turn (`"review"`/`"clarification"` are driven by `requestedAction` and are
+    out of M5's scope). The adapter constructs replies via the live
+    `mockProviderReplySchema` so an invalid `kind` cannot be emitted.
   - **Empty-content rule (required):** the protocol allows an empty
     `assistant_turn_finished.content` for a tool-only turn (see
     `docs/protocol.md` M3 decisions), but `ProviderReply.content` is
     `z.string().min(1)`. The adapter must never emit an invalid reply. Mapping:
-    - non-empty `content` → `ProviderReply{ kind: "success", content, … }`.
-    - empty `content` **with** an `error` event on the turn → `kind: "error"`
+    - non-empty `content` → `ProviderReply{ kind: "answer", content, … }`.
+    - empty `content` **with** an `error` event on the turn → `kind: "failure"`
       with `content` = the error text (non-empty).
     - empty `content` with **no** error (a legitimately silent tool-only turn) →
-      `kind: "success"` with a deterministic non-empty fallback string
+      `kind: "answer"` with a deterministic non-empty fallback string
       (e.g. `"(no textual response; tool-only turn)"`), so a valid protocol
-      event can never yield an invalid `ProviderReply`. The exact `kind`
-      vocabulary is taken from the live `mockProviderReplySchema` `replyKinds`.
+      event can never yield an invalid `ProviderReply`.
 - **`createAiEzioLiveSession(input) → InteractiveSessionController`:**
   - `start()` spawns `ai-ezio --mount-mode` via `@ai-ezio/harness` `Session`
     (the harness resolves the ai-ezio binary).
@@ -170,10 +176,13 @@ No typing, no scraping, no idle-by-quiescence guessing.
   driven against `@ai-ezio/harness` with `HAX_PROVIDER=mock` (and/or the
   harness's fake-engine seam).
 - **Empty-content mapping (deterministic):** a tool-only turn with empty
-  `assistant_turn_finished.content` yields a **valid** `ProviderReply`
-  (`content.length >= 1`) — the non-empty fallback for the silent case, and the
-  `kind: "error"` path when the turn carried an `error` event. Asserts a valid
-  protocol event can never produce a schema-invalid reply.
+  `assistant_turn_finished.content` yields a reply that **passes
+  `mockProviderReplySchema.parse(...)`** — i.e. both `content.length >= 1` *and*
+  `kind` ∈ `replyKinds`. Covers the silent-turn fallback (`kind: "answer"`) and
+  the error path (`kind: "failure"` when the turn carried an `error` event).
+  Asserting only non-empty content is **insufficient** — the test must validate
+  the whole reply against the live schema so an invalid `kind` cannot slip
+  through.
 - **End-to-end (the M5 done-when):** a real `whisper collab mount ai-ezio` plus
   **one relay handoff** delivered via `submit()` and its response captured over
   the protocol — observed, not scraped.
