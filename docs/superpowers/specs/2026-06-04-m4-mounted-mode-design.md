@@ -33,6 +33,7 @@ seam**, not the core loop:
 | `new_conversation` | Calls hax's existing `agent_new_conversation()` (small `agent.c` hook) |
 | `status` | Emits a `status` event; payload `{model, provider, protocol, sessionId, state, contextPercent?}` (see below) |
 | `/skills` | A **general** slash-command registration seam in hax (upstreamable, like `agent_observer`); a downstream C handler registers `/skills`. Extensible for future commands |
+| Ezio skills → engine-visible | A **general** hax knob (`HAX_EXTRA_SKILLS_DIR` env) makes hax read an additional skills dir for the model prompt; ai-ezio sets it to the ai-ezio-global dir at launch, so ezio's own skills are **injected into the model** (not just listed). Removes the M2 engine-visibility caveat |
 | Engine boundary | M4 **deliberately widens** the hax patch beyond M3's `emit.c`-only guardrail — each addition stays a small, documented seam |
 
 ## Components
@@ -124,6 +125,26 @@ event:
   `slash_dispatch`), but its output is terminal text, so it's meaningful for
   humans.
 
+### 7. Ezio's own skills → engine-visible (the bridge)
+
+M2 gave ai-ezio its own skills dir (`${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/skills/`)
+but flagged a caveat: hax builds the model's "# Skills" prompt section from only
+the dirs *it* reads (project + hax-global), so an ai-ezio-global skill was
+**listed** but **not injected into the model**. `docs/skills.md` deferred the
+bridge to "mounted mode (M3/M4) … via a future hax knob." M4 delivers it:
+
+- **General hax knob (upstreamable):** hax honors one **additional** skills
+  directory from an env var (`HAX_EXTRA_SKILLS_DIR`), enumerated into the
+  "# Skills" prompt section alongside its existing dirs. General-purpose — any
+  embedder can point hax at more skills.
+- **ai-ezio wiring:** both launch paths — the CLI human REPL
+  (`packages/cli`) and the mounted harness spawn (`packages/harness`) — set
+  `HAX_EXTRA_SKILLS_DIR` to the resolved ai-ezio-global skills dir.
+- **Result:** ezio's own skills are now **listed *and* loaded into the model** —
+  engine-visible. The M2 caveat is removed; `docs/skills.md` is updated (the
+  ai-ezio-global row becomes engine-visible, the caveat/`doctor` note dropped),
+  and `/skills` (Component 6) now lists exactly the dirs the engine reads.
+
 ## Engine seam details (grounded in hax source)
 
 - `agent.h` already exposes `void agent_new_conversation(struct agent_state *st)`.
@@ -135,15 +156,19 @@ event:
   `copy_last_response`, set from `on_turn_finished`.
 - Status fields come from `struct agent_session` (`model`) and `struct provider`
   (`name`), both in scope at the dispatch point.
+- `agent_env.c` already enumerates skills (`append_skills`/`collect_skills`) from
+  the project + hax-global dirs into the "# Skills" prompt section — the natural
+  place to also read `HAX_EXTRA_SKILLS_DIR` (the engine-visibility bridge).
 
 ## Engine-boundary note
 
 M4 widens the hax patch beyond M3's `emit.c`-only surface:
 `--mount-mode` flag (`main.c`), the control-dispatch generalization
 (`emit.c` + a small `agent.c` integration), the `new_conversation`/`status`
-hooks (`agent.c`), the stored-last-content + re-emit (`emit.c`), and the
-slash-command seam + downstream `/skills` (`slash.c` + a new downstream file).
-Each is a small, documented seam; the slash seam is upstreamable. This is the
+hooks (`agent.c`), the stored-last-content + re-emit (`emit.c`), the
+slash-command seam + downstream `/skills` (`slash.c` + a new downstream file),
+and the `HAX_EXTRA_SKILLS_DIR` knob (`agent_env.c`). Each is a small, documented
+seam; the slash seam and the extra-skills knob are upstreamable. This is the
 expected cost of mounted mode and is recorded in `UPSTREAM.md`.
 
 ## Testing
@@ -152,6 +177,10 @@ expected cost of mounted mode and is recorded in `UPSTREAM.md`.
 - **C (engine):**
   - the slash seam: registering a command makes `slash_dispatch` route to it;
     `/skills` lists a known fixture skill (set up a temp `.agents/skills/<name>/`).
+  - the engine-visibility bridge: with `HAX_EXTRA_SKILLS_DIR` pointed at a fixture
+    dir containing a skill, the model's "# Skills" prompt section includes that
+    skill (assert via `agent_env` build output / the `HAX_TRANSCRIPT` mirror) —
+    proving ezio's own skills reach the model, not just the listing.
   - controls over real fds: `copy_last_response` re-emits the prior
     `assistant_turn_finished.content` with **zero** new turns
     (no `user_turn_started`/`assistant_turn_started`); `new_conversation` →
@@ -174,6 +203,9 @@ expected cost of mounted mode and is recorded in `UPSTREAM.md`.
   `new_conversation` (fresh conversation), and `status` (payload event).
 - `/skills` works in the human REPL via the general slash seam, listing the
   honored skill dirs; the seam is general enough to register another command.
+- A skill placed in the **ai-ezio-global** dir is both listed by `/skills` and
+  **injected into the model's prompt** (via `HAX_EXTRA_SKILLS_DIR`) — ezio's own
+  skills are engine-visible, and `docs/skills.md`'s caveat is removed.
 - The no-fd interactive REPL remains byte-for-byte unchanged for normal use.
 
 ## Out of scope for M4
@@ -193,3 +225,4 @@ expected cost of mounted mode and is recorded in `UPSTREAM.md`.
 | Control dispatch corrupts the turn loop | Controls handled only between turns at the input boundary; `interrupt` stays on the tick; e2e covers each control + a following normal turn. |
 | `/skills` C enumeration drifts from TS `skill list` | Both read the same three documented dirs; a test asserts a fixture skill appears in `/skills`. Acceptable minor duplication (different surfaces). |
 | `--mount-mode` chrome suppression changes the no-fd REPL | `--mount-mode` only affects the mounted path; the no-fd interactive REPL regression must still pass byte-for-byte. |
+| `HAX_EXTRA_SKILLS_DIR` unset on some launch path → ezio skills invisible | Both launch paths set it (CLI human REPL + mounted harness spawn); a test asserts the fixture skill reaches the prompt. Running the raw hax binary directly (no ai-ezio) simply doesn't get the extra dir — expected. |
