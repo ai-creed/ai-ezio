@@ -109,6 +109,15 @@ control, if ever wanted, is a later milestone — not M3.
 - **Deterministic:** every test uses `HAX_PROVIDER=mock` (no LLM). The mock's
   backtick-argument path (e.g. submit ``run `ls` ``) yields a deterministic tool
   call; a slow `HAX_MOCK_SCRIPT` is available for timing-sensitive cases.
+- **C (emitter unit) — REQUIRED for the error translation:** extend the
+  `protocol/emit` unit test (`test_emit.c`, which already feeds `EV_TEXT_DELTA`
+  to `emit_stream_event`) to also feed `EV_TOOL_CALL_START`, `EV_TOOL_CALL_END`,
+  and **`EV_ERROR`**, asserting `emit_stream_event` writes well-formed
+  `tool_call_started{name,callId}`, `tool_call_finished{name,callId,status:"ok"}`,
+  and **`error{message,turnId}`** JSONL. This directly covers the C translation
+  for every M3b event — so a missing or malformed `EV_ERROR`/tool `case` in
+  `emit.c` fails a committed test regardless of whether the mock provider can
+  emit those events. (This is the gate that makes "error end-to-end in C" real.)
 - **C (engine):** a tool-turn test (extend `observer_e2e` or a sibling) driving
   the real binary over fds and asserting `tool_call_started` then
   `tool_call_finished{status:"ok"}` appear in order with matching `name`/`callId`,
@@ -129,14 +138,25 @@ control, if ever wanted, is a later milestone — not M3.
 
 ## Done when
 
-The **full enumerated M3 set** flows over the fds under the mock provider:
-events `ready`, `user_turn_started`, `assistant_turn_started`, `assistant_delta`,
-**`tool_call_started`**, **`tool_call_finished`**, `assistant_turn_finished{content}`,
-**`error`**, `idle`, plus controls `submit` and `interrupt`; the
-version-mismatch teardown path is exercised by a committed test; and the no-fd
-interactive REPL is still byte-for-byte unaffected. The M4 controls
-(`copy_last_response`, `new_conversation`, `status`) are explicitly NOT required
-to function — only their documented groundwork (already present) is in scope.
+The **full enumerated M3 set** is verified:
+
+- `ready`, `user_turn_started`, `assistant_turn_started`, `assistant_delta`,
+  **`tool_call_started`**, **`tool_call_finished`**, `assistant_turn_finished{content}`,
+  `idle`, plus controls `submit` and `interrupt`, flow over the fds under the
+  **mock provider** (the mock's backtick path drives the tool events).
+- **`error`** is verified through the **real C translation**: the required
+  `emit.c` emitter unit test feeds `EV_ERROR` to `emit_stream_event` and asserts
+  the `error{message,turnId}` JSONL (mock-independent), and the TS harness's
+  turn-scoped/fatal error handling is exercised by the fake-engine e2e. Acceptance
+  for `error` does **not** depend on the mock provider being able to emit
+  `EV_ERROR` — but the C `EV_ERROR` translation MUST be covered by a committed
+  test, not skipped.
+- The version-mismatch teardown path is exercised by a committed test, and the
+  no-fd interactive REPL is still byte-for-byte unaffected.
+
+The M4 controls (`copy_last_response`, `new_conversation`, `status`) are
+explicitly NOT required to function — only their documented groundwork (already
+present) is in scope.
 
 ## Out of scope for M3b
 
@@ -150,7 +170,7 @@ to function — only their documented groundwork (already present) is in scope.
 
 | Risk | Mitigation |
 | --- | --- |
-| Mock provider can't emit `EV_ERROR` for the error test | Use a fake-engine script (a few lines writing a JSONL `error` to fd 3) via `Session.start({ binary })`; keep the C test focused on tool events. |
+| Mock provider can't emit `EV_ERROR` for an *engine-level* error test | The C `emit.c` error translation is covered directly by the **required emitter unit test** (feed `EV_ERROR` to `emit_stream_event` and assert the `error{message,turnId}` JSONL) — this does not depend on the mock emitting `EV_ERROR`. The TS error e2e additionally uses a fake-engine script (a few lines writing a JSONL `error` to fd 3) via `Session.start({ binary })` to exercise the harness's turn-scoped/fatal handling. The C test must NOT skip the `EV_ERROR` case. |
 | Parallel tool calls collide in the `{id→name}` table | Fixed-size table sized to hax's max parallel calls; add on START, clear on END; on overflow, fall back to an empty name (still emits the event). |
 | `status:"ok"` misread as execution success | Documented explicitly in `docs/protocol.md` and this spec; the event reflects call lifecycle, not execution. |
 | M3b C change creeps beyond `emit.c` | Guardrail: tool/error translation lives in `emit.c`; if a hook in `agent.c`'s dispatch loop seems needed, stop — that's execution-outcome scope (out of scope). |
