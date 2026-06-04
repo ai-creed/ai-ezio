@@ -41,9 +41,10 @@ replacement) for users who don't want ai-whisper's workflows. Therefore:
 
 | Decision | Choice |
 | --- | --- |
+| Agent identity (role) | The workflow **role / agentType / providerId is `ezio`** (in family with `codex`/`claude`); `whisper collab mount ezio`, with `ezio` also a bin alias for the standalone agent. **`ai-ezio` remains the project / package / repo name** (`@ai-ezio/harness`, `packages/adapter-ai-ezio`, the `ai-ezio` package) |
 | Adapter location | `packages/adapter-ai-ezio` **in the ai-whisper repo** (mirrors adapter-codex); imports `@ai-ezio/harness` + `@ai-whisper/shared`. ai-ezio `packages/adapter` retired |
 | Harness coupling | `@ai-ezio/harness` stays workflow-agnostic (no `@ai-whisper/shared` dependency) |
-| Integration depth | **Protocol-native drive path** in the ai-whisper mount layer: handoff via `submit()`, readiness/idle from the explicit `idle` event — not output quiescence; an `ai-ezio` `submit-strategy` that bypasses keystream/paste typing |
+| Integration depth | **Protocol-native drive path** in the ai-whisper mount layer: handoff via `submit()`, readiness/idle from the explicit `idle` event — not output quiescence; an `ezio` `submit-strategy` that bypasses keystream/paste typing |
 | Operator visibility | The mounted session renders the streamed `assistant_delta` text (and tool events) to shared stdout so the dashboard shows ai-ezio working |
 | `handleWork` | Implemented (direct-packet): `submitAndWait` → `ProviderReply{kind,content,transitionIntent}` (no scraping). **Empty-content rule** below guarantees a valid (`min 1`) reply even on tool-only turns |
 | Session model | One **persistent** `Session` per mount (conversation continuity across handoffs) |
@@ -53,13 +54,13 @@ replacement) for users who don't want ai-whisper's workflows. Therefore:
 ## M5 / M6 boundary
 
 The protocol-native drive path requires ai-whisper's mount layer to **recognize
-`ai-ezio`**, so M5 needs a *minimal slice* of what was filed under M6 — the
-`AgentType` must include `ai-ezio`, and `whisper collab mount ai-ezio` must work —
+`ezio`**, so M5 needs a *minimal slice* of what was filed under M6 — the
+`AgentType` must include `ezio`, and `whisper collab mount ezio` must work —
 purely to run one relay handoff. The boundary:
 
 - **M5:** the adapter + the minimum `AgentType`/mount plumbing to drive **one real
   relay handoff** protocol-natively (the provable vertical slice).
-- **M6:** full workflow integration — `whisper skill install --target ai-ezio`,
+- **M6:** full workflow integration — `whisper skill install --target ezio`,
   running a complete multi-role workflow, relay interception, and polish.
 
 ## The contract (grounded in ai-whisper source)
@@ -93,7 +94,7 @@ placeholder `packages/adapter`.
 ### 2. ai-whisper `packages/adapter-ai-ezio`
 
 - **`createAiEzioProvider(config) → CompanionProvider`:**
-  - `getIdentity()` → `{ providerId: "ai-ezio", toolFamily: "hax", providerVersion }`.
+  - `getIdentity()` → `{ providerId: "ezio", toolFamily: "hax", providerVersion }`.
   - `getCapabilities()` → at minimum `supportsDirectPackets: true`,
     `supportsRelayInterception: false`, `supportsLaunchHooks: true`. The exact
     field set is taken from the live `ProviderCapabilities` type at
@@ -136,13 +137,13 @@ placeholder `packages/adapter`.
 The protocol-native drive path — the minimal slice that makes the relay handoff
 work for ai-ezio:
 
-- **`AgentType` includes `ai-ezio`** (the minimum widening needed to mount/drive
+- **`AgentType` includes `ezio`** (the minimum widening needed to mount/drive
   it; the full broker-wide widening is M6).
-- **`submit-strategy` gains an `ai-ezio` path** that delivers a handoff via
+- **`submit-strategy` gains an `ezio` path** that delivers a handoff via
   `session.submit(text)` — no keystream/paste typing.
 - **Idle/readiness for ai-ezio comes from the `idle` event**, not output
   quiescence — the mount layer treats the `idle` event as "turn complete."
-- **`whisper collab mount ai-ezio`** can mount an ai-ezio session.
+- **`whisper collab mount ezio`** can mount an ai-ezio session.
 
 ## Data flow (one relay handoff)
 
@@ -183,7 +184,7 @@ No typing, no scraping, no idle-by-quiescence guessing.
   Asserting only non-empty content is **insufficient** — the test must validate
   the whole reply against the live schema so an invalid `kind` cannot slip
   through.
-- **End-to-end (the M5 done-when):** a real `whisper collab mount ai-ezio` plus
+- **End-to-end (the M5 done-when):** a real `whisper collab mount ezio` plus
   **one relay handoff** delivered via `submit()` and its response captured over
   the protocol — observed, not scraped.
 - **ai-ezio:** the harness suite stays green; retiring `packages/adapter` doesn't
@@ -199,7 +200,7 @@ captured from `assistant_turn_finished.content`, and readiness is taken from the
 ## Out of scope for M5 (→ M6)
 
 - The full broker-wide `AgentType` widening beyond the minimum to mount/drive.
-- `whisper skill install --target ai-ezio`.
+- `whisper skill install --target ezio`.
 - Running a complete multi-role workflow with ai-ezio in a role.
 - Relay interception (`@@ai-ezio …`) — declared `false` in M5.
 - Non-fd transports; provider-registry external registration.
@@ -208,8 +209,8 @@ captured from `assistant_turn_finished.content`, and readiness is taken from the
 
 | Risk | Mitigation |
 | --- | --- |
-| ai-whisper is the live tool running these workflows | Branch before changes; the `ai-ezio` drive path is additive (existing codex/claude paths untouched); test before commit. |
+| ai-whisper is the live tool running these workflows | Branch before changes; the `ezio` drive path is additive (existing codex/claude paths untouched); test before commit. |
 | Cross-repo dependency (`@ai-ezio/harness` unpublished) | Link the local package into ai-whisper; document the link in the plan; CI/publish is a later concern. |
-| Mount layer is byte/idle-quiescence oriented | The `ai-ezio` path is a parallel, additive branch keyed on `AgentType`; it sources idle from the explicit event, leaving codex/claude behavior unchanged. |
+| Mount layer is byte/idle-quiescence oriented | The `ezio` path is a parallel, additive branch keyed on `AgentType`; it sources idle from the explicit event, leaving codex/claude behavior unchanged. |
 | `AgentType` minimal-widening leaks into M6 scope | Keep M5's widening to exactly what mount/drive needs for one handoff; the broker-wide widening + workflow run is M6. |
 | Operator visibility differs from codex TUI | The adapter renders a clean assistant stream to shared stdout — intentionally simpler than a full TUI, but the operator still sees progress. |
