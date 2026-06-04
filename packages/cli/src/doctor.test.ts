@@ -64,6 +64,6 @@ describe("formatDoctorReport", () => {
 		const text = formatDoctorReport(buildDoctorReport(inputs()));
 		expect(text).toContain("via platform-package");
 		expect(text).toContain("[project] /proj/.agents/skills");
-		expect(text).toContain("ai-ezio only");
+		expect(text).toContain("[ai-ezio-global]"); // listed (engine-visible as of M4)
 	});
 });

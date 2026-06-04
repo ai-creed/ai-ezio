@@ -130,6 +130,43 @@ describe.runIf(Boolean(HAX))("Session e2e over inherited fds (mock provider)", (
 			]),
 		).toBe(true);
 	}, 20000);
+
+	it("copyLastResponse re-emits the prior content with no new turn", async () => {
+		const events: ProtocolEvent[] = [];
+		const session = new Session({ onEvent: (e) => events.push(e) });
+		await session.start({ binary: HAX, env: baseEnv });
+		const turn = await session.submitAndWait("remember this");
+		const mark = events.length; // events captured up to here
+		const copy = await session.copyLastResponse();
+		session.close();
+
+		expect(copy.content).toBe(turn.content);
+		// no new turn was started by the copy
+		const afterCopy = events.slice(mark).map((e) => e.type);
+		expect(afterCopy).not.toContain("user_turn_started");
+		expect(afterCopy).not.toContain("assistant_turn_started");
+	}, 20000);
+
+	it("newConversation resets and a fresh turn works", async () => {
+		const session = new Session();
+		await session.start({ binary: HAX, env: baseEnv });
+		await session.submitAndWait("first");
+		await session.newConversation();
+		const fresh = await session.submitAndWait("second");
+		expect(fresh.content).toContain("second");
+		session.close();
+	}, 20000);
+
+	it("status returns an idle-state payload", async () => {
+		const session = new Session();
+		await session.start({ binary: HAX, env: baseEnv });
+		const s = await session.status();
+		session.close();
+		expect(s.type).toBe("status");
+		expect(s.provider).toBe("mock");
+		expect(s.protocol).toMatch(/^\d+\.\d+\.\d+$/);
+		expect(s.state).toBe("idle");
+	}, 20000);
 });
 
 // Error / fatal-EOF / version-mismatch handling, driven by a deterministic Node

@@ -25,30 +25,30 @@ ai-ezio.
 | # | Source           | Path                                                        | Engine-visible |
 | - | ---------------- | ----------------------------------------------------------- | -------------- |
 | 1 | `project`        | `<cwd>/.agents/skills/`                                      | **yes**        |
-| 2 | `ai-ezio-global` | `${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/skills/`         | no (see below) |
+| 2 | `ai-ezio-global` | `${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/skills/`         | **yes** (M4)   |
 | 3 | `hax-global`     | `${XDG_CONFIG_HOME:-$HOME/.config}/hax/skills/`             | **yes**        |
 
 Precedence: a skill in a higher row **shadows** a same-named skill in a lower
 row. `skill list` reports the winning entry; `skill dirs` lists all three
 directories with their source and whether each exists.
 
-## Engine visibility (important caveat)
+## Engine visibility
 
-The hax engine builds the model's "# Skills" prompt section from **only** the
-directories *it* reads — `<cwd>/.agents/skills/` and the hax-global dir
-(`.../hax/skills/`). It has no knowledge of the ai-ezio-global dir.
+All three honored directories are **engine-visible** — skills in them are injected
+into the model's "# Skills" prompt:
 
-So a skill placed in `${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/skills/` is:
+- `project` and `hax-global` are read by hax directly.
+- `ai-ezio-global` is bridged in by **M4**: both ai-ezio launch paths (the CLI
+  human REPL and the mounted harness spawn) set `HAX_EXTRA_SKILLS_DIR` to the
+  ai-ezio-global dir, and hax enumerates that extra directory into the prompt
+  (`agent_env.c`). So a skill placed in
+  `${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/skills/` is both listed by
+  `ai-ezio skill list` / `/skills` **and** loaded into the model.
 
-- **listed** by `ai-ezio skill list` and counted by `ai-ezio doctor`, but
-- **not yet injected** into the running engine's prompt.
-
-`ai-ezio doctor` flags this explicitly (an info note per ai-ezio-global skill).
-Bridging the ai-ezio-global dir into the engine prompt requires ai-ezio to
-control the launch environment, which lands with mounted mode (M3/M4) — e.g. by
-pointing the engine at a merged view or via a future hax knob. Until then, for a
-skill that must reach the model, install it into `.agents/skills/` (project) or
-the hax-global dir.
+> Caveat removed in M4: earlier (M2–M3) the ai-ezio-global dir was listed but not
+> injected into the prompt; the `HAX_EXTRA_SKILLS_DIR` bridge closes that gap.
+> Running the raw `hax` binary directly (not via ai-ezio) won't set the env var,
+> so it sees only project + hax-global — expected.
 
 ## Why this layout
 

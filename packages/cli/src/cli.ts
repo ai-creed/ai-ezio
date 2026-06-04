@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { describeHaxBinary, resolveHaxBinary } from "@ai-ezio/harness";
+import { aiEzioGlobalSkillsDir, describeHaxBinary, resolveHaxBinary } from "@ai-ezio/harness";
 import { buildDoctorReport, formatDoctorReport } from "./doctor.js";
 import { discoverSkills, nodeSkillFs, skillDirs, type SkillEnv } from "./skills.js";
 import { readVersionInfo } from "./version.js";
@@ -95,6 +95,34 @@ export function isNativeSubcommand(argv: readonly string[]): boolean {
 	return argv[0] === "skill" || argv[0] === "doctor";
 }
 
+/** A mounted invocation (`--mount-mode` or protocol fds) — forward the fds. */
+export function isMountInvocation(argv: readonly string[]): boolean {
+	return (
+		argv.includes("--mount-mode") ||
+		argv.some((a) => a.startsWith("--protocol-fd") || a.startsWith("--control-fd"))
+	);
+}
+
+/** Build the spawn stdio array for a mounted launch: inherit 0/1/2 plus exactly
+ * the fds named by --protocol-fd/--control-fd, so hax gets them. */
+export function mountStdio(argv: readonly string[]): Array<"inherit" | "ignore"> {
+	const fds = new Set<number>([0, 1, 2]);
+	for (const a of argv) {
+		const m = a.match(/^--(?:protocol|control)-fd=(\d+)$/);
+		if (m?.[1]) fds.add(Number(m[1]));
+	}
+	const max = Math.max(...fds);
+	const stdio: Array<"inherit" | "ignore"> = [];
+	for (let i = 0; i <= max; i++) stdio.push(fds.has(i) ? "inherit" : "ignore");
+	return stdio;
+}
+
+/** Child env for any hax launch: base env + HAX_EXTRA_SKILLS_DIR (so ezio's own
+ * skills reach the model on both the human-REPL and mounted paths). */
+export function launchEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	return { ...base, HAX_EXTRA_SKILLS_DIR: aiEzioGlobalSkillsDir(base) };
+}
+
 /** Run the CLI, returning the process exit code. */
 export async function main(argv: string[]): Promise<number> {
 	if (wantsVersionJson(argv)) {
@@ -115,8 +143,11 @@ export async function main(argv: string[]): Promise<number> {
 	}
 	ensureExecutable(bin);
 
+	// Human REPL inherits the terminal; a mounted launch forwards the protocol
+	// fds (and --mount-mode) to hax. Both set HAX_EXTRA_SKILLS_DIR.
+	const stdio = isMountInvocation(argv) ? mountStdio(argv) : "inherit";
 	return await new Promise<number>((resolve) => {
-		const child = spawn(bin, argv, { stdio: "inherit" });
+		const child = spawn(bin, argv, { stdio, env: launchEnv() });
 		child.on("error", (error) => {
 			process.stderr.write(`ai-ezio: failed to launch hax: ${error.message}\n`);
 			resolve(127);

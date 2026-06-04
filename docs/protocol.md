@@ -47,6 +47,7 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 | `assistant_turn_finished`  | `turnId`, `content`                      | Turn complete; `content` is the final assistant text (the handback). |
 | `idle`                     | —                                        | Engine quiescent, ready for the next control. |
 | `error`                    | `message`, `turnId?`                     | Recoverable or fatal error; `turnId` if turn-scoped. |
+| `status`                   | `model`, `provider`, `protocol`, `sessionId`, `state`, `contextPercent?` | Reply to a `status` control (M4). `state` is `"idle"` in M4 (answered between turns); `contextPercent` is `null` until reliably known. |
 
 Example stream:
 

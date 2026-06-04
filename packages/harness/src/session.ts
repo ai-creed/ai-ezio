@@ -10,6 +10,7 @@ import {
 	type ProtocolControl,
 	type ProtocolEvent,
 	type ReadyEvent,
+	type StatusEvent,
 	type Transport,
 } from "@ai-ezio/protocol";
 import { spawnHax, type SpawnedHax, type SpawnHaxOptions } from "./spawn.js";
@@ -154,6 +155,27 @@ export class Session {
 	/** Cancel the in-flight turn. */
 	interrupt(): void {
 		this.control({ type: "interrupt" });
+	}
+
+	/** Re-fetch the last handback without re-running a turn (no clipboard).
+	 * Resolves the re-emitted content; rejects TurnError if no prior response. */
+	async copyLastResponse(): Promise<TurnResult> {
+		this.control({ type: "copy_last_response" });
+		const e = await this.waitForEvent("assistant_turn_finished"); // TurnError on no-prev
+		if (e.type !== "assistant_turn_finished") throw new Error("unexpected event");
+		return { turnId: e.turnId, content: e.content };
+	}
+
+	/** Start a fresh conversation; resolves once the engine is idle again. */
+	async newConversation(): Promise<void> {
+		this.control({ type: "new_conversation" });
+		await this.waitForEvent("idle");
+	}
+
+	/** Request an engine/session status event. */
+	async status(): Promise<StatusEvent> {
+		this.control({ type: "status" });
+		return (await this.waitForEvent("status")) as StatusEvent;
 	}
 
 	/** Close the control channel (shuts the engine down) and stop the child.

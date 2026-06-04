@@ -13,7 +13,14 @@ export {
 	type HaxResolution,
 	type ResolveHaxOptions,
 } from "./resolve-hax.js";
-export { spawnHax, type SpawnedHax, type SpawnHaxOptions } from "./spawn.js";
+export {
+	haxSpawnArgs,
+	haxSpawnEnv,
+	spawnHax,
+	type SpawnedHax,
+	type SpawnHaxOptions,
+} from "./spawn.js";
+export { aiEzioGlobalSkillsDir } from "./skills-dir.js";
 export {
 	EngineExitedError,
 	ProtocolVersionError,

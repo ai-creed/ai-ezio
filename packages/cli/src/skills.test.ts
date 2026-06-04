@@ -16,7 +16,7 @@ describe("skillDirs", () => {
 		expect(dirs[0]).toMatchObject({ path: "/proj/.agents/skills", engineVisible: true });
 		expect(dirs[1]).toMatchObject({
 			path: "/home/u/.config/ai-ezio/skills",
-			engineVisible: false,
+			engineVisible: true, // M4: bridged in via HAX_EXTRA_SKILLS_DIR
 		});
 		expect(dirs[2]).toMatchObject({ path: "/home/u/.config/hax/skills", engineVisible: true });
 	});
@@ -70,7 +70,7 @@ describe("discoverSkills", () => {
 		expect(skills.map((s) => s.name)).toEqual(["alpha", "beta", "gamma"]);
 		expect(skills.find((s) => s.name === "beta")).toMatchObject({
 			source: "ai-ezio-global",
-			engineVisible: false,
+			engineVisible: true, // M4: ai-ezio-global is bridged into the prompt
 			description: "B",
 		});
 		expect(skills.find((s) => s.name === "gamma")?.description).toBeNull();

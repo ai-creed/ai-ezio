@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isNativeSubcommand, wantsVersionJson } from "./cli.js";
+import {
+	isMountInvocation,
+	isNativeSubcommand,
+	launchEnv,
+	mountStdio,
+	wantsVersionJson,
+} from "./cli.js";
 import { readVersionInfo } from "./version.js";
 
 describe("wantsVersionJson", () => {
@@ -18,6 +24,32 @@ describe("isNativeSubcommand", () => {
 		expect(isNativeSubcommand(["doctor"])).toBe(true);
 		expect(isNativeSubcommand(["-p", "hi"])).toBe(false);
 		expect(isNativeSubcommand([])).toBe(false);
+	});
+});
+
+describe("isMountInvocation", () => {
+	it("detects --mount-mode and protocol fds", () => {
+		expect(isMountInvocation(["--mount-mode"])).toBe(true);
+		expect(isMountInvocation(["--protocol-fd=3", "--control-fd=4"])).toBe(true);
+		expect(isMountInvocation(["-p", "hi"])).toBe(false);
+		expect(isMountInvocation([])).toBe(false);
+	});
+});
+
+describe("mountStdio", () => {
+	it("inherits 0/1/2 plus exactly the named protocol fds", () => {
+		const s = mountStdio(["--mount-mode", "--protocol-fd=3", "--control-fd=4"]);
+		expect(s.length).toBe(5);
+		expect(s[0]).toBe("inherit");
+		expect(s[3]).toBe("inherit"); // protocol fd forwarded
+		expect(s[4]).toBe("inherit"); // control fd forwarded
+	});
+});
+
+describe("launchEnv (CLI sets HAX_EXTRA_SKILLS_DIR)", () => {
+	it("adds HAX_EXTRA_SKILLS_DIR to the child env", () => {
+		const env = launchEnv({ XDG_CONFIG_HOME: "/xdg" } as NodeJS.ProcessEnv);
+		expect(env.HAX_EXTRA_SKILLS_DIR).toBe("/xdg/ai-ezio/skills");
 	});
 });
 

@@ -17,6 +17,7 @@ export type {
 	IdleEvent,
 	ProtocolEvent,
 	ReadyEvent,
+	StatusEvent,
 	ToolCallFinishedEvent,
 	ToolCallStartedEvent,
 	UserTurnStartedEvent,

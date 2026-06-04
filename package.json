@@ -16,7 +16,8 @@
 		"lint": "eslint .",
 		"format": "prettier --write \"packages/**/*.{ts,json}\" \"packaging/**/*.json\"",
 		"format:check": "prettier --check \"packages/**/*.{ts,json}\" \"packaging/**/*.json\"",
-		"smoke:install": "node scripts/smoke-install.mjs"
+		"smoke:install": "node scripts/smoke-install.mjs",
+		"smoke:cli-mount": "node scripts/cli-mount-smoke.mjs"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.0",

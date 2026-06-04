@@ -20,6 +20,15 @@ describe("JsonlDecoder", () => {
 			{ type: "tool_call_finished", turnId: "t1", name: "bash", callId: "c1", status: "ok" },
 			{ type: "assistant_turn_finished", turnId: "t1", content: "hello" },
 			{ type: "error", message: "boom", turnId: "t1" },
+			{
+				type: "status",
+				model: "m",
+				provider: "mock",
+				protocol: "0.1.0",
+				sessionId: "s",
+				state: "idle",
+				contextPercent: null,
+			},
 			{ type: "idle" },
 		];
 		const wire = events.map((e) => `${JSON.stringify(e)}\n`).join("");

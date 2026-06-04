@@ -6,6 +6,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { resolveHaxBinary } from "./resolve-hax.js";
+import { aiEzioGlobalSkillsDir } from "./skills-dir.js";
 
 export interface SpawnHaxOptions {
 	/** Override the binary path (defaults to the resolver). */
@@ -24,12 +25,25 @@ export interface SpawnedHax {
 	controlStream: Writable;
 }
 
+/** The args a mounted hax spawn uses: protocol fds + `--mount-mode` (chrome
+ * suppressed) + any extra. Pure, for testability. */
+export function haxSpawnArgs(extra: string[] = []): string[] {
+	return ["--protocol-fd=3", "--control-fd=4", "--mount-mode", ...extra];
+}
+
+/** The child env for a mounted hax spawn: the base env plus
+ * `HAX_EXTRA_SKILLS_DIR` set to the ai-ezio-global skills dir (engine-visibility
+ * bridge). Pure, for testability. */
+export function haxSpawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	return { ...base, HAX_EXTRA_SKILLS_DIR: aiEzioGlobalSkillsDir(base) };
+}
+
 export function spawnHax(options: SpawnHaxOptions = {}): SpawnedHax {
 	const binary = options.binary ?? resolveHaxBinary();
-	const child = spawn(binary, ["--protocol-fd=3", "--control-fd=4", ...(options.args ?? [])], {
+	const child = spawn(binary, haxSpawnArgs(options.args), {
 		// 0,1,2 ignored; 3 = events (hax writes), 4 = controls (hax reads).
 		stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
-		env: options.env ?? process.env,
+		env: haxSpawnEnv(options.env ?? process.env),
 	});
 	const eventStream = child.stdio[3] as Readable;
 	const controlStream = child.stdio[4] as Writable;

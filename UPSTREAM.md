@@ -36,24 +36,33 @@ The change is deliberately minimal and rides stable seams so it survives upstrea
 churn. It has two parts — an **upstreamable seam** and a **downstream emitter**:
 
 **Upstreamable in shape (kept on the fork; upstreaming optional, not assumed):**
-- one new file `src/agent_observer.h` — a general `struct agent_observer` of
-  optional agent-loop lifecycle hooks (`on_ready`, `on_user_turn`,
-  `on_assistant_begin`, `on_turn_finished`, `on_idle`); mirrors the existing
-  `struct provider` / `struct tool` seams. Justified for any embedder
-  (loggers, TUIs, automation), not just ai-ezio;
-- ~5 invocation points in `agent_run` where that data is already in scope;
-- two new CLI flags `--protocol-fd=<n>` / `--control-fd=<n>`.
+- `src/agent_observer.h` — a general `struct agent_observer` of optional
+  agent-loop lifecycle hooks (`on_ready`, `on_user_turn`, `on_assistant_begin`,
+  `on_turn_finished`, `on_idle`); mirrors the existing `struct provider` /
+  `struct tool` seams. ~5 invocation points in `agent_run`;
+- CLI flags `--protocol-fd=<n>` / `--control-fd=<n>` and `--mount-mode` (M4;
+  suppress human chrome — banner/usage/resume — for a mounted session);
+- **slash-command registration seam** (M4): `slash_register()` in `slash.{c,h}`
+  — a general runtime registry so any embedder can add `/`-commands;
+- **`HAX_EXTRA_SKILLS_DIR`** (M4): `agent_env.c` enumerates one additional skills
+  directory (from the env var) into the model prompt — a general "extra skills
+  dir" knob.
 
-**Downstream (ai-ezio's emitter, kept here):**
-- one new file `src/protocol/emit.c` (+ header) implementing `agent_observer`,
-  serializing JSONL to the protocol fd, and reading controls from the control
-  fd; plus a single `on_event` hook for stream events (deltas/tools/error),
-  the input-source swap for `submit`, the tick control-read for `interrupt`,
-  and one `meson.build` line.
+**Downstream (ai-ezio's, kept here):**
+- `src/protocol/emit.c` (+ header) implementing `agent_observer`, serializing
+  JSONL to the protocol fd, and the control reader (`emit_read_control`:
+  `submit`/`copy_last_response`/`new_conversation`/`status`; `interrupt` via the
+  tick); plus the `on_event` stream hook (deltas/tools/error) and the
+  input-source swap;
+- `src/protocol/skills_cmd.c` — the downstream `/skills` handler registered via
+  the slash seam (lists the honored skill dirs);
+- the M4 control integration points in `agent.c` (`new_conversation` →
+  `agent_new_conversation`, `status` → `emit_status`) and `meson.build` lines.
 
 > Earlier drafts described this as "one file + 2–3 lines"; the accurate surface
-> is the above. Anything beyond it is a smell — push it into the TypeScript
-> harness instead.
+> is the above, and M4 deliberately widened it (mounted mode + the two general
+> seams). Anything beyond these documented seams is a smell — push it into the
+> TypeScript harness instead.
 
 ## Keeping up with hax updates
 

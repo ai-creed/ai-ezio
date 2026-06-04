@@ -62,6 +62,18 @@ export interface ErrorEvent {
 	turnId?: string;
 }
 
+/** Reply to a `status` control (M4). `state` is `"idle"` in M4 (status is
+ * answered between turns); `contextPercent` is null until reliably known. */
+export interface StatusEvent {
+	type: "status";
+	model: string;
+	provider: string;
+	protocol: string;
+	sessionId: string;
+	state: "idle" | "busy";
+	contextPercent?: number | null;
+}
+
 export type ProtocolEvent =
 	| ReadyEvent
 	| UserTurnStartedEvent
@@ -71,6 +83,7 @@ export type ProtocolEvent =
 	| ToolCallFinishedEvent
 	| AssistantTurnFinishedEvent
 	| IdleEvent
-	| ErrorEvent;
+	| ErrorEvent
+	| StatusEvent;
 
 export type EventType = ProtocolEvent["type"];

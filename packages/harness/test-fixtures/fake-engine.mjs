@@ -38,6 +38,8 @@ if (mode === "bad-major") {
 	setInterval(() => {}, 1 << 30);
 } else {
 	let submits = 0;
+	let lastTurnId = "";
+	let lastContent = "";
 	let buf = "";
 	const controls = fs.createReadStream(null, { fd: CONTROLS_FD });
 	controls.on("data", (chunk) => {
@@ -51,6 +53,28 @@ if (mode === "bad-major") {
 			try {
 				ctl = JSON.parse(line);
 			} catch {
+				continue;
+			}
+			if (ctl.type === "copy_last_response") {
+				if (lastTurnId)
+					emit({ type: "assistant_turn_finished", turnId: lastTurnId, content: lastContent });
+				else emit({ type: "error", message: "no previous response" });
+				continue;
+			}
+			if (ctl.type === "new_conversation") {
+				emit({ type: "idle" });
+				continue;
+			}
+			if (ctl.type === "status") {
+				emit({
+					type: "status",
+					model: "fake-model",
+					provider: "fake",
+					protocol: "0.1.0",
+					sessionId: "fake",
+					state: "idle",
+					contextPercent: null,
+				});
 				continue;
 			}
 			if (ctl.type !== "submit") continue;
@@ -69,7 +93,9 @@ if (mode === "bad-major") {
 				emit({ type: "assistant_turn_finished", turnId, content: "" });
 			} else {
 				emit({ type: "assistant_delta", turnId, text: `ok ${ctl.text}` });
-				emit({ type: "assistant_turn_finished", turnId, content: `ok ${ctl.text}` });
+				lastContent = `ok ${ctl.text}`;
+				lastTurnId = turnId;
+				emit({ type: "assistant_turn_finished", turnId, content: lastContent });
 			}
 			emit({ type: "idle" });
 		}

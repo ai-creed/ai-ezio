@@ -62,7 +62,9 @@ export function skillDirs(env: SkillEnv): SkillDir[] {
 		{
 			source: "ai-ezio-global",
 			path: join(base, "ai-ezio", "skills"),
-			engineVisible: false,
+			// Engine-visible as of M4: ai-ezio sets HAX_EXTRA_SKILLS_DIR to this dir
+			// on launch, so hax injects these skills into the model prompt.
+			engineVisible: true,
 		},
 		{ source: "hax-global", path: join(base, "hax", "skills"), engineVisible: true },
 	];
