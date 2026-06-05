@@ -83,23 +83,38 @@ over the protocol, no clipboard, no scraping.
 See `docs/superpowers/specs/2026-06-04-m5-adapter-design.md` for the full design
 and the M5/M6 boundary.
 
-## M6 — Workflow integration
+## M6 — Workflow integration ✅ (done 2026-06-05)
 
-- Widen ai-whisper's hardcoded `"claude" | "codex"` into a shared `AgentType`;
-  add ai-ezio.
-- Support `whisper collab mount ai-ezio`.
-- Support `whisper skill install --target ai-ezio`.
-- Run one full ai-whisper workflow with ai-ezio in a role.
+The agent's workflow **role / agentType is `ezio`** (the project/package/repo
+remains `ai-ezio`). Shipped on the ai-whisper `m6-workflow-integration` branch;
+see `docs/superpowers/specs/2026-06-05-m6-workflow-integration-design.md` and
+`docs/superpowers/plans/2026-06-05-m6-workflow-integration.md`.
 
-**Done when:** ai-ezio is a first-class ai-whisper agent type and completes one
-full workflow as a role.
+- ✅ Widened ai-whisper's hardcoded `"claude" | "codex"` into a single shared
+  `AgentType` (`(typeof agentTypes)[number]`) across the broker + CLI surfaces,
+  enforced by a drift-prevention guard test so no inline union can creep back.
+- ✅ Bound-agent role resolution (replacement model): `ezio` substitutes for a
+  role and "the other agent" is resolved from the two bound agents.
+- ✅ `whisper collab mount ezio` and `whisper collab tell --target ezio`.
+- ✅ Full relay parity: `@@ezio` targeting inbound, `supportsRelayInterception`
+  true, ezio-originated `@@` directives recorded with `senderAgent: "ezio"`.
+- ✅ `whisper skill install --target ezio` → installs into the engine-visible
+  `${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/skills` (helper + CLI boundary).
+- ✅ A full `spec-driven-development` workflow runs to terminal `done` with ezio
+  as implementer and claude as reviewer over the real stack (only the LLMs
+  mocked) — `pnpm run e2e:ai-ezio-workflow`.
+
+**Done when:** ezio is a first-class ai-whisper agent type and completes one
+full workflow as a role. **Met.**
 
 ## Open study questions (carried from the plan)
 
 - How much hax core (if any) needs splitting for clean protocol hooks beyond the
   `on_event` seam.
 - Streaming opt-in (`assistant_delta`) and whether `tool_call_delta` is needed.
-- Whether ai-whisper should support >2 mounted agents immediately or only allow
-  ai-ezio as a replacement role.
+- ~~Whether ai-whisper should support >2 mounted agents immediately or only allow
+  ezio as a replacement role.~~ **Resolved in M6:** replacement role (exactly two
+  bound agents; ezio usually replaces codex). >2 simultaneous agents is out of
+  scope.
 - How skills are shared across Claude / Codex / hax / ai-ezio (M2).
 - Which generic improvements (esp. the emitter) to propose back to hax upstream.
