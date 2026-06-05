@@ -130,6 +130,36 @@ protocol-native (no REPL re-enabled, no PTY scraping). Spec/plan:
 fed entirely by protocol events; codex/claude and all M6 behavior unchanged.
 **Met.**
 
+## M8 — Mounted ezio display fidelity ✅ (done 2026-06-05)
+
+A mounted `ezio` pane renders like a real coding agent — assistant prose as
+**formatted markdown** at turn end, a **thinking spinner** while working, **tool
+calls** with an args summary + output preview + **colored diffs**, a clean usage
+line on its own line (fixing the M7 usage-glue), red error rendering, and a
+magenta `❯` prompt (ASCII `>` fallback). All from protocol events; the engine
+stays protocol-native (no REPL re-enable, no PTY scraping). Spec/plan:
+`docs/superpowers/specs/2026-06-05-m8-mounted-display-fidelity-design.md`,
+`docs/superpowers/plans/2026-06-05-m8-mounted-display-fidelity.md`.
+
+- ✅ Protocol: optional `tool_call_started.args`, `tool_call_finished.output`/
+  `isDiff`, documented in `docs/protocol.md`; codec present + absence coverage.
+  `tool_call_finished.status` now reflects execution (`ok`/`error`).
+- ✅ hax emitter: tool events move to the **dispatch seam** (`agent.c`, after
+  `tool->run`) — `emit_tool_started`/`emit_tool_finished` carry args/output/isDiff
+  and an execution-accurate status; the stream-hook tool emission + pending-tool
+  tracking were removed (net-narrower emit state).
+- ✅ Adapter: a pure `mounted-renderer.ts` (+ dependency-free `render-markdown.ts`)
+  owns ALL pane presentation; the live-session delegates display and keeps only
+  handler forwarding + M6 handback timing. Spinner timer + UTF-8 detection are
+  injectable seams for deterministic tests.
+- ✅ Engine-level `test_emit`/`test_observer_tool_e2e`/`test_mount_repl` assert
+  args/output/isDiff over the real protocol; the mount e2e drives a tool turn and
+  asserts the pane renders `⏺ bash` + the tool output.
+
+**Done when:** mounting ezio renders markdown, a spinner, tool calls (args/output/
+diffs), a clean usage line, and a `❯` prompt — fed entirely by protocol events;
+codex/claude and all M6/M7 behavior unchanged. **Met.**
+
 ## Open study questions (carried from the plan)
 
 - How much hax core (if any) needs splitting for clean protocol hooks beyond the

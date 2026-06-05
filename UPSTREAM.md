@@ -66,11 +66,24 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
   confined to `src/protocol/emit.{c,h}` + a few `agent.c` lines + an engine-level
   test — surfacing data hax already computes (provider/model/effort, per-turn
   usage); a candidate to upstream as part of the observer/emitter seam.
+- **M8 (mounted display fidelity):** the emitter now also emits **tool events from
+  the `agent.c` dispatch seam** — `emit_tool_started` carries a human-readable
+  `args` summary (via a small `tool_display_arg` helper in `agent_dispatch.{c,h}`
+  that reads the tool's `display_arg` field), and `emit_tool_finished` carries the
+  tool's `output`, an always-boolean `isDiff` (from `tool->output_is_diff`), and an
+  **execution-accurate `status`** (`error` on refusal/skip, `ok` on run). These fire
+  around the dispatch loop (after `tool->run`), where the result and diff-ness are
+  known. The **old stream-hook tool emission** (`EV_TOOL_CALL_START`/`END` cases) and
+  its **pending-tool tracking** (`emit_pending_tool`, `EMIT_MAX_PENDING_TOOLS`,
+  `pending_tools`/`n_pending_tools`, `pending_tool_add`/`take`) were **removed** —
+  net-narrower emit state. Still confined to `src/protocol/emit.{c,h}`, the
+  `agent.c` dispatch loop, `agent_dispatch.{c,h}`, and engine-level tests.
 
 > Earlier drafts described this as "one file + 2–3 lines"; the accurate surface
-> is the above, and M4/M7 deliberately widened it (mounted mode + the two general
-> seams + the usage/effort emitter fields). Anything beyond these documented
-> seams is a smell — push it into the TypeScript harness instead.
+> is the above, and M4/M7/M8 deliberately widened it (mounted mode + the two general
+> seams + the usage/effort emitter fields + dispatch-sourced tool events). Anything
+> beyond these documented seams is a smell — push it into the TypeScript harness
+> instead.
 
 ## Keeping up with hax updates
 
