@@ -35,6 +35,8 @@ export interface ToolCallStartedEvent {
 	turnId: string;
 	name: string;
 	callId: string;
+	/** One-line summary of the call's arguments (M8); absent when not surfaced. */
+	args?: string;
 }
 
 export interface ToolCallFinishedEvent {
@@ -42,7 +44,12 @@ export interface ToolCallFinishedEvent {
 	turnId: string;
 	name: string;
 	callId: string;
+	/** Execution outcome (M8: dispatch-sourced — `ok` ran, `error` refused/skipped). */
 	status: "ok" | "error";
+	/** Tool result text (M8); absent when the engine didn't surface it. */
+	output?: string;
+	/** True when `output` is a unified diff (render colored) (M8). */
+	isDiff?: boolean;
 }
 
 export interface AssistantTurnFinishedEvent {

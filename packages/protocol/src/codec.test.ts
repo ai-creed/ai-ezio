@@ -114,3 +114,22 @@ describe("M7 optional fields (status.effort, assistant_turn_finished.usage)", ()
 		expect(Object.prototype.hasOwnProperty.call(d2, "effort")).toBe(false);
 	});
 });
+
+describe("M8 tool fields (tool_call_started.args, tool_call_finished.output/isDiff)", () => {
+	it("round-trips tool args/output/isDiff", () => {
+		const started = { type: "tool_call_started", turnId: "t", name: "bash", callId: "c", args: "ls -la" } satisfies ProtocolEvent;
+		const finished = { type: "tool_call_finished", turnId: "t", name: "bash", callId: "c", status: "ok", output: "README.md\nsrc/", isDiff: false } satisfies ProtocolEvent;
+		const d = new JsonlDecoder();
+		const out = [...d.push(encodeEvent(started)), ...d.push(encodeEvent(finished))];
+		expect(out[0]).toMatchObject({ type: "tool_call_started", args: "ls -la" });
+		expect(out[1]).toMatchObject({ type: "tool_call_finished", output: "README.md\nsrc/", isDiff: false });
+	});
+
+	it("absence stays absent (no args key on a bare tool_call_started)", () => {
+		const started = { type: "tool_call_started", turnId: "t", name: "bash", callId: "c" } satisfies ProtocolEvent;
+		const line = encodeEvent(started);
+		expect(line).not.toContain("args");
+		const [dec] = new JsonlDecoder().push(line);
+		expect(Object.prototype.hasOwnProperty.call(dec, "args")).toBe(false);
+	});
+});

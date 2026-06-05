@@ -42,8 +42,8 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 | `user_turn_started`        | `turnId`                                 | A submitted user turn was accepted. |
 | `assistant_turn_started`   | `turnId`                                 | Model began responding. |
 | `assistant_delta`          | `turnId`, `text`                         | Streamed text chunk (optional for consumers that only want final). |
-| `tool_call_started`        | `turnId`, `name`, `callId`               | A tool invocation began. |
-| `tool_call_finished`       | `turnId`, `name`, `callId`, `status`     | Tool finished (`status`: `ok` \| `error`). |
+| `tool_call_started`        | `turnId`, `name`, `callId`, `args?`      | A tool invocation began. `args?` (M8) is a one-line summary of the call's arguments. |
+| `tool_call_finished`       | `turnId`, `name`, `callId`, `status`, `output?`, `isDiff?` | Tool finished (`status`: `ok` \| `error`). `output?`/`isDiff?` (M8) carry the tool's result text and whether it is a unified diff. |
 | `assistant_turn_finished`  | `turnId`, `content`, `usage?`            | Turn complete; `content` is the final assistant text (the handback). `usage?` (M7) is an optional per-turn token object — see below. |
 | `idle`                     | —                                        | Engine quiescent, ready for the next control. |
 | `error`                    | `message`, `turnId?`                     | Recoverable or fatal error; `turnId` if turn-scoped. |
@@ -130,14 +130,16 @@ Rules:
   `agent_observer` `on_turn_finished` callback — never reconstructed from deltas.
 - **`assistant_delta`:** always-on in M3 (no opt-in control yet); revisit in a
   later milestone.
-- **`tool_call_started` / `tool_call_finished` semantics:** these report the
-  **model's tool-call stream lifecycle** — `tool_call_started` when the call
-  begins (`EV_TOOL_CALL_START`), `tool_call_finished` when its args are finalized
-  (`EV_TOOL_CALL_END`). They are **not** the tool's *execution* outcome. In M3,
-  `status` is `"ok"` meaning "the call was fully formed"; it does **not** indicate
-  whether the tool ran successfully (that happens later in hax's dispatch loop).
-  Reporting execution result is a future enhancement (a `tool_result` event or a
-  richer `status`), out of scope for M3.
+- **`tool_call_started` / `tool_call_finished` semantics:** in M3 these reported
+  the model's tool-call *stream lifecycle* (`status:"ok"` meant "args finalized",
+  not execution). **As of M8 they are emitted from hax's tool-dispatch seam**
+  (around `tool->run`): `tool_call_started{args?}` fires just before the tool runs
+  (args known), and `tool_call_finished{status,output?,isDiff?}` fires just after,
+  so `status` now reflects **execution** (`ok` for a run, `error` for a
+  refused/skipped call), `output?` is the tool's result text, and `isDiff?` is a
+  boolean (true when the output is a unified diff). All three new fields are
+  optional/back-compatible; older consumers ignore them. The M3 "future
+  enhancement (a `tool_result` event)" note is superseded by this M8 design.
 - **`error` event:** turn-scoped — `error{message,turnId}` is emitted, then the
   engine returns to `idle` (so the turn's `assistant_turn_finished`/`idle` still
   fire); the harness surfaces it as recoverable. A fatal/startup failure ends the
