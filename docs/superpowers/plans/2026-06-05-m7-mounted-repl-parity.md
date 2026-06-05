@@ -48,9 +48,21 @@ Expected: hax meson tests PASS; ai-ezio + ai-whisper vitest PASS. If `vendor/hax
 - Modify: `packages/protocol/src/events.ts`
 - Test: `packages/protocol/src/codec.test.ts`
 
-- [ ] **Step 1: Write the failing codec round-trip test**
+**Order matters (spec): document `docs/protocol.md` FIRST, then implement the
+schema/codec.** Steps below follow doc → test → types → verify.
 
-In `packages/protocol/src/codec.test.ts`, add a test that encodes/decodes a `status` event with `effort` and an `assistant_turn_finished` with `usage`:
+- [ ] **Step 1: Document the additions in `docs/protocol.md` (FIRST)**
+
+Add to `docs/protocol.md` (find the `status` and `assistant_turn_finished` event sections):
+- `assistant_turn_finished`: note the optional `usage` object and its four optional numeric fields (`contextTokens`, `outputTokens`, `cachedTokens`, `contextLimit`); a field is omitted when the backend didn't report it (hax `-1`), and `usage` is omitted entirely when none are present (no `usage: null`/`usage: undefined` on the wire).
+- `status`: note the optional `effort` string.
+- Add a sentence under the mount-mode/`status` description: in `--mount-mode`, hax emits one `status` event automatically right after `ready` (carrying `provider`/`model`/`effort`), in addition to answering the `status` control.
+
+- [ ] **Step 2: Write the failing codec tests — present round-trip AND absence**
+
+In `packages/protocol/src/codec.test.ts`, add two tests. The first round-trips the
+present optional fields; the second proves **absence stays absent** (no
+`usage: undefined` leakage) — the spec's required absence coverage.
 
 ```ts
 it("round-trips status.effort and assistant_turn_finished.usage (M7)", () => {
@@ -82,16 +94,39 @@ it("round-trips status.effort and assistant_turn_finished.usage (M7)", () => {
 		usage: { contextTokens: 8900, outputTokens: 595, cachedTokens: 2700, contextLimit: 262144 },
 	});
 });
+
+it("absence stays absent: no usage key / no `usage: undefined` leakage (M7)", () => {
+	const finished = {
+		type: "assistant_turn_finished",
+		turnId: "t1",
+		content: "done",
+	} satisfies ProtocolEvent;
+	// encodeEvent uses JSON.stringify, so even an explicit `usage: undefined`
+	// would be dropped — assert the encoded wire line carries no "usage" token
+	// and the decoded object has no own `usage` key.
+	const line = encodeEvent(finished);
+	expect(line).not.toContain("usage");
+	const [decoded] = new JsonlDecoder().push(line);
+	expect(Object.prototype.hasOwnProperty.call(decoded, "usage")).toBe(false);
+
+	// And a status without effort stays absent too.
+	const status = {
+		type: "status", model: "m", provider: "p", protocol: "0.1.0",
+		sessionId: "s", state: "idle", contextPercent: null,
+	} satisfies ProtocolEvent;
+	const [d2] = new JsonlDecoder().push(encodeEvent(status));
+	expect(Object.prototype.hasOwnProperty.call(d2, "effort")).toBe(false);
+});
 ```
 
 (Match the existing imports in `codec.test.ts` — `JsonlDecoder`, `encodeEvent`, `ProtocolEvent`.)
 
-- [ ] **Step 2: Run it — expect a TYPE failure (`effort`/`usage` not on the types)**
+- [ ] **Step 3: Run — expect a TYPE failure (`effort`/`usage` not on the types)**
 
 Run: `cd /Users/vuphan/Dev/ai-ezio && pnpm --filter @ai-ezio/protocol test`
 Expected: FAIL — `effort` / `usage` are not assignable (the `satisfies ProtocolEvent` check fails).
 
-- [ ] **Step 3: Add the optional fields to the event types**
+- [ ] **Step 4: Add the optional fields to the event types**
 
 In `packages/protocol/src/events.ts`:
 
@@ -128,24 +163,17 @@ export interface StatusEvent {
 }
 ```
 
-- [ ] **Step 4: Document the additions in `docs/protocol.md`**
-
-Add to `docs/protocol.md` (find the `status` and `assistant_turn_finished` event sections):
-- `assistant_turn_finished`: note the optional `usage` object and its four optional numeric fields (`contextTokens`, `outputTokens`, `cachedTokens`, `contextLimit`); a field is omitted when the backend didn't report it (hax `-1`), and `usage` is omitted when none are present.
-- `status`: note the optional `effort` string.
-- Add a sentence under the mount-mode/`status` description: in `--mount-mode`, hax emits one `status` event automatically right after `ready` (carrying `provider`/`model`/`effort`), in addition to answering the `status` control.
-
-- [ ] **Step 5: Build protocol, run the test**
+- [ ] **Step 5: Build protocol, run the tests**
 
 Run: `cd /Users/vuphan/Dev/ai-ezio && pnpm --filter @ai-ezio/protocol build && pnpm --filter @ai-ezio/protocol test`
-Expected: PASS.
+Expected: PASS (both the present round-trip and the absence test).
 
 - [ ] **Step 6: Commit (ai-ezio)**
 
 ```sh
 cd /Users/vuphan/Dev/ai-ezio
 git add docs/protocol.md packages/protocol/src/events.ts packages/protocol/src/codec.test.ts
-git commit -m "M7 protocol: optional status.effort + assistant_turn_finished.usage (documented)"
+git commit -m "M7 protocol: optional status.effort + assistant_turn_finished.usage (documented first, absence covered)"
 ```
 
 ---
@@ -840,8 +868,11 @@ commit as the submodule base if ai-ezio tracks `vendor/hax` by pinned commit**
 - **Human REPL + mount-chrome suppression unchanged** → `test_mount_chrome` still
   passes; `display_usage`/banner suppression in mount mode is untouched (we emit
   protocol data, we don't re-enable the human rendering).
-- **Back-compat** → all protocol fields optional; the JSONL codec passes unknown/
-  absent fields through; M4 `status` control still answered.
+- **Back-compat + absence stays absent** → all protocol fields optional; the
+  codec absence test (Task 1) proves an `assistant_turn_finished` without `usage`
+  carries no `usage` key on the wire or after decode (no `usage: undefined`
+  leakage), and a `status` without `effort` likewise; M4 `status` control still
+  answered.
 
 ## Out of scope (per spec — do not implement)
 
