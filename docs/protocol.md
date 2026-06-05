@@ -44,10 +44,27 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 | `assistant_delta`          | `turnId`, `text`                         | Streamed text chunk (optional for consumers that only want final). |
 | `tool_call_started`        | `turnId`, `name`, `callId`               | A tool invocation began. |
 | `tool_call_finished`       | `turnId`, `name`, `callId`, `status`     | Tool finished (`status`: `ok` \| `error`). |
-| `assistant_turn_finished`  | `turnId`, `content`                      | Turn complete; `content` is the final assistant text (the handback). |
+| `assistant_turn_finished`  | `turnId`, `content`, `usage?`            | Turn complete; `content` is the final assistant text (the handback). `usage?` (M7) is an optional per-turn token object — see below. |
 | `idle`                     | —                                        | Engine quiescent, ready for the next control. |
 | `error`                    | `message`, `turnId?`                     | Recoverable or fatal error; `turnId` if turn-scoped. |
-| `status`                   | `model`, `provider`, `protocol`, `sessionId`, `state`, `contextPercent?` | Reply to a `status` control (M4). `state` is `"idle"` in M4 (answered between turns); `contextPercent` is `null` until reliably known. |
+| `status`                   | `model`, `provider`, `effort?`, `protocol`, `sessionId`, `state`, `contextPercent?` | Reply to a `status` control (M4). `state` is `"idle"` in M4 (answered between turns); `contextPercent` is `null` until reliably known. `effort?` (M7) is the session's reasoning effort (string; omitted/empty when not set). |
+
+### M7 additions (optional, back-compatible)
+
+- **`assistant_turn_finished.usage`** — an optional object of per-turn token
+  counts: `contextTokens?`, `outputTokens?`, `cachedTokens?`, `contextLimit?`
+  (all optional numbers). An individual field is **omitted** when the backend
+  did not report it (hax reports `-1`), and the `usage` object is **omitted
+  entirely** when no field is present — never sent as `usage: null` or
+  `usage: undefined`.
+- **`status.effort`** — optional string (the session's reasoning effort); omitted
+  or empty when not set.
+- **Auto-emitted `status` in `--mount-mode`** — in addition to answering the
+  `status` control, hax emits **one** `status` event automatically immediately
+  after `ready` when running in `--mount-mode` (carrying `provider`/`model`/
+  `effort`), so a mounted client can render a session banner without first
+  sending a control. (Non-mount protocol sessions are unchanged: `status` is only
+  emitted on request.)
 
 Example stream:
 

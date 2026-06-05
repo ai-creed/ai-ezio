@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeControl, JsonlDecoder, MalformedLineError } from "./codec.js";
+import { encodeControl, encodeEvent, JsonlDecoder, MalformedLineError } from "./codec.js";
 import type { ProtocolEvent } from "./events.js";
 
 describe("encodeControl", () => {
@@ -59,5 +59,58 @@ describe("JsonlDecoder", () => {
 
 	it("surfaces a malformed line as MalformedLineError", () => {
 		expect(() => new JsonlDecoder().push("not json\n")).toThrow(MalformedLineError);
+	});
+});
+
+describe("M7 optional fields (status.effort, assistant_turn_finished.usage)", () => {
+	it("round-trips status.effort and assistant_turn_finished.usage", () => {
+		const status = {
+			type: "status",
+			model: "gpt-5.5",
+			provider: "codex",
+			protocol: "0.1.0",
+			sessionId: "s1",
+			state: "idle",
+			contextPercent: null,
+			effort: "high",
+		} satisfies ProtocolEvent;
+		const finished = {
+			type: "assistant_turn_finished",
+			turnId: "t1",
+			content: "done",
+			usage: { contextTokens: 8900, outputTokens: 595, cachedTokens: 2700, contextLimit: 262144 },
+		} satisfies ProtocolEvent;
+
+		const dec = new JsonlDecoder();
+		const out = [...dec.push(encodeEvent(status)), ...dec.push(encodeEvent(finished))];
+		expect(out[0]).toMatchObject({ type: "status", effort: "high" });
+		expect(out[1]).toMatchObject({
+			type: "assistant_turn_finished",
+			usage: { contextTokens: 8900, outputTokens: 595, cachedTokens: 2700, contextLimit: 262144 },
+		});
+	});
+
+	it("absence stays absent: no usage key / no `usage: undefined` leakage", () => {
+		const finished = {
+			type: "assistant_turn_finished",
+			turnId: "t1",
+			content: "done",
+		} satisfies ProtocolEvent;
+		const line = encodeEvent(finished);
+		expect(line).not.toContain("usage");
+		const [decoded] = new JsonlDecoder().push(line);
+		expect(Object.prototype.hasOwnProperty.call(decoded, "usage")).toBe(false);
+
+		const status = {
+			type: "status",
+			model: "m",
+			provider: "p",
+			protocol: "0.1.0",
+			sessionId: "s",
+			state: "idle",
+			contextPercent: null,
+		} satisfies ProtocolEvent;
+		const [d2] = new JsonlDecoder().push(encodeEvent(status));
+		expect(Object.prototype.hasOwnProperty.call(d2, "effort")).toBe(false);
 	});
 });

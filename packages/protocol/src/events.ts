@@ -50,6 +50,15 @@ export interface AssistantTurnFinishedEvent {
 	turnId: string;
 	/** Authoritative handback: the final assistant message of the user turn. */
 	content: string;
+	/** Optional per-turn token usage (M7). Individual fields are omitted when the
+	 * backend did not report them (hax `-1`); the object is absent entirely when
+	 * no field is available (never `usage: null`/`undefined` on the wire). */
+	usage?: {
+		contextTokens?: number;
+		outputTokens?: number;
+		cachedTokens?: number;
+		contextLimit?: number;
+	};
 }
 
 export interface IdleEvent {
@@ -72,6 +81,9 @@ export interface StatusEvent {
 	sessionId: string;
 	state: "idle" | "busy";
 	contextPercent?: number | null;
+	/** Reasoning effort for this session (M7); empty/omitted when not set. In
+	 * `--mount-mode` a `status` is auto-emitted once right after `ready`. */
+	effort?: string;
 }
 
 export type ProtocolEvent =
