@@ -219,8 +219,12 @@ void emit_tool_finished(struct emit_state *es, const char *name, const char *cal
     json_object_set_new(o, "status", json_string(status ? status : "ok"));
     if (output)
         json_object_set_new(o, "output", json_string(output));
-    if (is_diff)
-        json_object_set_new(o, "isDiff", json_true());
+    /* `isDiff` is a real boolean (not an "unreported" field): a dispatch-sourced
+     * tool_call_finished ALWAYS knows whether its output is a diff, so emit it as
+     * true OR false. (The protocol type keeps it optional only for back-compat
+     * with non-dispatch/older events.) Matches the C unit test, which asserts
+     * `isDiff` is present + boolean for both the non-diff bash and the diff edit. */
+    json_object_set_new(o, "isDiff", json_boolean(is_diff != 0));
     emit_obj(es->event_fd, o);
 }
 ```
@@ -615,19 +619,34 @@ git commit -m "M8 adapter: live-session delegates display to mounted-renderer; k
 - [ ] **Step 1: Drive a tool turn + assert tool rendering**
 
 The mount e2e mounts real ezio (`HAX_PROVIDER=mock`). Point it at a mock script
-(`HAX_MOCK_SCRIPT`) that issues a deterministic tool call (e.g. `tool bash
-{"command":"echo hi"}` + `end-turn`) for the driven turn, OR drive the existing
-relay handoff and additionally assert tool output if the mock heuristically runs a
-tool. After the handback proof + the M7 banner/prompt assertions, add:
+(`HAX_MOCK_SCRIPT`) whose driven turn issues a deterministic tool call with a
+**unique, assertable output marker**, e.g.:
+```
+text Running a command…
+tool bash {"command":"echo M8_TOOL_OUTPUT_MARKER"}
+end-turn
+```
+`bash echo` produces a stable, non-diff result (`M8_TOOL_OUTPUT_MARKER`) that the
+renderer draws as an output preview — so the pane must show **both** the `⏺ `
+invocation line **and** the rendered output (not just the invocation line; the
+spec requires asserting the diff/preview, not only the tool line). After the
+handback proof + the M7 banner/prompt assertions, add:
 
 ```js
-// M8: a tool call renders a `⏺ ` invocation line and its output/diff in the pane.
+// M8: a tool call renders a `⏺ ` invocation line AND its output/diff in the pane.
+// Asserting only the `⏺ ` line would pass even if output/diff rendering regressed,
+// so assert the rendered tool OUTPUT (the unique marker) appears too.
 if (!/⏺ /.test(mountLog)) { cleanup(); console.error("FAIL: no M8 tool invocation line\n" + mountLog.slice(-2500)); process.exit(1); }
-console.log("OK: M8 tool call rendered in the mounted ezio pane");
+if (!mountLog.includes("M8_TOOL_OUTPUT_MARKER")) { cleanup(); console.error("FAIL: tool output/preview not rendered in the pane (invocation line only)\n" + mountLog.slice(-2500)); process.exit(1); }
+console.log("OK: M8 tool call + output rendered in the mounted ezio pane");
 ```
 
-(Use the simplest reliable trigger; if the relay turn doesn't run a tool, set
-`HAX_MOCK_SCRIPT` to a tool-call script in `childEnv` so the driven turn emits a
+(If you prefer to additionally prove the **colored-diff** path, add a second
+scripted turn with a `write`/`edit` tool and assert a `\u001b[32m`/`\u001b[31m`
+diff line in `mountLog`; the `bash echo` marker above already satisfies the
+spec's "tool line + preview" requirement.)
+
+(Drive the tool turn via `HAX_MOCK_SCRIPT` in `childEnv` so the driven turn emits a
 tool call. Keep it deterministic.)
 
 - [ ] **Step 2: Build + run both e2e**
