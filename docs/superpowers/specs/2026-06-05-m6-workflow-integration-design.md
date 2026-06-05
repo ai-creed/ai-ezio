@@ -68,14 +68,22 @@ intentionally exercise a literal.
 ### Discovery method (do not rely on a hand-enumerated list)
 
 The implementer must **find every occurrence by grep**, not trust the
-illustrative list below — a hand list drifts. Run, against active source only:
+illustrative list below — a hand list drifts. A **single order-independent
+pattern** covers the whole contract: any two adjacent agent-type string literals
+joined by `|` is a violation, regardless of order or how many members follow
+(`"codex" | "claude"`, the reverse `"claude" | "codex"`, and the leading pair of
+any three-member `… | … | …` triple all match). Run, against active source only
+(also excluding the canonical definition file):
 
 ```sh
-# two-agent unions still to widen
-rg -n '"codex"\s*\|\s*"claude"' packages --glob '!**/dist/**' --glob '!**/deprecated/**' --glob '!**/*.test.ts'
-# already-widened triples that must collapse to AgentType (~59 at spec time)
-rg -n '"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"' packages --glob '!**/dist/**' --glob '!**/deprecated/**' --glob '!**/*.test.ts'
+rg -n '"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"' packages \
+  --glob '!**/dist/**' --glob '!**/deprecated/**' --glob '!**/*.test.ts' \
+  --glob '!**/shared/src/literals.ts'
 ```
+
+At spec time this matches the remaining two-agent unions (both orders) **and** the
+~59 already-widened three-agent triples — all of which must collapse to
+`AgentType`.
 
 Convert **all** hits to `AgentType` (member-only declarations) or
 `AgentType | <sentinel>` (sentinel-augmented). The illustrative
@@ -197,11 +205,14 @@ function aiEzioSkillsDir(home: string, env = process.env): string {
 **Drift-prevention guard (the proof for the `AgentType` contract):** a test that
 greps the active source tree (excluding `**/dist/**`, `**/deprecated/**`,
 `**/*.test.ts`, and `packages/shared/src/literals.ts`) and **fails if any inline
-agent-type union remains** — both the two-agent `"codex" | "claude"` and the
-three-agent `"codex" | "claude" | "ezio"` (any spacing/order). This is what makes
-the "every inline union is gone / no future drift" requirement verifiable; a
-green typecheck alone does not prove it (a re-declared triple typechecks fine).
-The guard runs the two `rg` patterns from Work area 1 and asserts zero hits.
+agent-type union remains**. It uses the **single order-independent pattern** from
+Work area 1 — `"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"` — which an
+order-specific `"codex" | "claude"` regex would not: that pattern matches both
+two-agent orders (`"codex" | "claude"` **and** `"claude" | "codex"`) and the
+leading pair of any three-agent triple, so a reversed-order re-declaration cannot
+slip through green. The guard asserts **zero hits**. This is what makes the
+"every inline union is gone / no future drift" requirement verifiable; a green
+typecheck alone does not prove it (a re-declared union typechecks fine).
 
 **Unit (vitest):**
 
