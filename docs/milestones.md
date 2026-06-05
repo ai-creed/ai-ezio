@@ -107,6 +107,29 @@ see `docs/superpowers/specs/2026-06-05-m6-workflow-integration-design.md` and
 **Done when:** ezio is a first-class ai-whisper agent type and completes one
 full workflow as a role. **Met.**
 
+## M7 — Mounted ezio REPL parity ✅ (done 2026-06-05)
+
+A mounted `ezio` pane re-creates the hax REPL *look* — a
+`▌ ezio › provider · model · effort` banner on start, and a per-turn usage line +
+`›` prompt — rendered entirely from protocol events. The engine stays
+protocol-native (no REPL re-enabled, no PTY scraping). Spec/plan:
+`docs/superpowers/specs/2026-06-05-m7-mounted-repl-parity-design.md`,
+`docs/superpowers/plans/2026-06-05-m7-mounted-repl-parity.md`.
+
+- ✅ hax emitter (minimal seam): `status.effort`, an auto-emitted `status` right
+  after `ready` in `--mount-mode`, and optional `assistant_turn_finished.usage`
+  (omitted when the backend reports `-1`) — surfacing data hax already computes.
+- ✅ Protocol: optional `status.effort` + `assistant_turn_finished.usage`,
+  documented in `docs/protocol.md`; codec present + absence coverage.
+- ✅ Adapter renders the banner once, a usage line (binary-`k` parity with hax's
+  `format_tokens`), and a `›` prompt after each turn.
+- ✅ Engine-level `test_mount_repl` (real hax + mock) proves auto-status and usage
+  present/omitted; the mount e2e asserts the banner + a post-turn prompt.
+
+**Done when:** mounting ezio shows a banner on start + usage/prompt per turn,
+fed entirely by protocol events; codex/claude and all M6 behavior unchanged.
+**Met.**
+
 ## Open study questions (carried from the plan)
 
 - How much hax core (if any) needs splitting for clean protocol hooks beyond the

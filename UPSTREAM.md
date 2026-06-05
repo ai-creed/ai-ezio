@@ -57,12 +57,20 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
 - `src/protocol/skills_cmd.c` — the downstream `/skills` handler registered via
   the slash seam (lists the honored skill dirs);
 - the M4 control integration points in `agent.c` (`new_conversation` →
-  `agent_new_conversation`, `status` → `emit_status`) and `meson.build` lines.
+  `agent_new_conversation`, `status` → `emit_status`) and `meson.build` lines;
+- **M7 (mounted REPL parity):** `emit_status` carries an `effort` field;
+  `emit_set_usage` stages a turn's token counts that `obs_on_turn_finished`
+  attaches to `assistant_turn_finished` (fields omitted when the backend reports
+  `-1`, `usage` omitted when empty); `agent.c` auto-emits one `status` right after
+  `ready` in `--mount-mode` and stages usage before `on_turn_finished`. Still
+  confined to `src/protocol/emit.{c,h}` + a few `agent.c` lines + an engine-level
+  test — surfacing data hax already computes (provider/model/effort, per-turn
+  usage); a candidate to upstream as part of the observer/emitter seam.
 
 > Earlier drafts described this as "one file + 2–3 lines"; the accurate surface
-> is the above, and M4 deliberately widened it (mounted mode + the two general
-> seams). Anything beyond these documented seams is a smell — push it into the
-> TypeScript harness instead.
+> is the above, and M4/M7 deliberately widened it (mounted mode + the two general
+> seams + the usage/effort emitter fields). Anything beyond these documented
+> seams is a smell — push it into the TypeScript harness instead.
 
 ## Keeping up with hax updates
 
