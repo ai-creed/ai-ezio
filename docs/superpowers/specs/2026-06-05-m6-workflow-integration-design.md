@@ -57,9 +57,13 @@ uses `AgentType`. Exactly two exceptions:
 
 1. `packages/shared/src/literals.ts` — the `agentTypes` literal array and the
    `AgentType` definition itself.
-2. Sentinel-augmented unions keep their sentinel: write `AgentType | "none"` or
-   `AgentType | null` (e.g. dashboard turn-state `owner`/`waiting`), never a
-   re-spelled member list.
+2. Sentinel-augmented unions keep their sentinel but still funnel the agent
+   members through `AgentType`: write `AgentType | "none"`, `AgentType | null`
+   (dashboard turn-state `owner`/`waiting`), or `AgentType | "all"` (skill-install
+   target — Work area 4) — never a re-spelled agent member list. Because the
+   guard only matches two **adjacent agent** literals joined by `|`, these
+   sentinel forms (the sentinel is not an agent literal) produce zero hits, so
+   the contract and the skill-install target type are mutually satisfiable.
 
 **Excluded from the sweep:** `packages/cli/deprecated/**` (dead code — left
 as-is), `**/dist/**` (build output), and `**/*.test.ts` fixtures that
@@ -173,16 +177,21 @@ boundary, so both are mandatory.
 `packages/cli/src/create-cli.ts` (the actual command — the gate users hit):
 
 - The `skill install` `--target` option `.choices([...])` adds `"ezio"`:
-  `.choices(["claude", "codex", "ezio", "all"])` (~`:563`). Without this,
-  Commander rejects `--target ezio` before `runSkillInstall` is ever called.
-- The action opts type widens: `target: "claude" | "codex" | "ezio" | "all"`.
+  `.choices(["claude", "codex", "ezio", "all"])` (~`:563`). This is a
+  comma-separated runtime **array**, not a `|`-joined type union, so the drift
+  guard does not match it. Without this, Commander rejects `--target ezio`
+  before `runSkillInstall` is ever called.
+- The action opts type widens to `target: AgentType | "all"` (import `AgentType`
+  from `@ai-whisper/shared`). **Do not** spell it `"claude" | "codex" | "ezio" |
+  "all"` — that re-introduces an inline agent union the drift guard would flag.
 
 `packages/cli/src/commands/skill/install.ts` (the helper):
 
-- `SkillInstallTarget = "claude" | "codex" | "ezio" | "all"`.
-- `VALID_TARGETS` adds `"ezio"`; the `"all"` fan-out becomes
-  `["claude", "codex", "ezio"]`.
-- `homeForTarget(target)` handles `"ezio"`:
+- `SkillInstallTarget = AgentType | "all"` (import `AgentType`; do **not** spell
+  out the agent members — see the sentinel rule in Work area 1).
+- `VALID_TARGETS` adds `"ezio"` (a runtime `Set` of strings — not a type union,
+  so guard-safe); the `"all"` fan-out becomes `["claude", "codex", "ezio"]`.
+- `homeForTarget(target: AgentType)` handles `"ezio"`:
 
 ```ts
 // ai-ezio engine reads this dir via HAX_EXTRA_SKILLS_DIR (see ai-ezio
