@@ -5,6 +5,7 @@
  * sizes) and surfaces a malformed line as a typed error rather than dropping it
  * silently.
  */
+import { StringDecoder } from "node:string_decoder";
 import type { ProtocolControl } from "./controls.js";
 import type { ProtocolEvent } from "./events.js";
 
@@ -28,15 +29,21 @@ export function encodeEvent(event: ProtocolEvent): string {
 /** Incremental decoder: feed chunks, get whole events out. */
 export class JsonlDecoder {
 	private buffer = "";
+	// fd-3 yields raw Buffer chunks at arbitrary boundaries. StringDecoder holds
+	// back the trailing bytes of a multibyte UTF-8 codepoint until the rest
+	// arrives, so a char split across reads (em-dash, bullet, smart quote, box
+	// chars) never decodes to `�`. Decoding a chunk in isolation does NOT.
+	private readonly utf8 = new StringDecoder("utf8");
 
 	/**
 	 * Append a chunk and return every complete event it produced. A trailing
-	 * partial line is retained until the rest arrives. Throws
-	 * MalformedLineError on a complete-but-unparseable line (the buffer past it
-	 * is preserved so decoding can continue after the caller handles it).
+	 * partial line — or a partial multibyte char — is retained until the rest
+	 * arrives. Throws MalformedLineError on a complete-but-unparseable line (the
+	 * buffer past it is preserved so decoding can continue after the caller
+	 * handles it).
 	 */
 	push(chunk: string | Uint8Array): ProtocolEvent[] {
-		this.buffer += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+		this.buffer += typeof chunk === "string" ? chunk : this.utf8.write(Buffer.from(chunk));
 		const events: ProtocolEvent[] = [];
 		let nl = this.buffer.indexOf("\n");
 		while (nl >= 0) {

@@ -57,6 +57,35 @@ describe("JsonlDecoder", () => {
 		expect(new JsonlDecoder().push('\n\n{"type":"idle"}\n\n')).toEqual([{ type: "idle" }]);
 	});
 
+	it("reassembles a multibyte UTF-8 char split across two byte chunks", () => {
+		// The fd-3 reader yields raw Buffer chunks at arbitrary boundaries. A
+		// multibyte codepoint (em-dash `—` = 0xE2 0x80 0x94) straddling a read
+		// must NOT decode to `�`; the decoder has to hold back the partial bytes.
+		const d = new JsonlDecoder();
+		const line = `${JSON.stringify({ type: "assistant_turn_finished", turnId: "t", content: "a—b" })}\n`;
+		const bytes = Buffer.from(line, "utf8");
+		const split = bytes.indexOf(0x94); // mid em-dash (last continuation byte)
+		expect(d.push(bytes.subarray(0, split))).toEqual([]); // ends mid-codepoint
+		const out = d.push(bytes.subarray(split));
+		expect(out).toEqual([
+			{ type: "assistant_turn_finished", turnId: "t", content: "a—b" },
+		]);
+	});
+
+	it("reassembles a multibyte char even when the split also breaks the line", () => {
+		// Two independent boundary hazards at once: the byte split lands mid-`•`
+		// (0xE2 0x80 0xA2) AND before the newline — both must be buffered.
+		const d = new JsonlDecoder();
+		const line = `${JSON.stringify({ type: "assistant_turn_finished", turnId: "t", content: "• item" })}\n`;
+		const bytes = Buffer.from(line, "utf8");
+		const split = bytes.indexOf(0x80); // mid bullet
+		expect(d.push(bytes.subarray(0, split))).toEqual([]);
+		const out = d.push(bytes.subarray(split));
+		expect(out).toEqual([
+			{ type: "assistant_turn_finished", turnId: "t", content: "• item" },
+		]);
+	});
+
 	it("surfaces a malformed line as MalformedLineError", () => {
 		expect(() => new JsonlDecoder().push("not json\n")).toThrow(MalformedLineError);
 	});
