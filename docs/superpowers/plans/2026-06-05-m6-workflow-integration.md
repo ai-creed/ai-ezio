@@ -140,6 +140,7 @@ Create `test/agent-type-drift-guard.test.ts`:
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // The contract (see the M6 spec, Work area 1): AgentType is the single canonical
 // agent-type union. No active-source module may inline-declare an agent-type
@@ -150,7 +151,10 @@ import path from "node:path";
 // never matches them.
 const INLINE_AGENT_UNION = /"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"/;
 
-const PKG_ROOT = path.resolve(__dirname, "..", "packages");
+// ESM-safe: the repo root package.json has "type": "module", so __dirname does
+// not exist. Resolve packages/ relative to this test file's URL (this file lives
+// in test/, so ../packages/ is the repo packages dir).
+const PKG_ROOT = fileURLToPath(new URL("../packages/", import.meta.url));
 
 // Excluded: dist (build output), deprecated (dead code), node_modules, *.test.ts
 // fixtures, and the canonical definition file itself.
@@ -675,37 +679,122 @@ git commit -m "M6: ezio provider declares supportsRelayInterception true (parity
 
 ---
 
-### Task 8: Outbound `@@` from ezio — regression test only
+### Task 8: Outbound `@@` from ezio — handoff-layer regression
 
 The shared `live-session.ts` already intercepts operator stdin `@@` directives
-for any mounted target (M5 wired ezio through it), and `onRelay` creates a
-handoff with `senderAgent = input.target`. This task pins that ezio-originated
-directives produce an ezio-sender handoff — **no new production code**.
+for any mounted target (M5 wired ezio through it); the `onRelay` closure in
+`mount-session-main.ts` builds the handoff with `senderAgent = input.target`. The
+regression must prove **that handoff is created with `senderAgent: "ezio"`** — a
+parse-only assertion is NOT acceptable (it would pass even if the live-session
+handoff path used the wrong sender). Since the `onRelay` closure is inline and
+unexported, extract the handoff-input builder into a small pure, exported helper
+and unit-test it; the inline closure then calls the helper, so the test pins the
+real production path.
 
 **Files:**
+- Modify: `packages/cli/src/runtime/mount-session-main.ts` (extract helper)
 - Test: `test/ai-ezio-outbound-relay.test.ts` (create)
 
-- [ ] **Step 1: Write the test**
+- [ ] **Step 1: Write the failing test**
 
-Model it on the existing relay-integration test
-(`test/ai-ezio-relay-integration.test.ts`): construct the `onRelay` path used by
-`mount-session-main.ts` (or call `createRelayHandoff` through a fake broker the
-way live-session does) with `input.target = "ezio"` and a parsed `@@claude …`
-directive, and assert the recorded handoff has `senderAgent: "ezio",
-targetAgent: "claude"`. Reuse the fake-broker helper pattern already in
-`test/ai-ezio-relay-integration.test.ts`. If the `onRelay` closure is not
-exported, assert at the unit boundary that `parseRelayDirective("@@claude x")`
-yields `target: "claude"` and document (code comment) that delivery uses the
-shared path proven by the Task 11 e2e.
+Create `test/ai-ezio-outbound-relay.test.ts`:
 
-- [ ] **Step 2: Run + commit**
+```ts
+import { describe, expect, it } from "vitest";
+import { buildRelayHandoffInput } from "../packages/cli/src/runtime/mount-session-main.ts";
+
+describe("ezio-originated @@ directive → handoff (M6 outbound)", () => {
+	it("a @@claude directive from an ezio mount yields senderAgent ezio", () => {
+		const input = buildRelayHandoffInput({
+			mountTarget: "ezio",
+			directive: { target: "claude", instruction: "review the diff" },
+			collabId: "collab_1",
+			now: "2026-06-05T00:00:00.000Z",
+		});
+		expect(input).toMatchObject({
+			collabId: "collab_1",
+			senderAgent: "ezio",
+			targetAgent: "claude",
+			requestText: "review the diff",
+		});
+		expect(input.handoffId).toMatch(/^handoff_[0-9]+$/);
+	});
+
+	it("works symmetrically for a codex mount targeting ezio", () => {
+		const input = buildRelayHandoffInput({
+			mountTarget: "codex",
+			directive: { target: "ezio", instruction: "take over" },
+			collabId: "collab_2",
+			now: "2026-06-05T00:00:01.000Z",
+		});
+		expect(input).toMatchObject({ senderAgent: "codex", targetAgent: "ezio" });
+	});
+});
+```
+
+- [ ] **Step 2: Run — expect FAIL (helper not exported yet)**
 
 Run: `pnpm vitest run test/ai-ezio-outbound-relay.test.ts`
-Expected: PASS.
+Expected: FAIL — `buildRelayHandoffInput` is not exported.
+
+- [ ] **Step 3: Extract the helper and call it from `onRelay`**
+
+In `packages/cli/src/runtime/mount-session-main.ts`, add an exported pure helper
+(import `AgentType` from `@ai-whisper/shared`):
+
+```ts
+export function buildRelayHandoffInput(input: {
+	mountTarget: AgentType;
+	directive: { target: AgentType; instruction: string };
+	collabId: string;
+	now: string;
+}): {
+	handoffId: string;
+	collabId: string;
+	senderAgent: AgentType;
+	targetAgent: AgentType;
+	requestText: string;
+	now: string;
+} {
+	return {
+		handoffId: `handoff_${input.now.replace(/[^0-9]/g, "")}`,
+		collabId: input.collabId,
+		senderAgent: input.mountTarget,
+		targetAgent: input.directive.target,
+		requestText: input.directive.instruction,
+		now: input.now,
+	};
+}
+```
+
+Then replace the inline `createRelayHandoff({ … })` object in `onRelay` (the
+non-`pull` branch — `pull` still returns early before this point, so
+`directive.target` here is a non-`pull` `AgentType`) with:
+
+```ts
+input.broker.control.createRelayHandoff(
+	buildRelayHandoffInput({
+		mountTarget: input.target,
+		directive: { target: directive.target, instruction: directive.instruction },
+		collabId: resolvedClaim.collabId,
+		now: handoffNow,
+	}),
+);
+```
+
+This is behavior-preserving (same field values) and makes the sender contract
+unit-testable.
+
+- [ ] **Step 4: Build cli, run the test + the existing relay-integration test**
+
+Run: `pnpm --filter @ai-whisper/cli build && pnpm vitest run test/ai-ezio-outbound-relay.test.ts test/ai-ezio-relay-integration.test.ts`
+Expected: PASS for both (the refactor doesn't change the inbound integration).
+
+- [ ] **Step 5: Commit**
 
 ```sh
-git add test/ai-ezio-outbound-relay.test.ts
-git commit -m "M6: regression — ezio-originated @@ directive yields ezio-sender handoff"
+git add packages/cli/src/runtime/mount-session-main.ts test/ai-ezio-outbound-relay.test.ts
+git commit -m "M6: extract+test ezio-originated relay handoff (senderAgent=ezio)"
 ```
 
 ---
@@ -912,8 +1001,21 @@ Proves the M6 done-when: a complete `spec-driven-development` run with ezio as
 implementer and claude as reviewer over the real broker/protocol, only the LLM
 mocked. Models the M5 e2e (`scripts/ai-ezio-mount-relay-e2e.mjs`).
 
+**Acceptance bar (strict — do not weaken):** the run uses the **real** stack with
+**both** agents mounted through their real mount paths — ezio via the real hax
+engine, claude via the real `whisper collab mount claude` adapter — and **only the
+agent models are mocked**: ezio's via `HAX_PROVIDER=mock`, claude's via a scripted
+fake model command pointed to by `AI_WHISPER_CLAUDE_CMD` (the claude adapter parses
+its stdout through `mockProviderReplySchema`, exactly the deterministic seam M5
+used for hax). **No mock-backed substitute for the claude role**, and success
+requires the workflow reach the **terminal `done`** status — not a mid-run
+`running` state. The evaluator/orchestrator runs for real (the user's env has it
+configured); the e2e asserts the start preflight is not evaluator-blocked and
+FAILS loudly if it is, rather than degrading.
+
 **Files:**
 - Create: `scripts/ai-ezio-full-workflow-e2e.mjs`
+- Create: `scripts/e2e/fake-claude-model.mjs` (deterministic claude model stub)
 - Modify: `package.json` (add `e2e:ai-ezio-workflow` script)
 
 - [ ] **Step 1: Add the npm script**
@@ -924,52 +1026,76 @@ In `package.json` scripts, after `"e2e:ai-ezio-mount"`, add:
 "e2e:ai-ezio-workflow": "node scripts/ai-ezio-full-workflow-e2e.mjs",
 ```
 
-- [ ] **Step 2: Write the e2e driver**
+- [ ] **Step 2: Write the deterministic claude model stub**
+
+Create `scripts/e2e/fake-claude-model.mjs` — a tiny script that stands in for the
+`claude` binary so the claude **mount path is real but its model is deterministic**
+(only the LLM is mocked). It must emit, on stdout, JSON replies valid against
+`mockProviderReplySchema` (`{ kind, content, transitionIntent? }`, where `kind ∈
+{answer, review, clarification, failure}`) that **approve/advance** each SDD phase
+so the workflow can reach `done`:
+- for a review request → `{ "kind": "review", "content": "LGTM", "transitionIntent": "completed" }`
+- otherwise → `{ "kind": "answer", "content": "ok" }`
+
+Inspect `packages/adapter-claude/src/parse-claude-output.ts` for the exact
+expected stdout framing the adapter parses, and shape the stub's output to match.
+Wire it via `AI_WHISPER_CLAUDE_CMD=<abs path to this stub>` in the claude mount's
+child env. (Author the replies so the real evaluator accepts completion; if a
+phase needs a specific transitionIntent to advance, emit it.)
+
+- [ ] **Step 3: Write the e2e driver**
 
 Create `scripts/ai-ezio-full-workflow-e2e.mjs`. Reuse the M5 script's scaffolding
 (temp state root = workspace, `AI_WHISPER_STATE_ROOT`, `HAX_PROVIDER=mock`,
-`AI_EZIO_HAX_BIN`, the observer `createBrokerRuntime` on the daemon's port). The
-new shape:
+`AI_EZIO_HAX_BIN`, the observer `createBrokerRuntime` on the daemon's port). Shape:
 
-1. Spawn `whisper collab mount ezio` in a pty (as in M5).
-2. Spawn `whisper collab mount claude` in a second pty (claude reviewer). If the
-   environment lacks a real claude CLI, fall back to mounting a second mock-backed
-   agent the same way ezio is mounted — the assertion target is the role
-   resolution + handoff flow, not claude's content; document this in a comment.
+1. Spawn `whisper collab mount ezio` in a pty (child env: `HAX_PROVIDER=mock`,
+   `AI_EZIO_HAX_BIN`, as in M5).
+2. Spawn the **real** `whisper collab mount claude` in a second pty, child env
+   adding `AI_WHISPER_CLAUDE_CMD=<abs>/scripts/e2e/fake-claude-model.mjs` (run via
+   `process.execPath` if the stub is a `.mjs`). Do **not** substitute a second
+   ezio/mock mount for the claude role — if the claude mount cannot bind, FAIL.
 3. Wait until BOTH `ezio` and `claude` bindings report `bound` via
-   `broker.control.listSessionBindings(collabId)`.
-4. Write a tiny spec file under the temp workspace (a 3-line markdown plan is
-   enough for the mock provider).
-5. Start the workflow with explicit roles:
+   `broker.control.listSessionBindings(collabId)` (deadline ~30s; FAIL + log tail
+   on timeout).
+4. Assert the workflow-start preflight is not evaluator-blocked: read
+   `broker.control` daemon status / evaluator status; if blocked, FAIL with the
+   remediation message (do not proceed degraded).
+5. Write a small but real spec file under the temp workspace (enough for the SDD
+   phases to have something to act on).
+6. Start the workflow with explicit roles:
    `sh(["workflow", "start", "--type=spec-driven-development", "--spec", specPath, "--implementer", "ezio", "--reviewer", "claude"])`.
-   Assert stdout matches `Workflow started: wf_...` and capture the id.
-6. Assert the persisted role bindings resolved to ezio/claude:
+   Assert stdout matches `Workflow started: wf_...`; capture the id.
+7. Assert persisted role bindings resolved to ezio/claude:
    `broker.control.getWorkflow(workflowId).roleBindings` →
    `{ implementer: "ezio", reviewer: "claude" }`.
-7. Drive to a terminal state: poll `broker.control.getWorkflow(workflowId).status`
-   (and/or `listRelayHandoffs`) for up to ~90s. Assert at least one handoff with
-   `senderAgent === "ezio"` AND one with `targetAgent === "ezio"` were recorded
-   (both directions), and that the workflow reaches a non-error terminal/progress
-   state (`running` past round 1, `done`, or a clean phase transition — not
-   `halted`). On `halted`, FAIL and print `haltReason` + the last ~2500 chars of
-   the mount logs.
-8. `cleanup()` (kill ptys, `collab stop`, rm temp) on every exit path; `exit(0)`
-   on success with an `OK:` line, `exit(1)` with a `FAIL:` line + log tail.
+8. **Drive to completion:** poll `broker.control.getWorkflow(workflowId).status`
+   for up to ~180s. **Success requires `status === "done"`.** On `halted` or
+   `canceled`, FAIL immediately and print `haltReason` + the last ~2500 chars of
+   both mount logs. On timeout without `done`, FAIL.
+9. Additionally assert bidirectional handoffs were recorded: at least one
+   `senderAgent === "ezio"` AND one `targetAgent === "ezio"` in
+   `broker.control.listRelayHandoffs(collabId, …)`.
+10. `cleanup()` (kill both ptys, `collab stop`, rm temp) on every exit path;
+    `exit(0)` with an `OK:` line only when `done` + both assertions hold; else
+    `exit(1)` with a `FAIL:` line + log tail.
 
 Follow the M5 script's helpers verbatim (`sh`, `sleep`, `now`, `cleanup`,
-deadline loops) so behavior and timeouts match the proven pattern.
+deadline loops). Increase the M5 `AI_WHISPER_IDLE_THRESHOLD_MS` only if needed for
+the multi-round flow; keep it explicit.
 
-- [ ] **Step 3: Build, then run the e2e**
+- [ ] **Step 4: Build, then run the e2e**
 
 Run: `pnpm -r build && pnpm run e2e:ai-ezio-workflow`
-Expected: prints `OK:` lines and exits 0. If it halts on a missing claude CLI,
-apply the Step-2 fallback (second mock-backed mount) and re-run.
+Expected: prints `OK:` lines and exits 0 with the workflow at `status === "done"`.
+If it halts, read `haltReason` + the log tails and fix the stub replies / role
+wiring — do **not** relax the `done` requirement or substitute a mock claude.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```sh
-git add scripts/ai-ezio-full-workflow-e2e.mjs package.json
-git commit -m "M6: full spec-driven-development e2e with ezio implementer + claude reviewer"
+git add scripts/ai-ezio-full-workflow-e2e.mjs scripts/e2e/fake-claude-model.mjs package.json
+git commit -m "M6: full SDD e2e to done — real ezio+claude mounts, only models mocked"
 ```
 
 ---
@@ -1020,9 +1146,15 @@ then push). Do not merge to master without the gate fully green.
   → explicit CLI-boundary test (Task 10).
 - **ezio `toolFamily` is `"hax"`** (not `"ezio"`) → companion-agent-loop fallback
   maps `"hax"` → `"ezio"` (Task 3, Step 3).
-- **Missing claude CLI in CI** → e2e falls back to a second mock-backed mount,
-  documented, since the assertion target is role/handoff flow (Task 11).
-- **Workflow halts** → e2e fails loudly with `haltReason` + log tail (Task 11).
+- **Outbound `@@` sender contract** → `buildRelayHandoffInput` is unit-tested to
+  set `senderAgent = mountTarget` (Task 8), proving the handoff layer — not just
+  the parser.
+- **e2e determinism without faking the stack** → claude's mount path is real;
+  only its *model* is mocked via `AI_WHISPER_CLAUDE_CMD` (Task 11), mirroring
+  `HAX_PROVIDER=mock` for ezio. No mock-backed substitute for the claude role.
+- **e2e must reach completion** → success requires terminal `status === "done"`;
+  `halted`/`canceled`/timeout FAIL loudly with `haltReason` + both log tails
+  (Task 11). Evaluator-blocked preflight FAILs rather than degrading.
 
 ## Out of scope (per spec — do not implement)
 
