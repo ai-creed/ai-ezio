@@ -16,7 +16,7 @@
 
 **Verification gate (before final commit):**
 - ai-ezio: `meson compile -C vendor/hax/build && meson test -C vendor/hax/build` and `pnpm -r build && pnpm -r test`
-- ai-whisper: `pnpm -r build && pnpm typecheck && pnpm lint && pnpm test && pnpm run e2e:ai-ezio-mount`
+- ai-whisper: `pnpm -r build && pnpm typecheck && pnpm lint && pnpm test && pnpm run e2e:ai-ezio-mount && pnpm run e2e:ai-ezio-workflow` (**both** e2e — the workflow e2e re-verifies unchanged M6 behavior through the adapter)
 
 ---
 
@@ -346,6 +346,8 @@ Expected: PASS (the two new tests + the existing lifecycle test). If the test na
 
 **Files:**
 - Modify: `vendor/hax/src/agent.c`
+- Create: `vendor/hax/tests/protocol/test_mount_repl.c` (engine-level test)
+- Modify: `vendor/hax/tests/meson.build` (register the test)
 
 - [ ] **Step 1: Fix the existing `emit_status` call (EMIT_CTL_STATUS) to pass effort**
 
@@ -402,6 +404,52 @@ meson compile -C vendor/hax/build && meson test -C vendor/hax/build
 Expected: full build clean; all meson tests PASS (incl. `emit` and `mount_chrome` —
 the human-display suppression is unchanged, so `mount_chrome` must still pass).
 
+- [ ] **Step 4b: Write the engine-level mount-mode test (real hax + mock script)**
+
+The Task-2 emitter unit tests call `emit_status`/`emit_set_usage` directly — they
+do NOT prove `agent.c` actually auto-emits `status` after `ready` in mount mode or
+passes real mock `EV_DONE` usage into the emitter. Add a committed **engine-level**
+test that spawns the real hax binary (mock provider) over the protocol fds and
+asserts the wire output — modeled on `vendor/hax/tests/protocol/test_observer_e2e.c`
+(its `spawn_hax` fork/exec + event-fd drain) and `test_mount_chrome.c` (the
+`--mount-mode` flags). The mock is scriptable via `HAX_MOCK_SCRIPT`
+(`vendor/hax/src/providers/mock.c`): directives `text <msg>`,
+`usage in=N out=M [cached=K]`, `end-turn`.
+
+Create `vendor/hax/tests/protocol/test_mount_repl.c`:
+- Write a temp mock-script file (via `mkstemp`) containing:
+  `text Hi\nusage in=100 out=50 cached=10\nend-turn\n`.
+- `spawn_hax(hax, ...)` with `--mount-mode --protocol-fd=<w> --control-fd=<r>` and
+  child env `HAX_PROVIDER=mock`, `HAX_MOCK_SCRIPT=<temp>`, `HAX_NO_SESSION=1`.
+- Write one `{"type":"submit","text":"go"}\n` to the control fd, then drain the
+  event fd until `idle`, collecting every JSONL line.
+- Assert, by walking the parsed lines in order:
+  1. a `ready` line appears, and the **next** event is a `status` line carrying
+     non-empty `provider`, non-empty `model`, and an `effort` key present
+     (string; may be empty) — proving the mount-mode auto-emit after ready.
+  2. the `assistant_turn_finished` line carries `usage` with
+     `contextTokens == 150` (input+output), `outputTokens == 50`,
+     `cachedTokens == 10` — proving `agent.c` fed the mock `EV_DONE` counts via
+     `emit_set_usage` (`context_limit` may be 0 under mock → `contextLimit`
+     legitimately absent; do not require it).
+- Unlink the temp script; close fds; `waitpid` the child.
+
+Register it in `vendor/hax/tests/meson.build` (mirror the `observer_e2e` block):
+
+```meson
+# Engine-level: mount-mode auto-status-after-ready + assistant_turn_finished.usage
+# from a scripted mock turn (exercises agent.c wiring, not just emit.c).
+test_mount_repl = executable('test_mount_repl',
+    sources: ['protocol/test_mount_repl.c'],
+    dependencies: [jansson],
+)
+test('protocol/mount_repl', test_mount_repl, args: [hax_exe], depends: hax_exe)
+```
+
+Run: `clang-format -i vendor/hax/tests/protocol/test_mount_repl.c && meson compile -C vendor/hax/build && meson test -C vendor/hax/build mount_repl`
+Expected: PASS. (If meson needs a reconfigure after adding the test target, run
+`meson setup --reconfigure vendor/hax/build` first.)
+
 - [ ] **Step 5: Manual protocol smoke (mock provider)**
 
 Confirm the wire output carries the new fields end to end:
@@ -421,8 +469,8 @@ is to eyeball `status.effort` + `assistant_turn_finished.usage` on fd 3.)
 
 ```sh
 cd /Users/vuphan/Dev/ai-ezio
-git add vendor/hax/src/protocol/emit.c vendor/hax/src/protocol/emit.h vendor/hax/tests/protocol/test_emit.c vendor/hax/src/agent.c
-git commit -m "M7 emitter: status.effort + auto-status-on-ready (mount) + turn usage"
+git add vendor/hax/src/protocol/emit.c vendor/hax/src/protocol/emit.h vendor/hax/tests/protocol/test_emit.c vendor/hax/src/agent.c vendor/hax/tests/protocol/test_mount_repl.c vendor/hax/tests/meson.build
+git commit -m "M7 emitter: status.effort + auto-status-on-ready (mount) + turn usage; engine-level mount test"
 ```
 
 ---
@@ -508,6 +556,24 @@ describe("createAiEzioLiveSession — REPL-look rendering (M7)", () => {
 		expect(out).not.toContain("context "); // no usage line when usage absent
 		expect(out).toContain("›"); // prompt still rendered
 	});
+
+	it("renders the banner only once across repeated status events", () => {
+		const writes: string[] = [];
+		const stdout = { write: (s: string) => (writes.push(s), true) } as never;
+		let emit!: (e: ProtocolEvent) => void;
+		createAiEzioLiveSession({
+			stdout,
+			createEngineSession: ({ onEvent }) => {
+				emit = onEvent;
+				return { start: async () => ({ type: "ready" }), submit: () => {}, submitAndWait: async () => ({ turnId: "t", content: "" }), onExit: () => {}, close: () => {} } as never;
+			},
+		}).start();
+		const status = { type: "status", model: "gpt-5.5", provider: "codex", protocol: "0.1.0", sessionId: "s", state: "idle", effort: "high" } as const;
+		emit(status); // auto-status on ready
+		emit(status); // a later M4 status control must NOT re-render the banner
+		const bannerCount = (writes.join("").match(/ezio/g) || []).length;
+		expect(bannerCount).toBe(1);
+	});
 });
 ```
 
@@ -558,13 +624,20 @@ extend `assistant_turn_finished`/`idle`. Add near the top of the function body:
 	const renderPrompt = () => input.stdout.write("\u001b[2m›\u001b[0m ");
 
 	let lastUsage: Extract<ProtocolEvent, { type: "assistant_turn_finished" }>["usage"];
+	// Banner is rendered ONCE (spec: "render the banner once"). The mount-mode
+	// auto-status-on-ready triggers it; later M4 `status` controls must NOT
+	// re-render it.
+	let bannerRendered = false;
 ```
 
 In `onEvent`, add a `status` case and extend `assistant_turn_finished` + `idle`:
 
 ```ts
 			case "status": {
-				renderBanner(event.provider, event.model, event.effort ?? "");
+				if (!bannerRendered) {
+					renderBanner(event.provider, event.model, event.effort ?? "");
+					bannerRendered = true;
+				}
 				break;
 			}
 			case "assistant_turn_finished": {
@@ -617,15 +690,29 @@ The M5 mount e2e already spawns a real `whisper collab mount ezio` (real hax,
 handback succeeds, assert the pane rendered the banner and a prompt:
 
 ```js
-// M7: the mounted pane shows a REPL-like banner on ready and a `›` prompt.
-if (!/ezio .*›/.test(mountLog)) { cleanup(); console.error("FAIL: no M7 banner in mount pane\n" + mountLog.slice(-2000)); process.exit(1); }
-if (!mountLog.includes("›")) { cleanup(); console.error("FAIL: no `›` prompt in mount pane\n" + mountLog.slice(-2000)); process.exit(1); }
-console.log("OK: M7 banner + prompt rendered in the mounted ezio pane");
+// M7: the mounted pane shows a REPL-like banner on ready AND a `›` prompt AFTER
+// the driven turn. The banner itself contains one `›` (`ezio › provider · …`),
+// so a prompt-after-turn must add at least one MORE — assert >= 2 occurrences,
+// and that a prompt appears in the pane output AFTER the banner line.
+const bannerMatch = /ezio[^\n]*›[^\n]*\n/.exec(mountLog);
+if (!bannerMatch) { cleanup(); console.error("FAIL: no M7 banner line in mount pane\n" + mountLog.slice(-2000)); process.exit(1); }
+const afterBanner = mountLog.slice(bannerMatch.index + bannerMatch[0].length);
+const promptCount = (mountLog.match(/›/g) || []).length;
+// >= 2 total `›` (banner + >= 1 post-turn prompt) AND a `›` rendered after the
+// banner line — proves the per-turn prompt, not just the banner glyph.
+if (promptCount < 2 || !afterBanner.includes("›")) {
+	cleanup();
+	console.error("FAIL: no post-turn `›` prompt after the driven turn (banner-only)\n" + mountLog.slice(-2000));
+	process.exit(1);
+}
+console.log("OK: M7 banner on ready + post-turn `›` prompt rendered in the mounted ezio pane");
 ```
 
-Place these before the final `process.exit(0)`. (The hax binary used by the e2e
-is `../ai-ezio/vendor/hax/build/hax` — rebuilt in Task 3, so the M7 status/usage
-events are emitted.)
+Place these before the final `process.exit(0)`, AFTER the existing handback proof
+(so a turn has been driven). The hax binary used by the e2e is
+`../ai-ezio/vendor/hax/build/hax` — rebuilt in Task 3, so the M7 status/usage
+events are emitted. (Note: ANSI may interleave in the pty log; match the `›` glyph
+loosely as above rather than exact escape sequences.)
 
 - [ ] **Step 2: Build + run the e2e**
 
@@ -674,9 +761,10 @@ pnpm -r build && pnpm -r test
 ai-whisper:
 ```sh
 cd /Users/vuphan/Dev/ai-whisper
-pnpm -r build && pnpm typecheck && pnpm lint && pnpm test && pnpm run e2e:ai-ezio-mount
+pnpm -r build && pnpm typecheck && pnpm lint && pnpm test && pnpm run e2e:ai-ezio-mount && pnpm run e2e:ai-ezio-workflow
 ```
-Expected: all green. Fix any lint findings inline with scoped
+Expected: all green — including `e2e:ai-ezio-workflow`, which re-verifies the M6
+full spec-driven-development run is unchanged by the adapter rendering. Fix any lint findings inline with scoped
 `// eslint-disable-next-line <rule> -- <reason>` (M5/M6 precedent). Prettier
 repo-wide drift is pre-existing and NOT a gate; eslint is the enforced gate.
 
@@ -708,10 +796,23 @@ commit as the submodule base if ai-ezio tracks `vendor/hax` by pinned commit**
   C test + adapter "skips unreported" test).
 - **Empty `effort`** → banner shows `provider · model` with no trailing `· ` (adapter
   "omits the effort segment" test).
-- **status auto-emitted on ready in mount mode** → adapter renders the banner before
-  any turn; in non-mount protocol sessions the banner only appears if a `status`
-  control is sent (unchanged M4 behavior).
+- **status auto-emitted on ready in mount mode** → proven at the engine level
+  (Task 3 `test_mount_repl`: real hax + mock asserts `status` is the event right
+  after `ready`, carrying provider/model/effort); the adapter renders the banner
+  before any turn. In non-mount protocol sessions the banner only appears if a
+  `status` control is sent (unchanged M4 behavior).
+- **Banner rendered once** → the adapter guards on `bannerRendered`, so a later
+  M4 `status` control does not duplicate the banner (adapter "renders the banner
+  only once" test).
+- **Usage from the real mock turn path** → engine-level `test_mount_repl` scripts
+  the mock (`usage in=100 out=50 cached=10`) and asserts
+  `assistant_turn_finished.usage` = `{contextTokens:150, outputTokens:50, cachedTokens:10}`,
+  catching an `agent.c` wiring regression (not just the direct emitter unit test).
 - **No usage on a turn** → the `›` prompt is still rendered (REPL look preserved).
+- **Post-turn prompt, not just banner glyph** → the mount e2e asserts ≥2 `›`
+  occurrences and a `›` after the banner line, proving a per-turn prompt.
+- **M6 behavior unchanged** → the full gate runs **both** e2e
+  (`e2e:ai-ezio-mount` + `e2e:ai-ezio-workflow`), re-verifying the M6 SDD run.
 - **Human REPL + mount-chrome suppression unchanged** → `test_mount_chrome` still
   passes; `display_usage`/banner suppression in mount mode is untouched (we emit
   protocol data, we don't re-enable the human rendering).
