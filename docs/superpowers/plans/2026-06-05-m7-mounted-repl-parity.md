@@ -582,7 +582,8 @@ describe("createAiEzioLiveSession — REPL-look rendering (M7)", () => {
 		expect(out).toMatch(/context 8\.7k \/ 256k \(3%\)/); // usage line (binary k, mirrors hax format_tokens)
 		expect(out).toContain("out 595");
 		expect(out).toContain("cached 2.6k");
-		expect(out).toContain("›"); // prompt glyph
+		// banner › + post-turn prompt › → >= 2 (not satisfiable by the banner alone)
+		expect((out.match(/›/g) || []).length).toBeGreaterThanOrEqual(2);
 	});
 
 	it("omits the effort segment when empty and skips unreported usage fields", () => {
@@ -603,7 +604,10 @@ describe("createAiEzioLiveSession — REPL-look rendering (M7)", () => {
 		expect(out).toContain("p");
 		expect(out).not.toMatch(/· · /); // no empty effort segment
 		expect(out).not.toContain("context "); // no usage line when usage absent
-		expect(out).toContain("›"); // prompt still rendered
+		// The banner itself contains one `›`; a POST-TURN prompt must add another.
+		// `toContain("›")` would be satisfied by the banner alone, so count >= 2 to
+		// prove the prompt is rendered even when usage is absent (spec line 106).
+		expect((out.match(/›/g) || []).length).toBeGreaterThanOrEqual(2);
 	});
 
 	it("renders the banner only once across repeated status events", () => {
@@ -860,7 +864,9 @@ commit as the submodule base if ai-ezio tracks `vendor/hax` by pinned commit**
   (`-1` counts) → asserts the second `assistant_turn_finished` has **no `usage`
   key**. Catches an `agent.c`/mock-`EV_DONE` wiring regression in either direction
   — neither the direct emitter unit test nor a present-only engine test would.
-- **No usage on a turn** → the `›` prompt is still rendered (REPL look preserved).
+- **No usage on a turn** → the post-turn `›` prompt is still rendered; the adapter
+  test asserts **≥2** `›` (banner + prompt), so a regression that drops the prompt
+  when usage is absent fails even though the banner's own `›` remains.
 - **Post-turn prompt, not just banner glyph** → the mount e2e asserts ≥2 `›`
   occurrences and a `›` after the banner line, proving a per-turn prompt.
 - **M6 behavior unchanged** → the full gate runs **both** e2e
