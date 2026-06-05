@@ -47,36 +47,67 @@ and proves a complete `spec-driven-development` run with ezio in a role.
 export type AgentType = (typeof agentTypes)[number]; // "codex" | "claude" | "ezio"
 ```
 
-**Replace** the inline `"codex" | "claude"` unions with `AgentType` in (file →
-what it types):
+### The contract (precise)
 
-- `packages/broker/src/runtime/broker-event-bus.ts` — `phase-started`
-  implementer/reviewer; `round-started` sender/target.
-- `packages/broker/src/runtime/workflow-registry.ts` — `WorkflowDefinition`
-  `defaultImplementer`/`defaultReviewer` types (defaults **stay** literal
-  `"claude"`/`"codex"`).
-- `packages/broker/src/runtime/workflow-driver.ts` — `roleBindings`,
-  `isAgentBound`, `sender`/`target` locals.
-- `packages/broker/src/control/workflow-control.ts` — `createWorkflow`
-  roleBindings, `beginPhaseRun` sender/target.
-- `packages/broker/src/control/create-control-service.ts` — `beginPhaseRun`
-  sender/target.
-- `packages/broker/src/storage/repositories/workflow-repository.ts` —
-  `roleBindings` record value type (type + SQL parse).
-- `packages/broker/src/storage/repositories/dashboard-repository.ts` —
-  `owner`/`waiting` turn-state types (keep `"none"`/`null`).
-- `packages/broker/src/storage/repositories/session-repository.ts` —
-  `agent_type`.
-- `packages/broker/src/storage/repositories/attach-claim-repository.ts` —
-  `agent_type`.
-- `packages/cli/src/runtime/companion-agent-loop.ts` — fallback agent mapping
-  (map `toolFamily === "hax"` → `"ezio"`; codex/claude unchanged).
-- `packages/cli/src/bin/companion-agent.ts` — accept `"ezio"` arg + message.
-- `packages/cli/src/commands/workflow/start.ts` — see Work area 2.
+`AgentType` is the **single canonical** agent-type union. No active module may
+inline-declare an agent-type union — neither the two-agent `"codex" | "claude"`
+(in any spacing/order) **nor** the already-widened three-agent
+`"codex" | "claude" | "ezio"` (in any order). Every such occurrence imports and
+uses `AgentType`. Exactly two exceptions:
+
+1. `packages/shared/src/literals.ts` — the `agentTypes` literal array and the
+   `AgentType` definition itself.
+2. Sentinel-augmented unions keep their sentinel: write `AgentType | "none"` or
+   `AgentType | null` (e.g. dashboard turn-state `owner`/`waiting`), never a
+   re-spelled member list.
+
+**Excluded from the sweep:** `packages/cli/deprecated/**` (dead code — left
+as-is), `**/dist/**` (build output), and `**/*.test.ts` fixtures that
+intentionally exercise a literal.
+
+### Discovery method (do not rely on a hand-enumerated list)
+
+The implementer must **find every occurrence by grep**, not trust the
+illustrative list below — a hand list drifts. Run, against active source only:
+
+```sh
+# two-agent unions still to widen
+rg -n '"codex"\s*\|\s*"claude"' packages --glob '!**/dist/**' --glob '!**/deprecated/**' --glob '!**/*.test.ts'
+# already-widened triples that must collapse to AgentType (~59 at spec time)
+rg -n '"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"\s*\|\s*"(codex|claude|ezio)"' packages --glob '!**/dist/**' --glob '!**/deprecated/**' --glob '!**/*.test.ts'
+```
+
+Convert **all** hits to `AgentType` (member-only declarations) or
+`AgentType | <sentinel>` (sentinel-augmented). The illustrative
+not-exhaustive surface map:
+
+- **Broker runtime:** `broker-event-bus.ts` (`phase-started`
+  implementer/reviewer; `round-started` sender/target); `workflow-registry.ts`
+  (`WorkflowDefinition` `defaultImplementer`/`defaultReviewer` types — defaults
+  **stay** literal `"claude"`/`"codex"`); `workflow-driver.ts` (`roleBindings`,
+  `isAgentBound`, `sender`/`target`).
+- **Broker control:** `workflow-control.ts` (`createWorkflow` roleBindings,
+  `beginPhaseRun` sender/target); `create-control-service.ts` (`beginPhaseRun`
+  sender/target **and** `recordCaptureDiagnostic` `targetProvider` at ~`:1218`,
+  which M5 deliberately kept narrow — M6 widens it).
+- **Broker repositories:** `workflow-repository.ts` (`roleBindings` value type +
+  SQL parse); `dashboard-repository.ts` (`owner`/`waiting` → `AgentType |
+  "none"` / `AgentType | null`); `session-repository.ts` (`agent_type`);
+  `attach-claim-repository.ts` (`agent_type`);
+  `relay-capture-diagnostics-repository.ts` (`targetProvider`, both type and the
+  `as` cast — see Work area 3); `relay-handoff-repository.ts` (any re-declared
+  triple).
+- **CLI:** `runtime/companion-agent-loop.ts` (fallback mapping: `toolFamily ===
+  "hax"` → `"ezio"`; codex/claude unchanged); `bin/companion-agent.ts` (accept
+  `"ezio"` arg + message); `commands/workflow/start.ts` (see Work area 2);
+  `commands/workflow/list.ts` and `commands/workflow/inspect.ts` (any
+  re-declared union); `create-cli.ts` — the **`workflow start` action opts**
+  (`implementer`/`reviewer`, ~`:429-430`) and the **`skill install` action
+  opts** + `.choices` (see Work area 4).
 
 Rule: import `AgentType` from `@ai-whisper/shared`; do not re-declare the union.
-Where a type legitimately needs a narrower set (e.g. `"none"`/`null` sentinels),
-keep the sentinel and union it with `AgentType`.
+A passing typecheck is necessary but **not sufficient** — the drift-prevention
+guard (see Testing) is the proof the contract holds.
 
 ## Work area 2 — role resolution (replacement model)
 
@@ -127,7 +158,18 @@ Covered by a regression test; no new code.
 
 ## Work area 4 — skill install
 
-`packages/cli/src/commands/skill/install.ts`:
+Two files — the helper **and** the user-visible CLI parser. Widening only the
+helper leaves `whisper skill install --target ezio` rejected at the command
+boundary, so both are mandatory.
+
+`packages/cli/src/create-cli.ts` (the actual command — the gate users hit):
+
+- The `skill install` `--target` option `.choices([...])` adds `"ezio"`:
+  `.choices(["claude", "codex", "ezio", "all"])` (~`:563`). Without this,
+  Commander rejects `--target ezio` before `runSkillInstall` is ever called.
+- The action opts type widens: `target: "claude" | "codex" | "ezio" | "all"`.
+
+`packages/cli/src/commands/skill/install.ts` (the helper):
 
 - `SkillInstallTarget = "claude" | "codex" | "ezio" | "all"`.
 - `VALID_TARGETS` adds `"ezio"`; the `"all"` fan-out becomes
@@ -152,6 +194,15 @@ function aiEzioSkillsDir(home: string, env = process.env): string {
 
 ## Testing
 
+**Drift-prevention guard (the proof for the `AgentType` contract):** a test that
+greps the active source tree (excluding `**/dist/**`, `**/deprecated/**`,
+`**/*.test.ts`, and `packages/shared/src/literals.ts`) and **fails if any inline
+agent-type union remains** — both the two-agent `"codex" | "claude"` and the
+three-agent `"codex" | "claude" | "ezio"` (any spacing/order). This is what makes
+the "every inline union is gone / no future drift" requirement verifiable; a
+green typecheck alone does not prove it (a re-declared triple typechecks fine).
+The guard runs the two `rg` patterns from Work area 1 and asserts zero hits.
+
 **Unit (vitest):**
 
 - `AgentType` is exported and equals the `agentTypes` element union (a
@@ -163,8 +214,13 @@ function aiEzioSkillsDir(home: string, env = process.env): string {
 - `parseCallerAgent("ezio")` → `"ezio"`; unknown → `null`.
 - `parseRelayDirective("@@ezio do x")` → target `"ezio"`; `@@ezio[bad]` rejected;
   `getRelayDirectiveError` mentions ezio.
-- `skill install --target ezio` writes a skill under the ai-ezio dir (use a
-  fake `XDG_CONFIG_HOME`/`HOME`); `--target all` writes to all three.
+- **Skill install helper:** `runSkillInstall({ target: "ezio" })` writes a skill
+  under the ai-ezio dir (fake `XDG_CONFIG_HOME`/`HOME`); `--target all` writes to
+  all three (claude, codex, ezio).
+- **Skill install CLI boundary** (the gap the helper test misses): the parser
+  built by `createCli()` **accepts** `skill install --target ezio` and routes it
+  to `runSkillInstall` with `target: "ezio"` — i.e. `"ezio"` is in the
+  Commander `.choices`, so the command is not rejected before the helper runs.
 - ezio provider `getCapabilities().supportsRelayInterception === true`.
 
 **Integration (real stack, mock LLM):** extend the M5 e2e
