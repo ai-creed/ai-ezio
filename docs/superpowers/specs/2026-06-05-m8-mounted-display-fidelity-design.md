@@ -129,10 +129,11 @@ Driven entirely by existing protocol events. All of this lives in
   stdout (and, where noted, observable side effects). Each of these is a REQUIRED
   committed case — the wording maps 1:1 to a behavioral requirement above:
   - **Banner once** — repeated `status` events render the banner exactly once.
-  - **No-raw-delta + relay capture (req. "Markdown at turn end"):** an
-    `assistant_delta` does **not** appear in the pane stdout, while a registered
-    `onProviderOutput` handler **does** receive the delta text — proving deltas
-    are suppressed from the pane but still forwarded for relay capture.
+  - **No-raw-delta (renderer layer):** feeding an `assistant_delta` writes
+    **nothing** to the pane stdout (the renderer suppresses raw deltas). This is
+    the renderer's half of the requirement; the `onProviderOutput` forwarding half
+    is asserted at the live-session layer below (the renderer does not own
+    handlers).
   - **Markdown at turn end:** `assistant_turn_finished.content` renders as the
     formatted markdown block (via `render-markdown.ts`).
   - **Spinner shown then cleared:** after `user_turn_started` the spinner is
@@ -155,6 +156,14 @@ Driven entirely by existing protocol events. All of this lives in
   - **Error → prompt recovery (req. "render red then return to a prompt"):** an
     `error` event renders red AND is followed by a prompt glyph, so the pane is
     usable again after an error (assert both the red error and the trailing prompt).
+- **`create-ai-ezio-live-session.ts`** (vitest, adapter integration): the
+  live-session owns the `InteractiveSessionController` handler path, so the
+  relay-capture half of the no-raw-delta requirement is asserted here — a
+  registered `onProviderOutput` handler **receives** the `assistant_delta` text
+  (proving deltas are still forwarded for relay capture even though the renderer
+  suppresses them from the pane). Together with the renderer's "no-raw-delta"
+  case above, this covers the full "stop writing raw deltas to stdout, still
+  forward to `onProviderOutput`" requirement across the correct two layers.
 - **hax** (`meson`): emitter unit test for `tool_call_started.args` /
   `tool_call_finished.output`/`isDiff`; extend the engine-level `test_mount_repl`
   to drive a scripted mock **tool** turn and assert the args/output/isDiff arrive
