@@ -68,16 +68,22 @@ Driven entirely by existing protocol events. All of this lives in
 - **Thinking spinner.** After `user_turn_started`, show an animated braille
   spinner + `thinking…` on its own line; clear it (carriage-return + clear-line)
   on the first real output of the turn (a `tool_call_started` or the
-  `assistant_turn_finished` content). Adapter-side timer (~80ms frames); never
-  left running across `idle`.
+  `assistant_turn_finished` content). Adapter-side timer (~80ms frames); the
+  timer is **stopped/cleared on `idle`** and on any turn-ending event, so it is
+  never left running across `idle` (no leaked interval). The timer is supplied
+  through an **injectable seam** (`setInterval`/`clearInterval` or a clock passed
+  to the renderer) so the idle-safety case is deterministically testable.
 - **Block separators.** Exactly one blank line between logical blocks — banner,
   tool calls, assistant text, usage line, prompt — mirroring hax's `disp`
   "exactly one blank line" rule. **Fixes the M7 usage-glue bug** (usage line now
   starts on its own line).
 - **Prompt parity.** Render hax's magenta-bold `❯` (`PROMPT_UTF8`) instead of the
-  dim `›`, with an ASCII `>` fallback when the locale isn't UTF-8.
-- **Error rendering.** `error` events render in red (`▌` stripe + message), then
-  return to a prompt.
+  dim `›`, with an ASCII `>` fallback when the locale isn't UTF-8. UTF-8 detection
+  is an **injectable seam** on the renderer (e.g. a `utf8?: boolean` option,
+  defaulting to a locale probe) so both the `❯` and the `>` fallback paths are
+  unit-testable without changing the process locale.
+- **Error rendering.** `error` events render in red (`▌` stripe + message) **and
+  are followed by a prompt**, so the pane returns to a usable state after an error.
 - **`render-markdown.ts`** — hand-rolled, no dependency (~200 lines). Handles:
   ATX headers (`#`..`######`), bold/italic (`**`/`*`/`_`), inline code
   (`` `code` ``), fenced code blocks (```` ``` ````) rendered as a dim/indented
@@ -120,10 +126,35 @@ Driven entirely by existing protocol events. All of this lives in
   inline code, fenced block, list, blockquote, link, mixed) → expected ANSI;
   plain text passes through; malformed markdown degrades gracefully.
 - **`mounted-renderer.ts`** (vitest): feed event sequences, assert the captured
-  stdout — banner once; spinner shown then cleared; a tool call renders
-  `⏺ name · args` then its diff/preview; `assistant_turn_finished` renders the
-  markdown block; usage line begins on its own line (separator fix); `❯` prompt
-  after each turn; an `error` event renders red.
+  stdout (and, where noted, observable side effects). Each of these is a REQUIRED
+  committed case — the wording maps 1:1 to a behavioral requirement above:
+  - **Banner once** — repeated `status` events render the banner exactly once.
+  - **No-raw-delta + relay capture (req. "Markdown at turn end"):** an
+    `assistant_delta` does **not** appear in the pane stdout, while a registered
+    `onProviderOutput` handler **does** receive the delta text — proving deltas
+    are suppressed from the pane but still forwarded for relay capture.
+  - **Markdown at turn end:** `assistant_turn_finished.content` renders as the
+    formatted markdown block (via `render-markdown.ts`).
+  - **Spinner shown then cleared:** after `user_turn_started` the spinner is
+    written; the first real output (a `tool_call_started` or the finished content)
+    clears it (carriage-return + clear-line in stdout).
+  - **Spinner idle-safety (req. "never left running across `idle`"):** drive
+    `user_turn_started` → `idle` (or turn completion) and assert the spinner's
+    timer/interval is stopped/cleared and no further spinner frames are written
+    after `idle` (inject a fake timer/clock so the test asserts no post-idle
+    frame and that the interval was cleared — no leaked timer).
+  - **Tool rendering:** a `tool_call_started{args}` renders `⏺ name · args`; a
+    `tool_call_finished{output,isDiff:true}` renders a colored unified diff; an
+    `isDiff:false` output renders a dim truncated preview; an error status renders
+    red.
+  - **Usage separator (M7 glue-bug fix):** the usage line begins on its own line
+    (preceded by a newline / block separator), not appended to the prior content.
+  - **Prompt parity — UTF-8 and ASCII fallback:** with a UTF-8 locale the prompt
+    is `❯`; with a non-UTF-8 locale (inject the locale/`isUtf8` seam) the prompt
+    is the ASCII `>` fallback. Both committed.
+  - **Error → prompt recovery (req. "render red then return to a prompt"):** an
+    `error` event renders red AND is followed by a prompt glyph, so the pane is
+    usable again after an error (assert both the red error and the trailing prompt).
 - **hax** (`meson`): emitter unit test for `tool_call_started.args` /
   `tool_call_finished.output`/`isDiff`; extend the engine-level `test_mount_repl`
   to drive a scripted mock **tool** turn and assert the args/output/isDiff arrive
