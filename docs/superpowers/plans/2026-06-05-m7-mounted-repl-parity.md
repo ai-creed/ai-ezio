@@ -416,29 +416,50 @@ asserts the wire output — modeled on `vendor/hax/tests/protocol/test_observer_
 (`vendor/hax/src/providers/mock.c`): directives `text <msg>`,
 `usage in=N out=M [cached=K]`, `end-turn`.
 
+The test must cover BOTH usage cases **at the engine layer** (the spec's
+mock-engine acceptance criterion requires `usage` present when the backend reports
+counts AND omitted when it reports none): drive **two** mock turns in one session —
+the first scripts usage counts, the second scripts none (`empty_usage` = `-1`). The
+mock plays "one turn of directives per `stream()` call, in file order", so a single
+script file with two `end-turn`-delimited turns yields turn 1 (with usage) then
+turn 2 (without).
+
 Create `vendor/hax/tests/protocol/test_mount_repl.c`:
-- Write a temp mock-script file (via `mkstemp`) containing:
-  `text Hi\nusage in=100 out=50 cached=10\nend-turn\n`.
+- Write a temp mock-script file (via `mkstemp`) containing TWO turns:
+  ```
+  text Hi
+  usage in=100 out=50 cached=10
+  end-turn
+  text Bye
+  end-turn
+  ```
+  (Turn 1 reports usage; turn 2 reports none → `empty_usage` `-1/-1/-1`.)
 - `spawn_hax(hax, ...)` with `--mount-mode --protocol-fd=<w> --control-fd=<r>` and
   child env `HAX_PROVIDER=mock`, `HAX_MOCK_SCRIPT=<temp>`, `HAX_NO_SESSION=1`.
-- Write one `{"type":"submit","text":"go"}\n` to the control fd, then drain the
-  event fd until `idle`, collecting every JSONL line.
+- Write TWO submits to the control fd up front
+  (`{"type":"submit","text":"go"}\n` twice), then drain the event fd until the
+  **second** `idle`, collecting every JSONL line.
 - Assert, by walking the parsed lines in order:
   1. a `ready` line appears, and the **next** event is a `status` line carrying
      non-empty `provider`, non-empty `model`, and an `effort` key present
      (string; may be empty) — proving the mount-mode auto-emit after ready.
-  2. the `assistant_turn_finished` line carries `usage` with
+  2. the **first** `assistant_turn_finished` line carries `usage` with
      `contextTokens == 150` (input+output), `outputTokens == 50`,
      `cachedTokens == 10` — proving `agent.c` fed the mock `EV_DONE` counts via
      `emit_set_usage` (`context_limit` may be 0 under mock → `contextLimit`
      legitimately absent; do not require it).
+  3. the **second** `assistant_turn_finished` line has **no `usage` key at all**
+     (`json_object_get(o, "usage") == NULL`) — proving `agent.c`/the emitter omit
+     `usage` for a real mock turn whose `EV_DONE` reported `-1` counts (the
+     engine-layer no-usage case the direct emitter unit test cannot prove).
 - Unlink the temp script; close fds; `waitpid` the child.
 
 Register it in `vendor/hax/tests/meson.build` (mirror the `observer_e2e` block):
 
 ```meson
 # Engine-level: mount-mode auto-status-after-ready + assistant_turn_finished.usage
-# from a scripted mock turn (exercises agent.c wiring, not just emit.c).
+# present (turn 1, scripted counts) AND omitted (turn 2, -1 counts) over the real
+# hax+mock path — exercises agent.c wiring, not just emit.c.
 test_mount_repl = executable('test_mount_repl',
     sources: ['protocol/test_mount_repl.c'],
     dependencies: [jansson],
@@ -804,10 +825,13 @@ commit as the submodule base if ai-ezio tracks `vendor/hax` by pinned commit**
 - **Banner rendered once** → the adapter guards on `bannerRendered`, so a later
   M4 `status` control does not duplicate the banner (adapter "renders the banner
   only once" test).
-- **Usage from the real mock turn path** → engine-level `test_mount_repl` scripts
-  the mock (`usage in=100 out=50 cached=10`) and asserts
-  `assistant_turn_finished.usage` = `{contextTokens:150, outputTokens:50, cachedTokens:10}`,
-  catching an `agent.c` wiring regression (not just the direct emitter unit test).
+- **Usage from the real mock turn path — present AND omitted** → engine-level
+  `test_mount_repl` drives two mock turns: turn 1 scripts counts
+  (`usage in=100 out=50 cached=10`) → asserts `assistant_turn_finished.usage` =
+  `{contextTokens:150, outputTokens:50, cachedTokens:10}`; turn 2 scripts none
+  (`-1` counts) → asserts the second `assistant_turn_finished` has **no `usage`
+  key**. Catches an `agent.c`/mock-`EV_DONE` wiring regression in either direction
+  — neither the direct emitter unit test nor a present-only engine test would.
 - **No usage on a turn** → the `›` prompt is still rendered (REPL look preserved).
 - **Post-turn prompt, not just banner glyph** → the mount e2e asserts ≥2 `›`
   occurrences and a `›` after the banner line, proving a per-turn prompt.
