@@ -38,8 +38,8 @@ describe("createMountedRenderer", () => {
 		const t = setup();
 		t.r.handle(STATUS); // banner
 		t.r.handle({ type: "idle" }); // prompt
-		expect(t.out()).toContain("[36m"); // banner cyan with a REAL escape
-		expect(t.out()).toContain("[95m"); // prompt bright magenta with a REAL escape
+		expect(t.out()).toContain("\u001b[36m"); // banner cyan with a REAL escape
+		expect(t.out()).toContain("\u001b[95m"); // prompt bright magenta with a REAL escape
 	});
 
 	it("renders the banner exactly once across repeated status events", () => {
