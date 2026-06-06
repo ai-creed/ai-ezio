@@ -2,6 +2,7 @@
 	"files": [],
 	"references": [
 		{ "path": "packages/protocol" },
+		{ "path": "packages/surface" },
 		{ "path": "packages/harness" },
 		{ "path": "packages/cli" }
 	]

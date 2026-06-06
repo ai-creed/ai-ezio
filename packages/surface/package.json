@@ -1,0 +1,28 @@
+{
+	"name": "@ai-ezio/surface",
+	"version": "0.1.0",
+	"description": "ai-ezio presentation surface: robust markdown renderer + mounted pane renderer",
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc --build",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@ai-ezio/protocol": "workspace:*",
+		"marked": "^15",
+		"marked-terminal": "^7"
+	},
+	"devDependencies": {
+		"@types/marked-terminal": "^6"
+	}
+}
