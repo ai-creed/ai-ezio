@@ -116,13 +116,20 @@ export function renderMarkdown(md: string, opts?: { width?: number }): string
 ## ai-whisper changes (consumer rewiring)
 
 - `packages/adapter-ai-ezio/package.json`: add
-  `"@ai-ezio/surface": "file:../../../ai-ezio/packages/surface"`; **remove**
-  `marked` and `marked-terminal` (now transitive via surface).
+  `"@ai-ezio/surface": "file:../../../ai-ezio/packages/surface"`.
 - Delete `src/render-markdown.ts` and `src/mounted-renderer.ts` (moved).
 - `src/create-ai-ezio-live-session.ts`: import `createMountedRenderer` from
   `@ai-ezio/surface` instead of `./mounted-renderer.js`. No logic change.
 - Delete `test/render-markdown.test.ts` and `test/mounted-renderer.test.ts`
   (their successors live in `@ai-ezio/surface`).
+- **Declare `marked` + `marked-terminal` in `packages/cli/package.json`
+  `dependencies`** (NOT only in `@ai-ezio/surface`). The CLI bundle inlines
+  `@ai-ezio/*` TS packages (`scripts/bundle.mjs`), so `@ai-ezio/surface` is in the
+  bundle — but its `marked`/`marked-terminal` imports are *npm* deps that the
+  bundle **externalizes**. Without the declaration the published artifact throws
+  `ERR_MODULE_NOT_FOUND` on `marked` (the exact class of bug that broke 0.5.0 on
+  `@ai-ezio/harness`). `@ai-ezio/surface` still lists them too — for its own build
+  and the future standalone CLI.
 - `pnpm install` to materialize the `file:` dep into the store.
 
 ## Testing
@@ -153,6 +160,12 @@ In ai-whisper:
 - **ai-whisper:** `pnpm install` (refresh `file:` store) → `pnpm -r build &&
   pnpm typecheck && pnpm lint && pnpm test && pnpm run e2e:ai-ezio-mount &&
   pnpm run e2e:ai-ezio-workflow`.
+- **Bundle self-containment smoke test** (catches the 0.5.0/0.5.1 class of bug):
+  after building the CLI, `npm pack` the `ai-whisper` package, install the tarball
+  into a clean temp dir (no `@ai-ezio` / workspace symlinks), and run
+  `whisper --version` — it must succeed (no `ERR_MODULE_NOT_FOUND`). This proves
+  every inlined/externalized dependency resolves from the published artifact alone.
+  Worth landing as a repeatable `scripts/` check so it can't silently regress.
 - **Hard-constraint acceptance:** a live **claude/ezio** SDD run and a live
   **codex/ezio** SDD run each reach `done` with **zero empty handbacks** (the
   capture path is untouched, but we re-prove it). A markdown table in a real ezio
