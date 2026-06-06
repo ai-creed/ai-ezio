@@ -53,8 +53,10 @@ single `.` export):
 
 ```
 ai-ezio/packages/surface/
-  package.json    name @ai-ezio/surface; deps: marked@^15, marked-terminal@^7,
-                  @ai-ezio/protocol (workspace:*)
+  package.json    name @ai-ezio/surface;
+                  deps: marked@^15, marked-terminal@^7,
+                        @ai-ezio/protocol (workspace:*)
+                  devDeps: @types/marked-terminal@^6 (see typing strategy below)
   tsconfig.json
   src/
     index.ts             re-exports renderMarkdown, createMountedRenderer, style
@@ -64,6 +66,22 @@ ai-ezio/packages/surface/
     render-markdown.test.ts
     mounted-renderer.test.ts
 ```
+
+### Typing strategy — `marked-terminal` has no bundled declarations
+`marked-terminal@7.3.0` ships only `index.js`/`index.cjs` with **no `.d.ts`**, so a
+strict NodeNext compile of `import { markedTerminal } from "marked-terminal"`
+fails with **TS7016** ("could not find a declaration file"). This would break the
+`@ai-ezio/surface` build gate (success criterion 1). The fix:
+
+- **Add `@types/marked-terminal@^6` as a `devDependency`** of `@ai-ezio/surface`.
+  This is the canonical source of the `markedTerminal(options)` signature and is
+  sufficient for the strict `tsc --build`.
+- **Fallback if the community types lag `marked@^15`:** add a one-line ambient
+  declaration `src/marked-terminal.d.ts` (`declare module "marked-terminal";`),
+  which silences TS7016 at the cost of `any`-typed options. Prefer the `@types`
+  package; use the ambient shim only if a version skew forces it.
+- The `tsc --build` in the verification gate (`pnpm -r build`) is what proves the
+  typing resolves — a missing declaration surfaces there, not at runtime.
 
 Dependency direction is unchanged (`ai-whisper → ai-ezio`):
 
