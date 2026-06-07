@@ -147,13 +147,28 @@ describe("createMountedRenderer", () => {
 		expect(a.out()).not.toContain("❯");
 	});
 
-	it("error renders red AND returns to a prompt", () => {
+	it("non-turn (fatal) error renders red AND draws its own prompt (no idle follows)", () => {
 		const t = setup({ utf8: true });
-		t.r.handle({ type: "error", message: "boom" });
+		t.r.handle({ type: "error", message: "boom" }); // no turnId → fatal/non-turn
 		const out = t.out();
 		expect(out).toContain("[31m"); // red
 		expect(out).toContain("boom");
 		expect(out).toContain("❯"); // trailing prompt — pane usable again
+		expect((out.match(/❯/g) || []).length).toBe(1);
+	});
+
+	it("turn-scoped error draws exactly ONE prompt — idle owns it, not the error", () => {
+		// Harness contract (fake-engine error mode, session.e2e.test.ts): a
+		// turn-scoped error drains to idle —
+		//   error(turnId) → assistant_turn_finished(content:"") → idle
+		// The error handler must NOT draw a prompt or the pane shows two.
+		const t = setup({ utf8: true });
+		t.r.handle({ type: "error", message: "boom", turnId: "x" });
+		t.r.handle({ type: "assistant_turn_finished", turnId: "x", content: "" });
+		t.r.handle({ type: "idle" });
+		const out = t.out();
+		expect(out).toContain("boom");
+		expect((out.match(/❯/g) || []).length).toBe(1); // exactly one prompt
 	});
 
 	it("echoUserInput paints a bright-magenta ▌ stripe + body, one trailing newline", () => {

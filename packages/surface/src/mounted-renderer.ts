@@ -181,7 +181,12 @@ export function createMountedRenderer(input: {
 					break;
 				case "error":
 					stopSpinner();
-					w(`\n${RED}▌ ${event.message}${RESET}\n${prompt}`);
+					w(`\n${RED}▌ ${event.message}${RESET}`);
+					// A turn-scoped error (carries turnId) still drains to
+					// assistant_turn_finished → idle, and idle draws the prompt — so
+					// drawing one here too would double it. A non-turn / fatal error
+					// has no following idle, so draw the prompt to keep the pane usable.
+					if (!event.turnId) w(`\n${prompt}`);
 					break;
 				default:
 					break;
