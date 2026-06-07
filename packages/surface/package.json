@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"@ai-ezio/protocol": "workspace:*",
+		"cli-table3": "^0.6",
 		"marked": "^15",
 		"marked-terminal": "^7",
 		"string-width": "^8"

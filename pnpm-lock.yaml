@@ -65,6 +65,9 @@ importers:
       '@ai-ezio/protocol':
         specifier: workspace:*
         version: link:../protocol
+      cli-table3:
+        specifier: ^0.6
+        version: 0.6.5
       marked:
         specifier: ^15
         version: 15.0.12
