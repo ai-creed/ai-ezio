@@ -140,14 +140,16 @@ export function renderMarkdown(md: string, opts?: { width?: number }): string
   `@ai-ezio/surface` instead of `./mounted-renderer.js`. No logic change.
 - Delete `test/render-markdown.test.ts` and `test/mounted-renderer.test.ts`
   (their successors live in `@ai-ezio/surface`).
-- **Declare `marked` + `marked-terminal` in `packages/cli/package.json`
-  `dependencies`** (NOT only in `@ai-ezio/surface`). The CLI bundle inlines
-  `@ai-ezio/*` TS packages (`scripts/bundle.mjs`), so `@ai-ezio/surface` is in the
-  bundle — but its `marked`/`marked-terminal` imports are *npm* deps that the
-  bundle **externalizes**. Without the declaration the published artifact throws
-  `ERR_MODULE_NOT_FOUND` on `marked` (the exact class of bug that broke 0.5.0 on
-  `@ai-ezio/harness`). `@ai-ezio/surface` still lists them too — for its own build
-  and the future standalone CLI.
+- **Declare `marked` + `marked-terminal` + `string-width` in
+  `packages/cli/package.json` `dependencies`** (NOT only in `@ai-ezio/surface`).
+  The CLI bundle inlines `@ai-ezio/*` TS packages (`scripts/bundle.mjs`), so
+  `@ai-ezio/surface` is in the bundle — but its `marked` / `marked-terminal` /
+  `string-width` imports are *npm* deps that the bundle **externalizes**. Without
+  the declaration the published artifact throws `ERR_MODULE_NOT_FOUND` on the
+  missing dep (the exact class of bug that broke 0.5.0 on `@ai-ezio/harness`).
+  `@ai-ezio/surface` still lists them too — for its own build and the future
+  standalone CLI. (`string-width` backs the mounted renderer's cell-width input
+  wrapping; every bare runtime import added to the surface must be mirrored here.)
 - `pnpm install` to materialize the `file:` dep into the store.
 
 ## Testing
