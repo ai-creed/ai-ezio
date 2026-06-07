@@ -72,9 +72,7 @@ export class Session {
 
 	/** Subscribe to engine child-exit (workflow-agnostic lifecycle signal for
 	 * adapters that surface provider exit). Fires once per child exit. */
-	onExit(
-		handler: (info: { code: number | null; signal: NodeJS.Signals | null }) => void,
-	): void {
+	onExit(handler: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): void {
 		this.exitHandlers.push(handler);
 	}
 
