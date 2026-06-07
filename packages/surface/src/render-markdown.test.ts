@@ -49,7 +49,9 @@ describe("renderMarkdown", () => {
 	});
 
 	it("degrades malformed markdown to text without throwing", () => {
-		expect(() => renderMarkdown("| broken | table\n no pipes here **unclosed", { width: 80 })).not.toThrow();
+		expect(() =>
+			renderMarkdown("| broken | table\n no pipes here **unclosed", { width: 80 }),
+		).not.toThrow();
 		const out = renderMarkdown("| broken | table\n no pipes here **unclosed", { width: 80 });
 		expect(out).toContain("broken");
 	});

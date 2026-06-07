@@ -101,23 +101,53 @@ describe("createMountedRenderer", () => {
 
 	it("tool: renders ⏺ name · args, a colored diff, a dim preview, and error status", () => {
 		const t = setup();
-		t.r.handle({ type: "tool_call_started", turnId: "t", name: "bash", callId: "c", args: "ls -la" });
+		t.r.handle({
+			type: "tool_call_started",
+			turnId: "t",
+			name: "bash",
+			callId: "c",
+			args: "ls -la",
+		});
 		expect(t.out()).toContain("⏺");
 		expect(t.out()).toContain("bash");
 		expect(t.out()).toContain("ls -la");
 
 		const d = setup();
-		d.r.handle({ type: "tool_call_finished", turnId: "t", name: "edit", callId: "c", status: "ok", output: "--- a\n+++ b\n+added\n-removed\n", isDiff: true });
+		d.r.handle({
+			type: "tool_call_finished",
+			turnId: "t",
+			name: "edit",
+			callId: "c",
+			status: "ok",
+			output: "--- a\n+++ b\n+added\n-removed\n",
+			isDiff: true,
+		});
 		expect(d.out()).toContain("[32m"); // green + line
 		expect(d.out()).toContain("[31m"); // red - line
 
 		const p = setup();
-		p.r.handle({ type: "tool_call_finished", turnId: "t", name: "bash", callId: "c", status: "ok", output: "l1\nl2\nl3\nl4\nl5\nl6\n", isDiff: false });
+		p.r.handle({
+			type: "tool_call_finished",
+			turnId: "t",
+			name: "bash",
+			callId: "c",
+			status: "ok",
+			output: "l1\nl2\nl3\nl4\nl5\nl6\n",
+			isDiff: false,
+		});
 		expect(p.out()).toContain("[2m"); // dim preview
 		expect(p.out()).toContain("l1");
 
 		const e = setup();
-		e.r.handle({ type: "tool_call_finished", turnId: "t", name: "bash", callId: "c", status: "error", output: "boom", isDiff: false });
+		e.r.handle({
+			type: "tool_call_finished",
+			turnId: "t",
+			name: "bash",
+			callId: "c",
+			status: "error",
+			output: "boom",
+			isDiff: false,
+		});
 		expect(e.out()).toContain("[31m"); // red error status
 	});
 
@@ -181,15 +211,36 @@ describe("createMountedRenderer", () => {
 		expect((out.match(/▌ /g) || []).length).toBe(1); // single visual row
 	});
 
-	it("echoUserInput re-stripes every wrapped visual row (hax-exact wrap)", () => {
+	it("echoUserInput re-stripes every wrapped visual row (char-wrap by cell width)", () => {
 		const t = setup({ utf8: true });
-		// cols=7 → body width = 7-2 = 5; 12 chars → rows of 5/5/2 = 3 stripes.
+		// cols=7 → body width = 7-2 = 5; 12 ASCII chars (1 cell each) → 5/5/2 = 3 stripes.
 		t.r.echoUserInput("abcdefghijkl", 7);
 		const out = t.out();
 		expect((out.match(/▌ /g) || []).length).toBe(3);
 		expect(out).toContain("▌ abcde");
 		expect(out).toContain("▌ fghij");
 		expect(out).toContain("▌ kl");
+	});
+
+	it("echoUserInput wraps by terminal CELL width, not code-point count (wide chars = 2 cells)", () => {
+		const t = setup({ utf8: true });
+		// cols=7 → body width = 5 cells. Four wide CJK chars (2 cells each = 8 cells)
+		// must wrap to rows of 2 chars (4 cells). Code-point counting would keep all
+		// four on one row (4 code points ≤ 5) — that was the bug.
+		t.r.echoUserInput("一二三四", 7);
+		const out = t.out();
+		expect((out.match(/▌ /g) || []).length).toBe(2);
+		expect(out).toContain("▌ 一二");
+		expect(out).toContain("▌ 三四");
+	});
+
+	it("echoUserInput counts zero-width combining marks as 0 cells", () => {
+		const t = setup({ utf8: true });
+		// "aé" as a + e + combining acute (U+0301): 3 code points, 2 cells. cols=4 →
+		// body width 2 → fits one row. Code-point counting would split it into two.
+		t.r.echoUserInput("ae\u0301", 4);
+		const out = t.out();
+		expect((out.match(/▌ /g) || []).length).toBe(1);
 	});
 
 	it("echoUserInput uses an ASCII | stripe when utf8 is off", () => {

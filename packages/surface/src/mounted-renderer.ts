@@ -8,6 +8,7 @@
  * are deterministically testable.
  */
 import type { ProtocolEvent } from "@ai-ezio/protocol";
+import stringWidth from "string-width";
 import { renderMarkdown } from "./render-markdown.js";
 import { BOLD, BRIGHT_MAGENTA, CYAN, DIM, ESC, FG_DEFAULT, GREEN, RED, RESET } from "./style.js";
 
@@ -125,17 +126,34 @@ export function createMountedRenderer(input: {
 	};
 
 	// Re-render a just-submitted operator line as hax's bright-magenta `▌ ` stripe
-	// + magenta body, hard-wrapping at every visual row (hax submitted_emit). The
-	// line-buffered runtime erases its plain echo first, then calls this. `cols` is
-	// the live tty width; the ASCII fallback uses `|` so it never emits a stray
-	// box glyph on a non-UTF-8 terminal.
+	// + magenta body, char-wrapping at every visual row. The line-buffered runtime
+	// erases its plain echo first, then calls this. `cols` is the live tty width;
+	// the ASCII fallback uses `|` so it never emits a stray box glyph on a non-UTF-8
+	// terminal. Wrapping is by terminal CELL width (string-width: wide CJK/emoji = 2,
+	// combining marks = 0) — matching how the terminal actually wraps — not by raw
+	// code-point count, which would misplace continuation rows for non-ASCII input.
+	// (This is char-wrap by cell width; hax's submitted_emit additionally does
+	// word-wrap with a phantom-column rule, which is not reproduced here.)
 	const echoUserInput = (text: string, cols: number): void => {
 		const stripe = utf8 ? "▌ " : "| ";
 		const width = Math.max(1, cols - STRIPE_COLS); // body cols after the stripe
-		const cps = Array.from(text); // code points, so surrogate pairs wrap as one
+		const cps = Array.from(text); // code points, so surrogate pairs stay intact
 		const rows: string[] = [];
-		for (let i = 0; i < cps.length; i += width) rows.push(cps.slice(i, i + width).join(""));
-		if (rows.length === 0) rows.push("");
+		let row = "";
+		let used = 0; // cells consumed on the current row
+		for (const cp of cps) {
+			const w = stringWidth(cp);
+			// Break before a glyph that would overflow the row — but never on an
+			// empty row (a single glyph wider than the body still has to land).
+			if (used + w > width && row !== "") {
+				rows.push(row);
+				row = "";
+				used = 0;
+			}
+			row += cp;
+			used += w;
+		}
+		if (row !== "" || rows.length === 0) rows.push(row);
 		const block = rows.map((r) => `${BRIGHT_MAGENTA}${stripe}${r}${FG_DEFAULT}`).join("\n");
 		w(`${block}\n`);
 	};
@@ -168,7 +186,9 @@ export function createMountedRenderer(input: {
 					stopSpinner();
 					lastUsage = event.usage;
 					if (event.content)
-						w(`\n${renderMarkdown(event.content, { width: (input.stdout as NodeJS.WriteStream).columns })}\n`);
+						w(
+							`\n${renderMarkdown(event.content, { width: (input.stdout as NodeJS.WriteStream).columns })}\n`,
+						);
 					break;
 				case "idle":
 					stopSpinner();

@@ -20,7 +20,8 @@
 	"dependencies": {
 		"@ai-ezio/protocol": "workspace:*",
 		"marked": "^15",
-		"marked-terminal": "^7"
+		"marked-terminal": "^7",
+		"string-width": "^8"
 	},
 	"devDependencies": {
 		"@types/marked-terminal": "^6"
