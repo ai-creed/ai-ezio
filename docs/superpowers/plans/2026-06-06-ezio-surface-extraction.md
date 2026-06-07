@@ -25,7 +25,7 @@ The `adapter-ai-ezio` already pulls ai-ezio packages via `file:` deps (e.g. `"@a
 
 **ai-ezio (`/Users/vuphan/Dev/ai-ezio`):**
 
-- Create `packages/surface/package.json` — name `@ai-ezio/surface`; deps `marked`, `marked-terminal`, `string-width`, `@ai-ezio/protocol`; devDep `@types/marked-terminal`.
+- Create `packages/surface/package.json` — name `@ai-ezio/surface`; deps `marked`, `marked-terminal`, `string-width`, `cli-table3`, `@ai-ezio/protocol`; devDep `@types/marked-terminal`.
 - Create `packages/surface/tsconfig.json` — extends `../../tsconfig.base.json`.
 - Create `packages/surface/src/style.ts` — consolidated ezio ANSI palette.
 - Create `packages/surface/src/render-markdown.ts` — robust `marked-terminal` renderer.
@@ -42,7 +42,7 @@ The `adapter-ai-ezio` already pulls ai-ezio packages via `file:` deps (e.g. `"@a
 - Modify `packages/adapter-ai-ezio/src/create-ai-ezio-live-session.ts` — import `createMountedRenderer` from `@ai-ezio/surface`.
 - Delete `packages/adapter-ai-ezio/src/render-markdown.ts` and `packages/adapter-ai-ezio/src/mounted-renderer.ts`.
 - Delete `packages/adapter-ai-ezio/test/render-markdown.test.ts` and `.../test/mounted-renderer.test.ts` **if they exist** (none present at plan time — coverage was via the mount e2e).
-- Modify `packages/cli/package.json` — declare `marked` + `marked-terminal` + `string-width` in `dependencies` (bundle externalizes them).
+- Modify `packages/cli/package.json` — declare `marked` + `marked-terminal` + `string-width` + `cli-table3` in `dependencies` (bundle externalizes them).
 - Modify `scripts/ai-ezio-mount-relay-e2e.mjs` — add a markdown-table pane assertion.
 - Create `scripts/bundle-selfcontained-smoke.mjs` — pack + clean-install + `whisper --version` smoke test.
 - Modify `package.json` — add a `smoke:bundle` script wiring the new smoke test.
@@ -84,6 +84,7 @@ ai-ezio TypeScript baseline: **tabs** for indentation, **double quotes**, **semi
 	},
 	"dependencies": {
 		"@ai-ezio/protocol": "workspace:*",
+		"cli-table3": "^0.6",
 		"marked": "^15",
 		"marked-terminal": "^7",
 		"string-width": "^8"
@@ -94,10 +95,10 @@ ai-ezio TypeScript baseline: **tabs** for indentation, **double quotes**, **semi
 }
 ```
 
-> `string-width` backs the mounted renderer's cell-width input wrapping (see
-> Task 4). Every bare npm import in `@ai-ezio/surface` must also be declared in
-> ai-whisper's CLI bundle deps (Task 8) or the externalizing bundle throws
-> `ERR_MODULE_NOT_FOUND`.
+> `string-width` backs the mounted renderer's cell-width input wrapping and
+> `cli-table3` backs the fit-to-width markdown table renderer (see Task 4). Every
+> bare npm import in `@ai-ezio/surface` must also be declared in ai-whisper's CLI
+> bundle deps (Task 8) or the externalizing bundle throws `ERR_MODULE_NOT_FOUND`.
 
 - [ ] **Step 2: Create `tsconfig.json` (mirrors protocol)**
 
@@ -132,7 +133,7 @@ Edit `/Users/vuphan/Dev/ai-ezio/tsconfig.json` so its `references` array include
 - [ ] **Step 4: Install so the workspace + `marked` deps materialize**
 
 Run (from ai-ezio root): `pnpm install`
-Expected: pnpm links `@ai-ezio/protocol` into `packages/surface/node_modules` and adds `marked`, `marked-terminal`, `string-width`, `@types/marked-terminal` to the store. No build yet.
+Expected: pnpm links `@ai-ezio/protocol` into `packages/surface/node_modules` and adds `marked`, `marked-terminal`, `string-width`, `cli-table3`, `@types/marked-terminal` to the store. No build yet.
 
 - [ ] **Step 5: Commit**
 
@@ -847,18 +848,19 @@ git commit -m "refactor(adapter-ai-ezio): drop moved renderer source (now in @ai
 
 ---
 
-## Task 8: ai-whisper — declare `marked` + `marked-terminal` + `string-width` in the CLI bundle deps
+## Task 8: ai-whisper — declare `marked` + `marked-terminal` + `string-width` + `cli-table3` in the CLI bundle deps
 
 **Files:**
 - Modify: `/Users/vuphan/Dev/ai-whisper/packages/cli/package.json`
 
-**Why:** `scripts/bundle.mjs` inlines `@ai-ezio/*` TS packages (so `@ai-ezio/surface` is in the bundle), but its `externalizeNpmDeps` plugin keeps every bare npm import (`marked`, `marked-terminal`, `string-width`) **external**. Without declaring them in the CLI's `dependencies`, the published artifact throws `ERR_MODULE_NOT_FOUND` on the missing dep at runtime — the exact class of bug that broke 0.5.0 on `@ai-ezio/harness`. **Rule:** every bare runtime import added to `@ai-ezio/surface` (`package.json` `dependencies`) must be mirrored here; `string-width` backs the mounted renderer's cell-width input wrapping.
+**Why:** `scripts/bundle.mjs` inlines `@ai-ezio/*` TS packages (so `@ai-ezio/surface` is in the bundle), but its `externalizeNpmDeps` plugin keeps every bare npm import (`marked`, `marked-terminal`, `string-width`, `cli-table3`) **external**. Without declaring them in the CLI's `dependencies`, the published artifact throws `ERR_MODULE_NOT_FOUND` on the missing dep at runtime — the exact class of bug that broke 0.5.0 on `@ai-ezio/harness`. **Rule:** every bare runtime import added to `@ai-ezio/surface` (`package.json` `dependencies`) must be mirrored here; `string-width` backs cell-width input wrapping and `cli-table3` backs the fit-to-width table renderer.
 
-- [ ] **Step 1: Add the three runtime deps**
+- [ ] **Step 1: Add the four runtime deps**
 
-In `packages/cli/package.json` `dependencies`, add `marked`, `marked-terminal`, and `string-width` (keep alphabetical-ish ordering consistent with the file):
+In `packages/cli/package.json` `dependencies`, add `cli-table3`, `marked`, `marked-terminal`, and `string-width` (keep alphabetical-ish ordering consistent with the file):
 
 ```json
+		"cli-table3": "^0.6",
 		"marked": "^15",
 		"marked-terminal": "^7",
 		"string-width": "^8",
@@ -870,6 +872,7 @@ Resulting `dependencies` (additions shown in context):
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.88.0",
 		"better-sqlite3": "^11.8.1",
+		"cli-table3": "^0.6",
 		"commander": "^13.1.0",
 		"fastify": "^5.2.1",
 		"ink": "^7.0.3",
@@ -887,14 +890,14 @@ Resulting `dependencies` (additions shown in context):
 - [ ] **Step 2: Install**
 
 Run: `cd /Users/vuphan/Dev/ai-whisper && pnpm install`
-Expected: `marked` + `marked-terminal` + `string-width` added to the CLI package's resolved deps.
+Expected: `marked` + `marked-terminal` + `string-width` + `cli-table3` added to the CLI package's resolved deps.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 cd /Users/vuphan/Dev/ai-whisper
 git add packages/cli/package.json pnpm-lock.yaml
-git commit -m "build(cli): declare marked + marked-terminal + string-width (externalized bundle deps)"
+git commit -m "build(cli): declare marked + marked-terminal + string-width + cli-table3 (externalized bundle deps)"
 ```
 
 ---
@@ -1106,7 +1109,7 @@ Expected: both clean. Proceed to PR/merge per `superpowers:finishing-a-developme
 - **Typing strategy for `marked-terminal` (TS7016)** (spec §Typing strategy) → `@types/marked-terminal` devDep in Task 1 + Task 3a ambient-shim fallback.
 - mounted-renderer moved verbatim, imports rewired, width passed, public API unchanged (spec §mounted-renderer) → Task 4.
 - ai-whisper rewiring: file: dep, import swap, delete moved files/tests (spec §ai-whisper changes) → Tasks 6–7.
-- Declare marked/marked-terminal/string-width in CLI deps (spec §ai-whisper changes, bundle note) → Task 8.
+- Declare marked/marked-terminal/string-width/cli-table3 in CLI deps (spec §ai-whisper changes, bundle note) → Task 8.
 - Structural renderer tests + real-ESC guard (spec §Testing) → Tasks 2–4 tests.
 - Mount e2e table assertion (spec §Testing) → Task 9.
 - Bundle self-containment smoke test (spec §Verification gate) → Task 10.
