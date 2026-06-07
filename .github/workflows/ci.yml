@@ -1,0 +1,49 @@
+name: CI
+
+# Run the TypeScript gate on every push to master and on PRs targeting it.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Cancel an in-flight run when a newer commit lands on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      # No submodules / no hax C build: the harness's hax-dependent e2e tests are
+      # gated with `describe.runIf(Boolean(HAX))`, so they skip when the engine
+      # binary is absent. The rest of the TS suite runs self-contained.
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Test
+        run: pnpm test
