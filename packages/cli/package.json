@@ -21,7 +21,9 @@
 	],
 	"dependencies": {
 		"@ai-ezio/harness": "workspace:*",
-		"@ai-ezio/protocol": "workspace:*"
+		"@ai-ezio/mcp-host": "workspace:*",
+		"@ai-ezio/protocol": "workspace:*",
+		"@ai-ezio/surface": "workspace:*"
 	},
 	"optionalDependencies": {
 		"@ai-ezio/hax-darwin-arm64": "workspace:*",

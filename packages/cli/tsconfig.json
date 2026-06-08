@@ -5,7 +5,12 @@
 		"outDir": "dist",
 		"resolveJsonModule": true
 	},
-	"references": [{ "path": "../harness" }, { "path": "../protocol" }],
+	"references": [
+		{ "path": "../harness" },
+		{ "path": "../mcp-host" },
+		{ "path": "../protocol" },
+		{ "path": "../surface" }
+	],
 	"include": ["src/**/*.ts"],
 	"exclude": ["src/**/*.test.ts"]
 }

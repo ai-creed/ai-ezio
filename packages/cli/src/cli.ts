@@ -123,6 +123,16 @@ export function launchEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Process
 	return { ...base, HAX_EXTRA_SKILLS_DIR: aiEzioGlobalSkillsDir(base) };
 }
 
+/** A bare interactive launch (no args, both ends a TTY) self-mounts: ezio owns
+ * the terminal and drives headless hax through the surface + MCP host. Anything
+ * with args (-p one-shot, explicit --mount-mode, flags) stays on the passthrough
+ * path below so existing behavior is untouched. */
+export function wantsInteractiveSelfMount(argv: readonly string[]): boolean {
+	return (
+		argv.length === 0 && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY)
+	);
+}
+
 /** Run the CLI, returning the process exit code. */
 export async function main(argv: string[]): Promise<number> {
 	if (wantsVersionJson(argv)) {
@@ -132,6 +142,11 @@ export async function main(argv: string[]): Promise<number> {
 
 	if (isNativeSubcommand(argv)) {
 		return runNativeSubcommand(argv);
+	}
+
+	if (wantsInteractiveSelfMount(argv)) {
+		const { runStandalone } = await import("./repl/standalone-runtime.js");
+		return runStandalone();
 	}
 
 	let bin: string;
