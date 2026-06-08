@@ -12,7 +12,7 @@ export interface McpToolResult {
 /** MCP content blocks → the string the model sees + an ok/error status. */
 export function mapToolResult(r: McpToolResult): { output: string; status: "ok" | "error" } {
 	const output = (r.content ?? [])
-		.map((b) => (b.type === "text" && b.text != null ? b.text : JSON.stringify(b)))
+		.map((b) => (b.type === "text" && typeof b.text === "string" ? b.text : JSON.stringify(b)))
 		.join("\n");
 	return { output, status: r.isError ? "error" : "ok" };
 }
@@ -20,7 +20,10 @@ export function mapToolResult(r: McpToolResult): { output: string; status: "ok" 
 export interface McpClient {
 	/** List tools as delegated defs (un-namespaced tool name in `name`). */
 	listTools(): Promise<DelegatedToolDef[]>;
-	callTool(tool: string, args: Record<string, unknown>): Promise<{ output: string; status: "ok" | "error" }>;
+	callTool(
+		tool: string,
+		args: Record<string, unknown>,
+	): Promise<{ output: string; status: "ok" | "error" }>;
 	close(): Promise<void>;
 }
 
@@ -33,7 +36,10 @@ export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise
 }
 
 /** Spawn + connect a stdio MCP server. */
-export async function connectStdio(server: ServerConfig, connectTimeoutMs = 10_000): Promise<McpClient> {
+export async function connectStdio(
+	server: ServerConfig,
+	connectTimeoutMs = 10_000,
+): Promise<McpClient> {
 	const transport = new StdioClientTransport({
 		command: server.command,
 		args: server.args,

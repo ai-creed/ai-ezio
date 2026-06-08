@@ -205,7 +205,12 @@ describe("M9 delegated-tool protocol", () => {
 				{ name: "cortex__recall_memory", description: "d", parametersSchema: { type: "object" } },
 			],
 		};
-		const res: ToolResultControl = { type: "tool_result", callId: "c1", output: "ok", status: "ok" };
+		const res: ToolResultControl = {
+			type: "tool_result",
+			callId: "c1",
+			output: "ok",
+			status: "ok",
+		};
 		expect(encodeControl(reg)).toBe(`${JSON.stringify(reg)}\n`);
 		expect(encodeControl(res)).toBe(`${JSON.stringify(res)}\n`);
 	});

@@ -128,9 +128,7 @@ export function launchEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Process
  * with args (-p one-shot, explicit --mount-mode, flags) stays on the passthrough
  * path below so existing behavior is untouched. */
 export function wantsInteractiveSelfMount(argv: readonly string[]): boolean {
-	return (
-		argv.length === 0 && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY)
-	);
+	return argv.length === 0 && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
 }
 
 /** Run the CLI, returning the process exit code. */

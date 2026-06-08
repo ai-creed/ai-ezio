@@ -3,7 +3,12 @@ import { mapToolResult, type McpToolResult } from "./mcp-client.js";
 
 describe("mapToolResult", () => {
 	it("joins text content blocks", () => {
-		const r: McpToolResult = { content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] };
+		const r: McpToolResult = {
+			content: [
+				{ type: "text", text: "a" },
+				{ type: "text", text: "b" },
+			],
+		};
 		expect(mapToolResult(r)).toEqual({ output: "a\nb", status: "ok" });
 	});
 	it("maps isError to status error", () => {

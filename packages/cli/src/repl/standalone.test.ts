@@ -17,7 +17,12 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => { stopped = true; } } as never,
+			host: {
+				handleEvent: async () => {},
+				stop: async () => {
+					stopped = true;
+				},
+			} as never,
 			write: () => {},
 		});
 		expect(submitted).toEqual(["hi"]);

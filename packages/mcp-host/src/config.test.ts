@@ -9,7 +9,9 @@ describe("config", () => {
 				toolPolicy: { cortex__purge_memory: "deny" },
 			}),
 		);
-		expect(cfg.servers).toEqual([{ name: "cortex", command: "ai-cortex", args: ["mcp"], env: undefined }]);
+		expect(cfg.servers).toEqual([
+			{ name: "cortex", command: "ai-cortex", args: ["mcp"], env: undefined },
+		]);
 		expect(cfg.toolPolicy.cortex__purge_memory).toBe("deny");
 	});
 	it("returns empty config for missing/blank input", () => {

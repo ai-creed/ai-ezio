@@ -4,9 +4,14 @@ import type { McpClient } from "./mcp-client.js";
 
 it("builds a host from an explicit config and registers tools in mounted mode", async () => {
 	const registered: unknown[] = [];
-	const session = { registerDelegatedTools: (t: unknown) => registered.push(t), sendToolResult: () => {} };
+	const session = {
+		registerDelegatedTools: (t: unknown) => registered.push(t),
+		sendToolResult: () => {},
+	};
 	const fake: McpClient = {
-		listTools: async () => [{ name: "recall_memory", description: "", parametersSchema: { type: "object" } }],
+		listTools: async () => [
+			{ name: "recall_memory", description: "", parametersSchema: { type: "object" } },
+		],
 		callTool: async () => ({ output: "", status: "ok" }),
 		close: async () => {},
 	};
@@ -20,7 +25,10 @@ it("builds a host from an explicit config and registers tools in mounted mode", 
 
 it("builds a no-op host (no servers) when config is empty", async () => {
 	const registered: unknown[] = [];
-	const session = { registerDelegatedTools: (t: unknown) => registered.push(t), sendToolResult: () => {} };
+	const session = {
+		registerDelegatedTools: (t: unknown) => registered.push(t),
+		sendToolResult: () => {},
+	};
 	const host = createMcpHost({ servers: [], toolPolicy: {} }, { mode: "standalone", cwd: "/repo" });
 	await host.start(session as never);
 	expect(registered).toEqual([]);

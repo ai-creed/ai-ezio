@@ -10,7 +10,9 @@ describe("policy", () => {
 		expect(decidePolicy("cortex__recall_memory", {}, "mounted")).toBe("allow");
 	});
 	it("config overrides defaults", () => {
-		expect(decidePolicy("cortex__recall_memory", { cortex__recall_memory: "deny" }, "mounted")).toBe("deny");
+		expect(
+			decidePolicy("cortex__recall_memory", { cortex__recall_memory: "deny" }, "mounted"),
+		).toBe("deny");
 	});
 	it("confirm degrades to deny in mounted, stays confirm in standalone", () => {
 		const pol = { cortex__trash_memory: "confirm" as const };

@@ -35,9 +35,15 @@ importers:
       '@ai-ezio/harness':
         specifier: workspace:*
         version: link:../harness
+      '@ai-ezio/mcp-host':
+        specifier: workspace:*
+        version: link:../mcp-host
       '@ai-ezio/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@ai-ezio/surface':
+        specifier: workspace:*
+        version: link:../surface
     optionalDependencies:
       '@ai-ezio/hax-darwin-arm64':
         specifier: workspace:*

@@ -68,7 +68,8 @@ export class McpHost {
 		if (!route) return this.reply(callId, `unknown tool: ${name}`, "error");
 
 		const policy = decidePolicy(name, this.opts.toolPolicy, this.opts.mode);
-		if (policy === "deny") return this.reply(callId, `tool "${name}" is blocked by policy`, "error");
+		if (policy === "deny")
+			return this.reply(callId, `tool "${name}" is blocked by policy`, "error");
 		if (policy === "confirm") {
 			const ok = this.opts.confirm ? await this.opts.confirm(name) : false;
 			if (!ok) return this.reply(callId, `tool "${name}" was not confirmed`, "error");
