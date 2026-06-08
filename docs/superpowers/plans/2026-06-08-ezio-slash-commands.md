@@ -366,6 +366,43 @@ describe("SlashController.handle", () => {
 		await c.handle("/help");
 		expect(out()).toContain("/echo");
 	});
+
+	it("register() overriding a built-in NAME fully displaces it (no stale /help, alias dropped)", async () => {
+		let ran = false;
+		const { ctx, out } = fakeCtx();
+		const c = new SlashController(ctx);
+		c.register({ name: "new", summary: "custom new", run: () => void (ran = true) });
+		// /new now dispatches the override, not the built-in newConversation path.
+		expect(await c.handle("/new")).toEqual({ action: "handled" });
+		expect(ran).toBe(true);
+		// The displaced built-in's "clear" alias is gone — last registration wins.
+		expect(await c.handle("/clear")).toEqual({ action: "handled" });
+		expect(out()).toContain("unknown command: /clear");
+		// /help shows the override exactly once, with no stale built-in "new".
+		const before = out();
+		await c.handle("/help");
+		const help = out().slice(before.length);
+		expect(help).toContain("custom new");
+		expect(help.match(/\/new\b/g)?.length).toBe(1);
+	});
+
+	it("register() overriding a built-in ALIAS wins the key but leaves the built-in's name intact", async () => {
+		let ran = false;
+		const { ctx, out } = fakeCtx();
+		const c = new SlashController(ctx);
+		c.register({ name: "fresh", aliases: ["clear"], summary: "fresh start", run: () => void (ran = true) });
+		// "clear" was the built-in /new alias; last registration wins → the override.
+		expect(await c.handle("/clear")).toEqual({ action: "handled" });
+		expect(ran).toBe(true);
+		// The built-in /new still works (its own name key was untouched).
+		expect(await c.handle("/new")).toEqual({ action: "handled" });
+		// /help lists both canonical names once each — no stale duplicate.
+		await c.handle("/help");
+		const help = out();
+		expect(help).toContain("/fresh");
+		expect(help.match(/\/new\b/g)?.length).toBe(1);
+		expect(help.match(/\/fresh\b/g)?.length).toBe(1);
+	});
 });
 ```
 
@@ -483,19 +520,31 @@ export class SlashController {
 		for (const cmd of builtinCommands(() => this.summaries())) this.register(cmd);
 	}
 
-	/** Register (or override) a command and its aliases. Last registration wins. */
+	/** Register (or override) a command and its aliases. Last registration wins
+	 * per key: any command that already owns this command's NAME is fully evicted
+	 * (all of its keys removed) so an override replaces it cleanly; an alias key
+	 * collision is resolved key-by-key (the alias now points at the new command,
+	 * but the prior owner keeps its other keys). */
 	register(cmd: SlashCommand): void {
+		const displaced = this.byKey.get(cmd.name);
+		if (displaced) {
+			for (const [k, v] of this.byKey) if (v === displaced) this.byKey.delete(k);
+		}
 		this.byKey.set(cmd.name, cmd);
 		for (const a of cmd.aliases ?? []) this.byKey.set(a, cmd);
 	}
 
-	/** Deduped canonical command list for /help, in registration order. */
+	/** Deduped canonical command list for /help. A command is listed only if it
+	 * still OWNS its own name key — this filters out any command reachable only
+	 * through a stolen alias key (e.g. another command claimed its name), so
+	 * /help never shows a stale entry. */
 	private summaries(): { name: string; summary: string }[] {
 		const seen = new Set<SlashCommand>();
 		const out: { name: string; summary: string }[] = [];
 		for (const cmd of this.byKey.values()) {
 			if (seen.has(cmd)) continue;
 			seen.add(cmd);
+			if (this.byKey.get(cmd.name) !== cmd) continue; // reachable only via a stolen alias
 			out.push({ name: cmd.name, summary: cmd.summary });
 		}
 		return out;
@@ -1011,7 +1060,7 @@ git commit -m "feat(cli): wire slash controller into the standalone runtime"
 - **Engine-touching command after the engine is gone** (`/new`, `/status`): the awaited control rejects; caught by the `run()`-throw guard → "/<name> failed: <message>", returns `handled` (Task 2 throwing-command test).
 - **Clipboard unavailable**: `clipboard()` rejects; `/copy` catches → "clipboard unavailable: <message>" (Task 2 + Task 3 reject tests).
 - **`/status` / `/new` race**: both are `await`ed inside `handle`, which the loop `await`s before reading the next line — no second submit mid-command.
-- **Alias/name collision on `register()`**: last registration wins (`byKey.set` overwrites); `/help` reflects the active set (Task 2 register test demonstrates the seam).
+- **Name/alias collision on `register()`**: last registration wins. Overriding a command's **name** fully evicts the prior owner (all its keys, including its aliases) so the override replaces it cleanly; an **alias** collision is resolved per key (the alias points at the new command, the prior owner keeps its other keys). `/help` lists a command only if it still owns its own name key, so a command reachable only through a stolen alias never shows as a stale entry (Task 2: `/echo` seam test + the two collision tests covering a name override and an alias override).
 - **Bare `/` and `/ …`**: empty candidate name → `submit` (Task 1).
 - **Path-like `/tmp/foo`, `/etc/hosts`, `/a.b`**: fail the `^[a-zA-Z][\w-]*$` name check → `submit` (Task 1).
 
