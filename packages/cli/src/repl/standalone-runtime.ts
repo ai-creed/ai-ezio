@@ -132,6 +132,8 @@ export async function runStandalone(): Promise<number> {
 			host,
 			write: (s) => void process.stdout.write(s),
 			slash,
+			echoSubmittedInput: renderer.echoSubmittedInput,
+			renderPrompt: renderer.renderPrompt,
 		});
 	} finally {
 		process.stdout.write("\x1b[?2004l"); // restore the terminal's paste mode

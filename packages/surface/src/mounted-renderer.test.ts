@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import { createMountedRenderer } from "./mounted-renderer.js";
 
-function setup(opts?: { utf8?: boolean }) {
+function setup(opts?: { utf8?: boolean; columns?: number }) {
 	const writes: string[] = [];
-	const stdout = { write: (s: string) => (writes.push(s), true), columns: 80 } as never;
+	const stdout = {
+		write: (s: string) => (writes.push(s), true),
+		columns: opts?.columns ?? 80,
+	} as never;
 	let cb: (() => void) | null = null;
 	const set = vi.fn((fn: () => void) => {
 		cb = fn;
@@ -251,9 +254,48 @@ describe("createMountedRenderer", () => {
 		expect(out).not.toContain("▌");
 	});
 
-	it("exposes the unchanged public API (handle + echoUserInput)", () => {
+	it("echoSubmittedInput erases the echoed input row and repaints the magenta block", () => {
+		const t = setup();
+		t.r.echoSubmittedInput("hello");
+		const out = t.out();
+		expect(out).toContain("[2K"); // cleared the echoed line
+		expect(out).not.toContain("[1A"); // single row → no cursor-up
+		expect(out).toContain("▌ hello");
+		expect(out).toContain("[95m"); // bright magenta
+	});
+
+	it("echoSubmittedInput erases every wrapped row (prompt + text across cols)", () => {
+		const t = setup({ columns: 7 });
+		// prompt 2 cells + 12 ASCII cells = 14; at width 7 → ceil(14/7) = 2 rows.
+		t.r.echoSubmittedInput("abcdefghijkl");
+		const out = t.out();
+		expect((out.match(/\[1A/g) || []).length).toBe(1); // 2 rows → 1 cursor-up
+		expect((out.match(/\[2K/g) || []).length).toBe(2); // both rows cleared
+	});
+
+	it("echoSubmittedInput counts embedded newlines as separate rows (Alt+Enter input)", () => {
+		const t = setup();
+		// "a\nb": line1 = prompt(2)+1 = 3 cells → 1 row; line2 = 1 cell → 1 row; total 2.
+		t.r.echoSubmittedInput("a\nb");
+		const out = t.out();
+		expect((out.match(/\[1A/g) || []).length).toBe(1);
+		expect((out.match(/\[2K/g) || []).length).toBe(2);
+	});
+
+	it("renderPrompt writes a fresh bright-magenta prompt on its own line", () => {
+		const t = setup();
+		t.r.renderPrompt();
+		const out = t.out();
+		expect(out.startsWith("\n")).toBe(true);
+		expect(out).toContain("❯");
+		expect(out).toContain("[95m");
+	});
+
+	it("exposes the public API (handle + echoUserInput + echoSubmittedInput + renderPrompt)", () => {
 		const t = setup();
 		expect(typeof t.r.handle).toBe("function");
 		expect(typeof t.r.echoUserInput).toBe("function");
+		expect(typeof t.r.echoSubmittedInput).toBe("function");
+		expect(typeof t.r.renderPrompt).toBe("function");
 	});
 });

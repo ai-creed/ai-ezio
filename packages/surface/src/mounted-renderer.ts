@@ -14,7 +14,10 @@ import { BOLD, BRIGHT_MAGENTA, CYAN, DIM, ESC, FG_DEFAULT, GREEN, RED, RESET } f
 
 // Cell width of the `▌ ` stripe (box glyph + space) — body wraps after it.
 const STRIPE_COLS = 2;
+// Visible cell width of the input prompt — both `❯ ` (utf8) and `> ` (ascii).
+const PROMPT_CELLS = 2;
 const CLEAR_LINE = `\r${ESC}[2K`;
+const CURSOR_UP = `${ESC}[1A`;
 const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const PREVIEW_LINES = 4;
 const ARG_MAX = 80;
@@ -158,8 +161,49 @@ export function createMountedRenderer(input: {
 		w(`${block}\n`);
 	};
 
+	// Total cell width of a string (wide CJK/emoji = 2, combining marks = 0).
+	const cellWidth = (s: string): number => {
+		let n = 0;
+		for (const cp of s) n += stringWidth(cp);
+		return n;
+	};
+
+	// Visual rows the plain keystroke echo of `❯ <text>` occupies at `cols`,
+	// honoring embedded newlines (Alt+Enter): the prompt prefixes only the first
+	// logical line; continuation lines start at column 0.
+	const echoRows = (text: string, cols: number): number => {
+		const width = Math.max(1, cols);
+		let total = 0;
+		const lines = text.split("\n");
+		for (let i = 0; i < lines.length; i++) {
+			const cells = (i === 0 ? PROMPT_CELLS : 0) + cellWidth(lines[i] ?? "");
+			total += Math.max(1, Math.ceil(cells / width));
+		}
+		return total;
+	};
+
+	// On submit, erase the plain keystroke echo of the input line (prompt + typed
+	// text, across wrap/continuation rows) and repaint it as the magenta ▌ block —
+	// so every submitted line, command or prompt, reads as a hax-style user turn.
+	// Cursor is assumed to sit at the end of the echoed text (the runtime suppresses
+	// Enter's newline echo on submit). Reads the live tty width itself.
+	const echoSubmittedInput = (text: string): void => {
+		const cols = (input.stdout as NodeJS.WriteStream).columns ?? 80;
+		const rows = echoRows(text, cols);
+		let erase = CLEAR_LINE;
+		for (let i = 1; i < rows; i++) erase += `${CURSOR_UP}${CLEAR_LINE}`;
+		w(erase);
+		echoUserInput(text, cols);
+	};
+
+	// Draw a fresh input prompt on its own line. Used by the runtime after a
+	// locally-handled slash command (no idle event follows to draw it).
+	const renderPrompt = (): void => void w(`\n${prompt}`);
+
 	return {
 		echoUserInput,
+		echoSubmittedInput,
+		renderPrompt,
 		handle(event: ProtocolEvent): void {
 			switch (event.type) {
 				case "status":
@@ -197,7 +241,7 @@ export function createMountedRenderer(input: {
 						if (u) w(`\n${u}`);
 						lastUsage = undefined;
 					}
-					w(`\n${prompt}`);
+					renderPrompt();
 					break;
 				case "error":
 					stopSpinner();
@@ -206,7 +250,7 @@ export function createMountedRenderer(input: {
 					// assistant_turn_finished → idle, and idle draws the prompt — so
 					// drawing one here too would double it. A non-turn / fatal error
 					// has no following idle, so draw the prompt to keep the pane usable.
-					if (!event.turnId) w(`\n${prompt}`);
+					if (!event.turnId) renderPrompt();
 					break;
 				default:
 					break;
