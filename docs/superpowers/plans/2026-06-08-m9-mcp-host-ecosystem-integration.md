@@ -431,9 +431,11 @@ git commit -m "feat(hax/core): delegated-tool registry on the session"
 - Modify: `vendor/hax/src/agent_dispatch.h` (declare it)
 - Test: `vendor/hax/tests/test_dispatch.c` (add a case, or the existing dispatch test)
 
-- [ ] **Step 1: Failing test**
+- [ ] **Step 1: Failing test (incl. output capping)**
 
 Add a test that builds a `struct item` tool call (`kind = ITEM_TOOL_CALL`, `call_id = "c1"`, `tool_name = "x__y"`), calls `dispatch_tool_delegated(&r, &call, "host output", 0 /*ok*/)`, and asserts the returned item is `ITEM_TOOL_RESULT` with `call_id == "c1"` and `output == "host output"`. Mirror the existing `dispatch_tool_skipped` test setup for `render_ctx`.
+
+Add a **capping** test: `setenv("HAX_TOOL_OUTPUT_CAP", "64", 1)`, build an output string longer than 64 bytes (e.g. 500 `'a'`s, with a couple of multibyte UTF-8 chars near the boundary to prove no codepoint is split), call `dispatch_tool_delegated(&r, &call, big, 0)`, and assert: (a) `strlen(result.output)` is `<= 64 + marker_len` (capped, not the full 500); (b) `result.output` contains the substring `"[delegated output truncated"`; (c) the kept prefix is valid UTF-8 (no `0x80–0xBF` continuation byte left dangling at the cut). `unsetenv` afterward.
 
 - [ ] **Step 2: Run; expect failure**
 
@@ -442,26 +444,43 @@ Expected: FAIL — `dispatch_tool_delegated` undefined.
 
 - [ ] **Step 3: Implement the helper**
 
-Mirror `dispatch_tool_skipped` (`agent_dispatch.c:340`), but take host-provided output:
+Mirror `dispatch_tool_skipped` (`agent_dispatch.c:340`), but take host-provided output and **cap it with hax's shared tool-output limit** (`output_cap_bytes()` from `util.h`, default 50K, env `HAX_TOOL_OUTPUT_CAP`) — the same ceiling native tools honor before their output enters history — and `ctrl_strip_dup` it exactly as the native path does (`agent_dispatch.c:568`/`:668`). Both helpers are already in scope in this file:
 
 ```c
 /* M9: build a tool result from host-delegated output. `is_error` only affects the
  * render transition; the model sees `output` either way (errors are recoverable
- * tool output, same convention as native tools). */
+ * tool output, same convention as native tools). The output is capped to hax's
+ * shared tool-output limit so a huge MCP result can't blow up model context. */
 struct item dispatch_tool_delegated(struct render_ctx *r, const struct item *call,
                                     const char *output, int is_error)
 {
     render_transition(r, RS_IDLE);
     (void)is_error;
+
+    const char *raw = output ? output : "";
+    size_t cap = output_cap_bytes();
+    char *capped;
+    if (strlen(raw) > cap) {
+        size_t n = cap;
+        /* Back off so the cut never splits a UTF-8 multibyte sequence. */
+        while (n > 0 && ((unsigned char)raw[n] & 0xC0) == 0x80)
+            n--;
+        capped = xasprintf("%.*s\n[delegated output truncated to %zu bytes]", (int)n, raw, cap);
+    } else {
+        capped = xstrdup(raw);
+    }
+    char *history = ctrl_strip_dup(capped); /* strip control bytes, native parity */
+    free(capped);
+
     return (struct item){
         .kind = ITEM_TOOL_RESULT,
         .call_id = xstrdup(call->call_id),
-        .output = xstrdup(output ? output : ""),
+        .output = history,
     };
 }
 ```
 
-Declare it in `agent_dispatch.h` beside `dispatch_tool_skipped`/`dispatch_tool_refused`.
+Ensure `#include "util.h"` is present (for `output_cap_bytes`/`xasprintf`/`ctrl_strip_dup`/`xstrdup`); `agent_dispatch.c` already uses `ctrl_strip_dup`, so it is. Declare `dispatch_tool_delegated` in `agent_dispatch.h` beside `dispatch_tool_skipped`/`dispatch_tool_refused`.
 
 - [ ] **Step 4: Run; expect pass; clang-format**
 
@@ -1023,6 +1042,8 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 ```
 
 (Verify the exact SDK import paths/method names against the installed `@modelcontextprotocol/sdk` version — `listTools()`/`callTool()` shapes are stable, but adjust the subpath imports if the package exports differ.)
+
+**Output capping is hax's job, not the host's.** `mapToolResult` returns the full joined text; the engine caps it to `output_cap_bytes()` (`HAX_TOOL_OUTPUT_CAP`) inside `dispatch_tool_delegated` (Task 1.4) — the same limit native tools use. Do **not** also truncate here, so there's one cap with one configurable limit (double-capping would hide the truncation marker and diverge from native behavior).
 
 - [ ] **Step 4: Run; expect pass**
 
@@ -1831,3 +1852,8 @@ git commit -m "docs: reframe ezio as the ecosystem MCP-host agent; maintained-fo
 2. *cwd/worktree injection drift + `path`* — `injectCwd` is now schema-aware: it **overrides** model-supplied `worktreePath` **and** `path` (drift-proof) for any tool whose schema declares them, and never adds an arg the schema lacks. Tests cover override-drift for both args and the no-spurious-add case (3.6). ✓
 3. *Host 60s per-call timeout* — implemented in code (`withTimeout(client.callTool, callTimeoutMs ?? 60_000)` in `host.handleEvent`), with a regression test asserting a slow call returns `tool_result{status:"error"}` well before hax's 120s backstop (3.6). ✓
 4. *Server-crash coverage* — added a regression test where `callTool` rejects (simulated crash/down server) and asserts the host still emits an error `tool_result` (no missing reply, no hang) (3.6). ✓
+
+**Reviewer findings addressed (round 2):**
+5. *Large-output capping* — `dispatch_tool_delegated` (Task 1.4) now caps host output to hax's shared `output_cap_bytes()` limit (default 50K, env `HAX_TOOL_OUTPUT_CAP`) with a UTF-8-safe cut + truncation marker, and `ctrl_strip_dup`s it for native parity — so MCP output is capped *before* the `ITEM_TOOL_RESULT` enters model history, exactly where native tool output is capped. A C capping test asserts truncation + marker + no split codepoint (1.4). The TS host deliberately does **not** double-cap (note in 3.5). ✓
+
+**Result-mapping / large-output coverage** → `mapToolResult` (3.5) maps content blocks + `isError`; capping → hax `dispatch_tool_delegated` (1.4) with its own test. ✓
