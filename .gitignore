@@ -19,6 +19,12 @@ artifacts/
 # cross-compile matrix or scripts/stage-host-binary.mjs — never committed)
 packaging/*/bin/
 
+# temporary idea docs (scratch notes; not published)
+docs/superpowers/ideas/
+
+# manual smoke checklists (local QA scratch; not published)
+docs/smoke/
+
 # logs / debug (hax HAX_TRACE / HAX_TRANSCRIPT dumps)
 *.log
 .DS_Store
