@@ -3,11 +3,16 @@
  * line-buffered shape ai-whisper's mounted host uses). A pure reducer over
  * decoded keys so it is fully testable without a TTY.
  *
- * Multiline: Alt+Enter (the terminal sends ESC then CR/LF) inserts a newline
- * instead of submitting, and a bracketed paste (ESC[200~ … ESC[201~) buffers a
- * whole block — embedded newlines stay literal — so a pasted snippet arrives as
- * one prompt rather than submitting at its first line break. A plain Enter
- * outside a paste still submits the (now possibly multiline) buffer.
+ * Multiline: Alt+Enter (the terminal sends ESC then CR/LF) OR Shift+Enter inserts
+ * a newline instead of submitting, and a bracketed paste (ESC[200~ … ESC[201~)
+ * buffers a whole block — embedded newlines stay literal — so a pasted snippet
+ * arrives as one prompt rather than submitting at its first line break. A plain
+ * Enter outside a paste still submits the (now possibly multiline) buffer.
+ *
+ * Shift+Enter works via the kitty keyboard protocol (enabled by the runtime):
+ * with it on, a modified Enter arrives as CSI 13;<mods>u (Shift = 2) rather than
+ * a bare CR that's indistinguishable from a plain Enter. Any modifier inserts a
+ * newline; plain Enter stays a CR and submits.
  *
  * NOTE: backspacing across a newline has imperfect echo (a raw `\b \b` can't
  * walk back up a line); the buffer text is always correct, but a full visual
@@ -51,6 +56,24 @@ const ESC_SEQUENCES: Record<string, "alt-enter" | "paste-start" | "paste-end"> =
 	"\x1b[201~": "paste-end",
 };
 
+// kitty keyboard protocol: a modified Enter arrives as CSI 13 ; <mods> u, where
+// <mods> is 1 + a modifier bitmask (2 = Shift, 3 = Alt, 5 = Ctrl, …). Any modifier
+// (mods >= 2) means "insert a newline, don't submit" — Shift+Enter is the headline
+// case. Plain Enter is unaffected by the protocol (still a bare CR), so it submits.
+const CSI_U_ENTER = /^\x1b\[13;(\d+)u$/;
+
+/** True while `pending` is an unfinished CSI sequence (ESC [ … with no final byte
+ * yet), so we keep reading until it terminates. CSI parameter/intermediate bytes
+ * are 0x20–0x3F; a final byte (0x40–0x7E) ends the sequence. */
+function isCsiPrefix(pending: string): boolean {
+	if (!pending.startsWith("\x1b[")) return false;
+	for (const c of pending.slice(2)) {
+		const code = c.charCodeAt(0);
+		if (code < 0x20 || code > 0x3f) return false;
+	}
+	return true;
+}
+
 type EscMatch =
 	| { kind: "complete"; action: "alt-enter" | "paste-start" | "paste-end" }
 	| { kind: "prefix" }
@@ -61,9 +84,16 @@ type EscMatch =
 function matchEsc(pending: string): EscMatch {
 	const action = ESC_SEQUENCES[pending];
 	if (action) return { kind: "complete", action };
+	const mu = pending.match(CSI_U_ENTER);
+	if (mu) {
+		// mods === 1 is a plain Enter (report-all mode only) — not a newline; drop it.
+		return Number(mu[1]) >= 2 ? { kind: "complete", action: "alt-enter" } : { kind: "none" };
+	}
 	for (const seq of Object.keys(ESC_SEQUENCES)) {
 		if (seq.startsWith(pending)) return { kind: "prefix" };
 	}
+	// A still-accumulating CSI (e.g. ESC[13;2 awaiting its `u`) — keep reading.
+	if (isCsiPrefix(pending)) return { kind: "prefix" };
 	return { kind: "none" };
 }
 

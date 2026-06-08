@@ -92,3 +92,58 @@ describe("bracketed paste", () => {
 		expect(b.text).toBe("x");
 	});
 });
+
+describe("kitty keyboard protocol: modified Enter", () => {
+	const SHIFT_ENTER = "\x1b[13;2u";
+	const CTRL_ENTER = "\x1b[13;5u";
+
+	it("Shift+Enter (CSI 13;2u) inserts a newline instead of submitting", () => {
+		let b = newLineBuffer();
+		for (const ch of "foo") b = feedKey(b, ch).buffer;
+		b = feedAll(b, SHIFT_ENTER);
+		expect(b.text).toBe("foo\n");
+		// a plain Enter afterwards submits the whole multiline buffer
+		expect(feedKey(b, "\r").submit).toBe("foo\n");
+	});
+
+	it("accumulates the CSI-u sequence byte-by-byte without submitting or echoing junk", () => {
+		let b = newLineBuffer();
+		for (const ch of "hi") b = feedKey(b, ch).buffer;
+		for (const ch of "\x1b[13;2") {
+			const r = feedKey(b, ch);
+			expect(r.submit).toBeUndefined();
+			expect(r.echo).toBeUndefined(); // partial sequence: nothing echoed yet
+			b = r.buffer;
+		}
+		const done = feedKey(b, "u");
+		expect(done.submit).toBeUndefined();
+		expect(done.buffer.text).toBe("hi\n");
+		expect(done.echo).toBe("\r\n");
+	});
+
+	it("Ctrl+Enter (CSI 13;5u) also inserts a newline", () => {
+		const b = feedAll(newLineBuffer(), CTRL_ENTER);
+		expect(b.text).toBe("\n");
+	});
+
+	it("plain Enter still submits (a bare CR is unaffected by the protocol)", () => {
+		let b = newLineBuffer();
+		for (const ch of "bar") b = feedKey(b, ch).buffer;
+		expect(feedKey(b, "\r").submit).toBe("bar");
+	});
+
+	it("drops an unrelated CSI sequence (e.g. an arrow key) without submitting", () => {
+		let b = newLineBuffer();
+		for (const ch of "x") b = feedKey(b, ch).buffer;
+		const after = feedAll(b, "\x1b[D"); // left arrow — a complete CSI, not Enter
+		expect(after.text).toBe("x"); // unchanged; the sequence was dropped
+		expect(feedKey(after, "\r").submit).toBe("x");
+	});
+
+	it("ignores an unmodified CSI-u Enter (mods=1) rather than inserting a newline", () => {
+		// ESC[13;1u = Enter with no modifiers (only seen in report-all mode). It must
+		// NOT become a newline — that would break submit — so it is dropped here.
+		const b = feedAll(newLineBuffer(), "\x1b[13;1u");
+		expect(b.text).toBe("");
+	});
+});

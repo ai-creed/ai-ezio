@@ -121,10 +121,13 @@ export async function runStandalone(): Promise<number> {
 	const stdin = process.stdin;
 	stdin.setRawMode?.(true);
 	stdin.resume();
-	// Enable bracketed paste so a pasted block arrives wrapped in ESC[200~…ESC[201~
-	// markers (feedKey treats the embedded newlines as literal instead of
-	// submitting at the first one).
-	process.stdout.write("\x1b[?2004h");
+	// Enable bracketed paste (ESC[?2004h) so a pasted block arrives wrapped in
+	// ESC[200~…ESC[201~ markers (feedKey treats the embedded newlines as literal
+	// instead of submitting at the first one), and push the kitty keyboard protocol
+	// (ESC[>1u, disambiguate flag) so Shift+Enter arrives as CSI 13;2u instead of a
+	// bare CR indistinguishable from a plain Enter. Both are ignored by terminals
+	// that don't support them, so this degrades gracefully.
+	process.stdout.write("\x1b[?2004h\x1b[>1u");
 	try {
 		await runStandaloneRepl({
 			keys: readKeys(stdin),
@@ -136,7 +139,8 @@ export async function runStandalone(): Promise<number> {
 			renderPrompt: renderer.renderPrompt,
 		});
 	} finally {
-		process.stdout.write("\x1b[?2004l"); // restore the terminal's paste mode
+		// Pop the kitty flags and restore the terminal's paste mode.
+		process.stdout.write("\x1b[<u\x1b[?2004l");
 		stdin.setRawMode?.(false);
 		stdin.pause();
 	}
