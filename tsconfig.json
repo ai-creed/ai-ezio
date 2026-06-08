@@ -4,6 +4,7 @@
 		{ "path": "packages/protocol" },
 		{ "path": "packages/surface" },
 		{ "path": "packages/harness" },
+		{ "path": "packages/mcp-host" },
 		{ "path": "packages/cli" }
 	]
 }

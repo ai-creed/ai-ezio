@@ -1,0 +1,12 @@
+export { McpHost } from "./host.js";
+export type { McpHostOptions, HostSession } from "./host.js";
+export { createMcpHost, loadMcpHost } from "./attach.js";
+export type { CreateHostOptions } from "./attach.js";
+export { loadConfig, parseConfig, configPath } from "./config.js";
+export type { HostConfig, ServerConfig, ToolPolicy } from "./config.js";
+export { decidePolicy, DEFAULT_DENY } from "./policy.js";
+export type { RunMode } from "./policy.js";
+export { encodeToolName, RouteMap } from "./namespace.js";
+export type { Route } from "./namespace.js";
+export { connectStdio, mapToolResult, withTimeout } from "./mcp-client.js";
+export type { McpClient, McpToolResult } from "./mcp-client.js";

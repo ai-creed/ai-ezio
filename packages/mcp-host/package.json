@@ -1,0 +1,25 @@
+{
+	"name": "@ai-ezio/mcp-host",
+	"version": "0.1.0",
+	"description": "ai-ezio MCP host: spawn/connect MCP servers and delegate their tools to the engine",
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"@ai-ezio/protocol": "workspace:*",
+		"@ai-ezio/harness": "workspace:*",
+		"@modelcontextprotocol/sdk": "^1.0.0"
+	},
+	"scripts": {
+		"build": "tsc --build",
+		"test": "vitest run"
+	}
+}
