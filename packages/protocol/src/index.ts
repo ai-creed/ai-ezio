@@ -19,18 +19,22 @@ export type {
 	ReadyEvent,
 	StatusEvent,
 	ToolCallFinishedEvent,
+	ToolCallRequestedEvent,
 	ToolCallStartedEvent,
 	UserTurnStartedEvent,
 } from "./events.js";
 export type {
 	ControlType,
 	CopyLastResponseControl,
+	DelegatedToolDef,
 	InterruptControl,
 	M3Control,
 	NewConversationControl,
 	ProtocolControl,
+	RegisterDelegatedToolsControl,
 	StatusControl,
 	SubmitControl,
+	ToolResultControl,
 } from "./controls.js";
 export { encodeControl, encodeEvent, JsonlDecoder, MalformedLineError } from "./codec.js";
 export type { Transport } from "./transport.js";

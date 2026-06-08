@@ -52,6 +52,15 @@ export interface ToolCallFinishedEvent {
 	isDiff?: boolean;
 }
 
+export interface ToolCallRequestedEvent {
+	type: "tool_call_requested";
+	turnId: string;
+	name: string;
+	callId: string;
+	/** Full model-supplied arguments object for the delegated tool (M9). */
+	args: Record<string, unknown>;
+}
+
 export interface AssistantTurnFinishedEvent {
 	type: "assistant_turn_finished";
 	turnId: string;
@@ -100,6 +109,7 @@ export type ProtocolEvent =
 	| AssistantDeltaEvent
 	| ToolCallStartedEvent
 	| ToolCallFinishedEvent
+	| ToolCallRequestedEvent
 	| AssistantTurnFinishedEvent
 	| IdleEvent
 	| ErrorEvent

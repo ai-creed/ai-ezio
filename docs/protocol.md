@@ -44,6 +44,7 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 | `assistant_delta`          | `turnId`, `text`                         | Streamed text chunk (optional for consumers that only want final). |
 | `tool_call_started`        | `turnId`, `name`, `callId`, `args?`      | A tool invocation began. `args?` (M8) is a one-line summary of the call's arguments. |
 | `tool_call_finished`       | `turnId`, `name`, `callId`, `status`, `output?`, `isDiff?` | Tool finished (`status`: `ok` \| `error`). `output?`/`isDiff?` (M8) carry the tool's result text and whether it is a unified diff. |
+| `tool_call_requested`      | `turnId`, `name`, `callId`, `args`       | (M9) Emitted **only for delegated tools** — the host must execute and reply with a `tool_result`. `args` is the full model-supplied arguments object. Display events still fire around it; the surface renders from those and ignores this. |
 | `assistant_turn_finished`  | `turnId`, `content`, `usage?`            | Turn complete; `content` is the final assistant text (the handback). `usage?` (M7) is an optional per-turn token object — see below. |
 | `idle`                     | —                                        | Engine quiescent, ready for the next control. |
 | `error`                    | `message`, `turnId?`                     | Recoverable or fatal error; `turnId` if turn-scoped. |
@@ -88,6 +89,8 @@ Example stream:
 | `copy_last_response`  | —        | Re-emit the last `assistant_turn_finished.content`. |
 | `new_conversation`    | —        | Start a fresh conversation (maps to `/new`). |
 | `status`              | —        | Request a status event (engine/session health). |
+| `register_delegated_tools` | `tools[]` | (M9) Sent **once after `ready`, before the first `submit`**. Merges host-provided tool defs (`{name, description, parametersSchema}`) into the advertised tool table; they serialize to the model like native tools, but their results come from the host. |
+| `tool_result`         | `callId`, `output`, `status` | (M9) The host's reply to a `tool_call_requested`, correlated by `callId` (`status`: `ok` \| `error`). |
 
 Example:
 
@@ -97,7 +100,26 @@ Example:
 {"type":"copy_last_response"}
 {"type":"new_conversation"}
 {"type":"status"}
+{"type":"register_delegated_tools","tools":[{"name":"cortex__recall_memory","description":"…","parametersSchema":{"type":"object"}}]}
+{"type":"tool_result","callId":"c_9","output":"…","status":"ok"}
 ```
+
+### M9 — host-delegated tools (generic MCP host)
+
+A **delegated tool** is one hax advertises to the model but does not run itself —
+its result comes from the harness (which backs it with an MCP server). hax stays
+MCP-agnostic: it only knows "this tool's result comes from the host."
+
+Sequence per delegated call: `tool_call_started` (display) → `tool_call_requested`
+(delegation) → hax **blocks** on the control fd → host sends `tool_result` →
+`tool_call_finished` (display). The blocking read is **interrupt-aware** (an
+`interrupt` aborts the call → `[interrupted]` result) and **timeout-bounded**
+(`AI_EZIO_DELEGATED_TIMEOUT`, default 120s, backstops a dead host). Tool dispatch
+is sequential, so at most one delegated call is outstanding. When no
+`register_delegated_tools` is sent, the delegated path is unreachable and native
+behavior is byte-for-byte identical. Delegated output is capped to hax's shared
+tool-output limit (`HAX_TOOL_OUTPUT_CAP`, default 50K) before entering history,
+exactly like native tools.
 
 ## Lifecycle / state machine
 

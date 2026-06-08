@@ -16,6 +16,27 @@ export interface InterruptControl {
 	type: "interrupt";
 }
 
+/** One host-provided tool advertised to the model; its result comes via tool_result (M9). */
+export interface DelegatedToolDef {
+	name: string;
+	description: string;
+	parametersSchema: Record<string, unknown>;
+}
+
+/** Sent once after `ready`, before the first `submit` (M9). */
+export interface RegisterDelegatedToolsControl {
+	type: "register_delegated_tools";
+	tools: DelegatedToolDef[];
+}
+
+/** The host's reply to a `tool_call_requested`, correlated by callId (M9). */
+export interface ToolResultControl {
+	type: "tool_result";
+	callId: string;
+	output: string;
+	status: "ok" | "error";
+}
+
 /** M4 groundwork (typed only; no M3 engine behavior). */
 export interface NewConversationControl {
 	type: "new_conversation";
@@ -38,6 +59,8 @@ export type M3Control = SubmitControl | InterruptControl;
 export type ProtocolControl =
 	| SubmitControl
 	| InterruptControl
+	| RegisterDelegatedToolsControl
+	| ToolResultControl
 	| NewConversationControl
 	| StatusControl
 	| CopyLastResponseControl;

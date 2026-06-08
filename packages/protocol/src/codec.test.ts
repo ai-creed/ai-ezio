@@ -181,3 +181,32 @@ describe("M8 tool fields (tool_call_started.args, tool_call_finished.output/isDi
 		expect(Object.prototype.hasOwnProperty.call(dec, "args")).toBe(false);
 	});
 });
+
+import type { ToolCallRequestedEvent } from "./events.js";
+import type { RegisterDelegatedToolsControl, ToolResultControl } from "./controls.js";
+
+describe("M9 delegated-tool protocol", () => {
+	it("round-trips a tool_call_requested event", () => {
+		const ev: ToolCallRequestedEvent = {
+			type: "tool_call_requested",
+			turnId: "t1",
+			callId: "c1",
+			name: "cortex__recall_memory",
+			args: { query: "auth" },
+		};
+		const [decoded] = new JsonlDecoder().push(encodeEvent(ev));
+		expect(decoded).toEqual(ev);
+	});
+
+	it("encodes register_delegated_tools and tool_result controls", () => {
+		const reg: RegisterDelegatedToolsControl = {
+			type: "register_delegated_tools",
+			tools: [
+				{ name: "cortex__recall_memory", description: "d", parametersSchema: { type: "object" } },
+			],
+		};
+		const res: ToolResultControl = { type: "tool_result", callId: "c1", output: "ok", status: "ok" };
+		expect(encodeControl(reg)).toBe(`${JSON.stringify(reg)}\n`);
+		expect(encodeControl(res)).toBe(`${JSON.stringify(res)}\n`);
+	});
+});
