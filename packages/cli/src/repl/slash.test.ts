@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { classifyLine } from "./slash.js";
 
-const KNOWN = new Set(["help", "new", "clear", "status", "skills", "copy", "usage", "quit", "exit"]);
+const KNOWN = new Set([
+	"help",
+	"new",
+	"clear",
+	"status",
+	"skills",
+	"copy",
+	"usage",
+	"quit",
+	"exit",
+]);
 
 describe("classifyLine", () => {
 	it("plain text → submit", () => {
@@ -99,7 +109,12 @@ describe("SlashController.handle", () => {
 
 	it("/new awaits newConversation and confirms", async () => {
 		let called = 0;
-		const { ctx, out } = fakeCtx({ session: { newConversation: async () => void called++, status: async () => ({}) as StatusEvent } });
+		const { ctx, out } = fakeCtx({
+			session: {
+				newConversation: async () => void called++,
+				status: async () => ({}) as StatusEvent,
+			},
+		});
 		const c = new SlashController(ctx);
 		expect(await c.handle("/new")).toEqual({ action: "handled" });
 		expect(called).toBe(1);
@@ -108,7 +123,12 @@ describe("SlashController.handle", () => {
 
 	it("/clear is an alias for /new", async () => {
 		let called = 0;
-		const { ctx } = fakeCtx({ session: { newConversation: async () => void called++, status: async () => ({}) as StatusEvent } });
+		const { ctx } = fakeCtx({
+			session: {
+				newConversation: async () => void called++,
+				status: async () => ({}) as StatusEvent,
+			},
+		});
 		const c = new SlashController(ctx);
 		expect(await c.handle("/clear")).toEqual({ action: "handled" });
 		expect(called).toBe(1);
@@ -171,7 +191,12 @@ describe("SlashController.handle", () => {
 		expect(none.out()).toContain("no usage yet");
 
 		const some = fakeCtx({
-			lastUsage: () => ({ contextTokens: 100, outputTokens: 20, cachedTokens: 5, contextLimit: 200000 }),
+			lastUsage: () => ({
+				contextTokens: 100,
+				outputTokens: 20,
+				cachedTokens: 5,
+				contextLimit: 200000,
+			}),
 		});
 		expect(await new SlashController(some.ctx).handle("/usage")).toEqual({ action: "handled" });
 		const text = some.out();
@@ -241,7 +266,12 @@ describe("SlashController.handle", () => {
 		let ran = false;
 		const { ctx, out } = fakeCtx();
 		const c = new SlashController(ctx);
-		c.register({ name: "fresh", aliases: ["clear"], summary: "fresh start", run: () => void (ran = true) });
+		c.register({
+			name: "fresh",
+			aliases: ["clear"],
+			summary: "fresh start",
+			run: () => void (ran = true),
+		});
 		// "clear" was the built-in /new alias; last registration wins → the override.
 		expect(await c.handle("/clear")).toEqual({ action: "handled" });
 		expect(ran).toBe(true);

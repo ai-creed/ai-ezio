@@ -8,7 +8,7 @@
  * registry + dispatch and is the extension point for future harness commands.
  */
 import type { Session } from "@ai-ezio/harness";
-import type { AssistantTurnFinishedEvent, StatusEvent } from "@ai-ezio/protocol";
+import type { AssistantTurnFinishedEvent } from "@ai-ezio/protocol";
 
 /** What the REPL should do after the controller handles a line. */
 export type SlashOutcome =

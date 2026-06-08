@@ -4,10 +4,15 @@
  * with the line-buffered reader. This is the unified architecture — hax is
  * always headless; ezio (TS) owns the terminal — applied to the human REPL.
  */
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
 import { Session } from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
-import type { ProtocolEvent } from "@ai-ezio/protocol";
+import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
 import { createMountedRenderer } from "@ai-ezio/surface";
+import { discoverSkills, nodeSkillFs, type SkillEnv } from "../skills.js";
+import { makeClipboard } from "./clipboard.js";
+import { SlashController, type SlashContext } from "./slash.js";
 import { runStandaloneRepl } from "./standalone.js";
 
 export interface OneShotOptions {
@@ -67,9 +72,15 @@ async function* readKeys(stdin: NodeJS.ReadStream): AsyncGenerator<string> {
 export async function runStandalone(): Promise<number> {
 	const host = loadMcpHost({ mode: "standalone", cwd: process.cwd() });
 	const renderer = createMountedRenderer({ stdout: process.stdout });
+	let lastContent = "";
+	let lastUsage: AssistantTurnFinishedEvent["usage"];
 	const session = new Session({
 		onEvent: (e: ProtocolEvent) => {
 			renderer.handle(e);
+			if (e.type === "assistant_turn_finished") {
+				lastContent = e.content;
+				lastUsage = e.usage;
+			}
 			void host.handleEvent(e);
 		},
 	});
@@ -84,6 +95,29 @@ export async function runStandalone(): Promise<number> {
 	// Register delegated tools BEFORE accepting input so the first turn sees them.
 	await host.start(session);
 
+	// Build the local slash controller with real capabilities. Skills are
+	// rediscovered per /skills call (cheap; reflects on-disk changes).
+	const skillEnv: SkillEnv = {
+		cwd: process.cwd(),
+		home: homedir(),
+		xdgConfigHome: process.env.XDG_CONFIG_HOME,
+	};
+	const skillFs = nodeSkillFs();
+	const slashCtx: SlashContext = {
+		write: (s) => void process.stdout.write(s),
+		session,
+		lastContent: () => lastContent,
+		lastUsage: () => lastUsage,
+		skills: () =>
+			discoverSkills(skillEnv, skillFs).map((s) => ({
+				name: s.name,
+				source: s.source,
+				description: s.description,
+			})),
+		clipboard: makeClipboard(process.platform, spawn),
+	};
+	const slash = new SlashController(slashCtx);
+
 	const stdin = process.stdin;
 	stdin.setRawMode?.(true);
 	stdin.resume();
@@ -97,6 +131,7 @@ export async function runStandalone(): Promise<number> {
 			session,
 			host,
 			write: (s) => void process.stdout.write(s),
+			slash,
 		});
 	} finally {
 		process.stdout.write("\x1b[?2004l"); // restore the terminal's paste mode

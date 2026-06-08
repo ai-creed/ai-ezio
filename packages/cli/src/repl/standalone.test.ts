@@ -4,7 +4,9 @@ import type { SlashOutcome } from "./slash.js";
 
 /** A fake slash controller: each entry in `outcomes` is matched by submitted
  * line; default is to submit the line verbatim. */
-function fakeSlash(map: (line: string) => SlashOutcome = (line) => ({ action: "submit", text: line })) {
+function fakeSlash(
+	map: (line: string) => SlashOutcome = (line) => ({ action: "submit", text: line }),
+) {
 	const seen: string[] = [];
 	return {
 		seen,
