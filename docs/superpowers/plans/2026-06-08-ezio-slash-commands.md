@@ -263,66 +263,66 @@ describe("SlashController.handle", () => {
 		expect(called).toBe(1);
 	});
 
-	it("/status renders provider · model · effort", async () => {
+	it("/status renders provider · model · effort and returns handled", async () => {
 		const { ctx, out } = fakeCtx();
 		const c = new SlashController(ctx);
-		await c.handle("/status");
+		expect(await c.handle("/status")).toEqual({ action: "handled" });
 		expect(out()).toContain("anthropic");
 		expect(out()).toContain("claude-x");
 		expect(out()).toContain("high");
 	});
 
-	it("/skills lists name · source, or a placeholder when empty", async () => {
+	it("/skills lists name · source, or a placeholder when empty (both return handled)", async () => {
 		const empty = fakeCtx();
-		await new SlashController(empty.ctx).handle("/skills");
+		expect(await new SlashController(empty.ctx).handle("/skills")).toEqual({ action: "handled" });
 		expect(empty.out()).toContain("(no skills found)");
 
 		const some = fakeCtx({
 			skills: () => [{ name: "debugging", source: "project", description: "d" }],
 		});
-		await new SlashController(some.ctx).handle("/skills");
+		expect(await new SlashController(some.ctx).handle("/skills")).toEqual({ action: "handled" });
 		expect(some.out()).toContain("debugging");
 		expect(some.out()).toContain("project");
 	});
 
-	it("/copy with content copies and reports byte count", async () => {
+	it("/copy with content copies, reports byte count, and returns handled", async () => {
 		let copied = "";
 		const { ctx, out } = fakeCtx({
 			lastContent: () => "héllo",
 			clipboard: async (t) => void (copied = t),
 		});
-		await new SlashController(ctx).handle("/copy");
+		expect(await new SlashController(ctx).handle("/copy")).toEqual({ action: "handled" });
 		expect(copied).toBe("héllo");
 		expect(out()).toContain(`copied ${Buffer.byteLength("héllo", "utf8")} bytes`);
 	});
 
-	it("/copy with no content → no response to copy", async () => {
+	it("/copy with no content → no response to copy (handled)", async () => {
 		const { ctx, out } = fakeCtx({ lastContent: () => "" });
-		await new SlashController(ctx).handle("/copy");
+		expect(await new SlashController(ctx).handle("/copy")).toEqual({ action: "handled" });
 		expect(out()).toContain("no response to copy");
 	});
 
-	it("/copy surfaces a rejecting clipboard as unavailable", async () => {
+	it("/copy surfaces a rejecting clipboard as unavailable (handled)", async () => {
 		const { ctx, out } = fakeCtx({
 			lastContent: () => "x",
 			clipboard: async () => {
 				throw new Error("pbcopy not found");
 			},
 		});
-		await new SlashController(ctx).handle("/copy");
+		expect(await new SlashController(ctx).handle("/copy")).toEqual({ action: "handled" });
 		expect(out()).toContain("clipboard unavailable");
 		expect(out()).toContain("pbcopy not found");
 	});
 
-	it("/usage renders tracked usage, or a placeholder when absent", async () => {
+	it("/usage renders tracked usage, or a placeholder when absent (both return handled)", async () => {
 		const none = fakeCtx({ lastUsage: () => undefined });
-		await new SlashController(none.ctx).handle("/usage");
+		expect(await new SlashController(none.ctx).handle("/usage")).toEqual({ action: "handled" });
 		expect(none.out()).toContain("no usage yet");
 
 		const some = fakeCtx({
 			lastUsage: () => ({ contextTokens: 100, outputTokens: 20, cachedTokens: 5, contextLimit: 200000 }),
 		});
-		await new SlashController(some.ctx).handle("/usage");
+		expect(await new SlashController(some.ctx).handle("/usage")).toEqual({ action: "handled" });
 		const text = some.out();
 		expect(text).toContain("100");
 		expect(text).toContain("20");
