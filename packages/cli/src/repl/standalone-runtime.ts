@@ -87,6 +87,10 @@ export async function runStandalone(): Promise<number> {
 	const stdin = process.stdin;
 	stdin.setRawMode?.(true);
 	stdin.resume();
+	// Enable bracketed paste so a pasted block arrives wrapped in ESC[200~…ESC[201~
+	// markers (feedKey treats the embedded newlines as literal instead of
+	// submitting at the first one).
+	process.stdout.write("\x1b[?2004h");
 	try {
 		await runStandaloneRepl({
 			keys: readKeys(stdin),
@@ -95,6 +99,7 @@ export async function runStandalone(): Promise<number> {
 			write: (s) => void process.stdout.write(s),
 		});
 	} finally {
+		process.stdout.write("\x1b[?2004l"); // restore the terminal's paste mode
 		stdin.setRawMode?.(false);
 		stdin.pause();
 	}
