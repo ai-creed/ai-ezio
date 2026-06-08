@@ -634,10 +634,10 @@ describe("makeClipboard", () => {
 		expect(captured).toBe("hello");
 	});
 
-	it("linux tries wl-copy first, falls back to xclip on spawn error", async () => {
-		const tried: string[] = [];
-		const spawnFn = ((cmd: string) => {
-			tried.push(cmd);
+	it("linux tries full wl-copy argv first, falls back to full xclip argv on spawn error", async () => {
+		const argvs: string[][] = [];
+		const spawnFn = ((cmd: string, args: string[]) => {
+			argvs.push([cmd, ...args]);
 			if (cmd === "wl-copy") {
 				const c = new EventEmitter() as never as ReturnType<typeof fakeChild>;
 				(c as unknown as { stdin: { end: () => void } }).stdin = { end: () => {} };
@@ -648,7 +648,9 @@ describe("makeClipboard", () => {
 		}) as never;
 		const copy = makeClipboard("linux", spawnFn);
 		await copy("x");
-		expect(tried).toEqual(["wl-copy", "xclip"]);
+		// Assert the COMPLETE argv of each candidate, not just the command name, so a
+		// regression that drops `-selection clipboard` from xclip is caught.
+		expect(argvs).toEqual([["wl-copy"], ["xclip", "-selection", "clipboard"]]);
 	});
 
 	it("rejects when every candidate fails", async () => {
