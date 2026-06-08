@@ -160,6 +160,38 @@ stays protocol-native (no REPL re-enable, no PTY scraping). Spec/plan:
 diffs), a clean usage line, and a `❯` prompt — fed entirely by protocol events;
 codex/claude and all M6/M7 behavior unchanged. **Met.**
 
+## M9 — Generic MCP host + unified terminal ✅ (done 2026-06-08)
+
+ezio becomes the ai-\* ecosystem's opinionated coding agent and a **generic MCP
+host**: the model can call any configured stdio MCP server's tools (cortex first)
+live, mid-turn. Built on a **unified** architecture — hax is always headless and
+ezio (TS) always owns the terminal. Spec/plan:
+`docs/superpowers/specs/2026-06-08-m9-mcp-host-ecosystem-integration-design.md`,
+`docs/superpowers/plans/2026-06-08-m9-mcp-host-ecosystem-integration.md`.
+
+- ✅ hax **host-delegated tools** seam (MCP-agnostic): `register_delegated_tools`
+  / `tool_result` controls + a `tool_call_requested` event; the dispatch loop
+  emits the request and **blocks** on the control fd for the host's result —
+  interrupt-aware and timeout-bounded (`AI_EZIO_DELEGATED_TIMEOUT`, default 120s).
+  Delegated output is capped to `output_cap_bytes()` like native tools. Native
+  behavior is byte-for-byte identical when nothing is registered.
+- ✅ `@ai-ezio/mcp-host`: spawn/connect stdio MCP servers (`@modelcontextprotocol/sdk`),
+  `<server>__<tool>` namespacing, schema-aware drift-proof cwd injection,
+  config-driven `allow|deny|confirm` policy (destructive defaults deny; confirm
+  degrades to deny in mounted), per-call 60s timeout, lifecycle. A shared
+  `loadMcpHost` factory is the single both-modes entry point.
+- ✅ Unified run architecture: hax always headless; standalone `ezio` self-mounts
+  (line-buffered input reader + M7/M8 surface + MCP host). hax stdin/stdout/stderr
+  stay ignored.
+- ✅ An e2e proves the full round-trip through the **real hax engine** + a stub MCP
+  server (register → model calls a delegated tool → request → host routes →
+  result → finish).
+
+**Done when:** the model calls a configured MCP server's tool live mid-turn over
+the protocol; native behavior unchanged when no tools are registered. **Met.**
+(Mounted-mode adapter wiring — one `loadMcpHost` call — lands in the ai-whisper
+`adapter-ai-ezio`.)
+
 ## Open study questions (carried from the plan)
 
 - How much hax core (if any) needs splitting for clean protocol hooks beyond the
@@ -170,4 +202,7 @@ codex/claude and all M6/M7 behavior unchanged. **Met.**
   bound agents; ezio usually replaces codex). >2 simultaneous agents is out of
   scope.
 - How skills are shared across Claude / Codex / hax / ai-ezio (M2).
-- Which generic improvements (esp. the emitter) to propose back to hax upstream.
+- ~~Which generic improvements (esp. the emitter) to propose back to hax
+  upstream.~~ **Resolved:** we maintain our own hax fork as ezio's backbone and do
+  not upstream; changes stay localized/minimal/rebaseable so the fork can still
+  sync with upstream hax (see `UPSTREAM.md`).

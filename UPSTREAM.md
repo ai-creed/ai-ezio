@@ -19,8 +19,17 @@ does not depend on it ever being merged.
 ## How hax is consumed
 
 hax is vendored as a **git submodule** at `vendor/hax`, pointing at our fork
-`ai-creed/hax`. The fork carries a single, small, isolated downstream change —
-the **protocol emitter** — on the `emitter` branch on top of the upstream base.
+`ai-creed/hax`. The fork carries small, isolated downstream changes on the
+`emitter` branch on top of the upstream base:
+
+- the **protocol emitter** (M3+), and
+- the **host-delegated tools** seam (M9): an MCP-agnostic mechanism letting the
+  harness advertise tools whose results come from the host over the protocol
+  (`register_delegated_tools`/`tool_result` controls, `tool_call_requested` event,
+  a delegated dispatch branch). hax knows nothing about MCP — that keeps the seam
+  generic and rebaseable.
+
+Each change stays localized so the fork can keep syncing with upstream hax.
 
 ```text
 vendor/hax  (submodule url: git@github.com:ai-creed/hax.git, branch = emitter)

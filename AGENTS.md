@@ -46,11 +46,14 @@ ai-ezio/
 1. **Read first:** `docs/architecture.md`, then `docs/protocol.md`, then this
    file. For any change under `vendor/hax`, read `UPSTREAM.md` first.
 2. **Respect the engine/harness boundary.** New product behavior goes in
-   `packages/`. Only touch `vendor/hax` to extend the protocol emitter, and keep
-   that surface tiny and upstreamable.
-3. **Keep the hax patch minimal.** The emitter is one file + two CLI flags +
-   a couple of registration lines. If a change to hax grows beyond the emitter
-   seam, stop and reconsider — it probably belongs in the harness.
+   `packages/`. The sanctioned hax-extension areas are the **protocol emitter**
+   and the **host-delegated tools** seam (M9) — both MCP-agnostic and generic.
+   All MCP/config/policy intelligence lives in `packages/mcp-host` (TS), never in
+   hax: the engine only knows "this tool's result comes from the host."
+3. **Keep the hax fork minimal & rebaseable.** We maintain our own hax fork (we do
+   not upstream), so every C change must stay localized so the fork can keep
+   syncing with upstream hax. If a change to hax grows beyond a tiny generic seam,
+   stop and reconsider — it probably belongs in the harness.
 4. **Protocol is the contract.** Do not infer readiness or response text from
    terminal chrome. Emit/consume explicit JSONL events. Any new event or control
    must be documented in `docs/protocol.md` first.

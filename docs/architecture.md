@@ -114,11 +114,39 @@ ai-whisper workflow lives in ai-whisper. See
 `docs/superpowers/specs/2026-06-04-m5-adapter-design.md`.
 
 ### `packages/cli`
-The `ai-ezio` user-facing binary. Interactive REPL passthrough for humans,
-`--mount-mode` for machines, plus structured status/diagnostics (`--version
---json` with ezio version + hax base commit, `doctor`, `skill list`/`skill
-dirs`, interactive `/skills`).
-Depends on: `harness`.
+The `ai-ezio` user-facing binary. A bare interactive `ezio` **self-mounts** (see
+"Terminal ownership"), `--mount-mode` for machines, plus structured
+status/diagnostics (`--version --json` with ezio version + hax base commit,
+`doctor`, `skill list`/`skill dirs`, interactive `/skills`).
+Depends on: `harness`, `mcp-host`, `surface`.
+
+### `packages/mcp-host` (M9)
+The generic **MCP host** — where all MCP/ecosystem intelligence lives. Spawns and
+connects stdio MCP servers (`@modelcontextprotocol/sdk`), lists their tools,
+registers them with hax as **delegated tools** (`<server>__<tool>` namespacing),
+and services each `tool_call_requested` by routing to the owning server and
+replying with a `tool_result`. Owns cwd injection (schema-aware, drift-proof),
+the config-driven `allow|deny|confirm` policy, per-call timeouts, and server
+lifecycle. hax knows nothing about MCP — only "this tool's result comes from the
+host." The shared `loadMcpHost` factory is wired by **both** Session creators (the
+standalone CLI and ai-whisper's mounted adapter).
+Depends on: `harness`, `protocol`.
+
+## Terminal ownership (unified, M9)
+
+hax is **always headless**: spawned with stdin/stdout/stderr ignored, it speaks
+only the protocol (events on fd 3, controls on fd 4) and never reads the keyboard
+or paints the screen. ezio (TS) **always owns the terminal** in both run modes:
+
+- **Output** — the M7/M8 `surface` renders the protocol stream (banner, markdown,
+  tool calls, usage, prompt).
+- **Input** — in **standalone** a small **line-buffered reader** owns the keyboard
+  and feeds `submit`; in **mounted** the host app (ai-whisper / 14all) provides the
+  input box and hands ezio a finished prompt string.
+- **MCP host** — sits in this same loop, servicing delegated tool calls.
+
+"Headless" means terminal-less and persistent/interactive (`--mount-mode`), **not**
+one-shot — the session stays alive across turns and keeps conversation context.
 
 ## Data flow (mounted turn)
 

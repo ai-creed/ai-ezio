@@ -3,18 +3,20 @@
 A hax-derived, workflow-native coding agent for the ai-creed / ai-whisper
 ecosystem.
 
-ai-ezio preserves hax's strengths — a fast, small terminal coding assistant —
+ai-ezio is the ai-\* ecosystem's opinionated coding agent and a **generic MCP
+host**: it preserves hax's strengths — a fast, small terminal coding assistant —
 while adding the machine-controllable behavior needed for mounted, automated
-collaboration. It keeps a good terminal UI for humans, but exposes an explicit
-machine protocol so ai-creed and ai-whisper never have to scrape a TUI.
+collaboration, and it speaks **MCP** to any ecosystem service (ai-cortex first).
+It keeps a good terminal UI for humans, but exposes an explicit machine protocol
+so ai-creed and ai-whisper never have to scrape a TUI.
 
 ```text
 hax      = minimal standalone coding assistant (C)
-ai-ezio  = hax-derived workflow-native coding agent (C engine + TypeScript harness)
+ai-ezio  = hax-derived workflow-native coding agent + MCP host (C engine + TypeScript harness)
 ```
 
-> **Status:** private, pre-implementation. This repository currently contains
-> high-level design documents only. See `docs/milestones.md` for the build plan.
+> **Status:** private, under active implementation (through M9 — generic MCP host
+> + unified terminal). See `docs/milestones.md` for the build plan.
 
 ## Lineage
 
