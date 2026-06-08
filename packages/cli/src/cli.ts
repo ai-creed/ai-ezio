@@ -124,11 +124,26 @@ export function launchEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Process
 }
 
 /** A bare interactive launch (no args, both ends a TTY) self-mounts: ezio owns
- * the terminal and drives headless hax through the surface + MCP host. Anything
- * with args (-p one-shot, explicit --mount-mode, flags) stays on the passthrough
- * path below so existing behavior is untouched. */
+ * the terminal and drives headless hax through the surface + MCP host. */
 export function wantsInteractiveSelfMount(argv: readonly string[]): boolean {
 	return argv.length === 0 && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+}
+
+/** The prompt for a `-p`/`--print <prompt>` one-shot, or undefined when there is
+ * no concrete prompt arg (e.g. `-p` reading stdin) — those stay on passthrough. */
+export function oneShotPrompt(argv: readonly string[]): string | undefined {
+	const i = argv.findIndex((a) => a === "-p" || a === "--print");
+	if (i < 0) return undefined;
+	const next = argv[i + 1];
+	return typeof next === "string" && !next.startsWith("-") ? next : undefined;
+}
+
+/** Args to forward to hax for a one-shot (everything except the -p flag + prompt),
+ * so e.g. `ezio -p "x" --some-flag` still reaches the engine. */
+export function oneShotExtraArgs(argv: readonly string[]): string[] {
+	const i = argv.findIndex((a) => a === "-p" || a === "--print");
+	if (i < 0) return [];
+	return argv.filter((_, idx) => idx !== i && idx !== i + 1);
 }
 
 /** Run the CLI, returning the process exit code. */
@@ -145,6 +160,14 @@ export async function main(argv: string[]): Promise<number> {
 	if (wantsInteractiveSelfMount(argv)) {
 		const { runStandalone } = await import("./repl/standalone-runtime.js");
 		return runStandalone();
+	}
+
+	// `-p <prompt>` one-shot runs through the unified Session + MCP host
+	// (submitAndWait), so a one-shot can use registered MCP tools too.
+	const oneShot = oneShotPrompt(argv);
+	if (oneShot !== undefined) {
+		const { runOneShot } = await import("./repl/standalone-runtime.js");
+		return runOneShot(oneShot, { startOptions: { args: oneShotExtraArgs(argv) } });
 	}
 
 	let bin: string;

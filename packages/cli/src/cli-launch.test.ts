@@ -47,8 +47,10 @@ describe("ai-ezio --mount-mode launch layer", () => {
 		expect(opts.env.HAX_EXTRA_SKILLS_DIR).toContain("ai-ezio");
 	});
 
-	it("the human-REPL launch (no mount flags) also sets HAX_EXTRA_SKILLS_DIR", async () => {
-		await main(["-p", "hello"]);
+	it("a passthrough launch (non-intercepted flag) sets HAX_EXTRA_SKILLS_DIR", async () => {
+		// `-p <prompt>` now routes through the unified Session + MCP host, so use a
+		// generic flag to exercise the raw passthrough spawn layer.
+		await main(["--help"]);
 		expect(spawnMock).toHaveBeenCalledTimes(1);
 		const call = spawnMock.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }];
 		expect(call[2].env.HAX_EXTRA_SKILLS_DIR).toContain("ai-ezio");
