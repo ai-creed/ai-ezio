@@ -6,7 +6,12 @@
   next), built on a **unified** run architecture where hax is always headless and
   ezio (TS) always owns the terminal.
 - **Repos touched:** ai-ezio (hax fork seam + protocol + new `mcp-host` package +
-  CLI + docs). ai-whisper unaffected (it already drives the mounted host path).
+  CLI + docs). ai-whisper: a **one-line adapter wiring** — the mounted Session is
+  created by ai-whisper's `adapter-ai-ezio`, so it calls the same `loadMcpHost`
+  factory + `host.start(session)` the standalone CLI does (without it, mounted
+  ezio would have no MCP tools). The host *implementation* lives entirely in
+  ai-ezio; ai-whisper only attaches it. (The terminal/input host path is already
+  ai-whisper's and is otherwise unchanged.)
 - **References:** `docs/architecture.md`, `docs/protocol.md`, `docs/milestones.md`,
   `UPSTREAM.md`, the M4 mount-mode + M7/M8 surface work.
 
@@ -76,8 +81,10 @@ delegated tool calls.
 2. **`packages/mcp-host`** (new TS — the product surface). *Does:* load config,
    spawn/connect stdio MCP servers (`@modelcontextprotocol/sdk`), `tools/list`,
    register namespaced defs with hax, service `tool_call_requested`, inject
-   `worktreePath`/cwd, enforce policy, manage server lifecycle. *Depends on:* the
-   harness `Session`. *Used by:* the CLI in both modes.
+   `worktreePath`/`path` from cwd (drift-proof, schema-aware), enforce policy,
+   manage server lifecycle. *Depends on:* the harness `Session`. *Used by:* both
+   Session creators — the standalone CLI and the ai-whisper mounted adapter — via
+   a shared `loadMcpHost` factory.
 3. **input reader** (TS, standalone only). *Does:* line-buffered stdin →
    `submit(string)`. Ported from ai-whisper's `live-session.ts` line buffer.
 4. **surface** (TS, exists). *Does:* render protocol events. Unchanged — delegated

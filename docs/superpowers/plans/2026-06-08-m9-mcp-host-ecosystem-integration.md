@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-08-m9-mcp-host-ecosystem-integration-design.md`
 
+**Both-modes wiring (load-bearing — read before Phase 3/4):** the MCP host attaches to a `Session`, so whoever *creates* the Session attaches it. There are exactly two Session creators: (1) ezio's **standalone CLI** (Phase 4), and (2) ai-whisper's **mounted adapter** (`packages/adapter-ai-ezio/src/create-ai-ezio-live-session.ts`, which imports `@ai-ezio/harness`). Both call the **same** `loadMcpHost(...)` factory + `host.start(session)` sequence. This is why "ai-whisper unaffected" from the spec is refined to "ai-whisper adapter gains a one-line host wiring" (Task 4.3): without it, mounted ezio would have no MCP tools. The host's register-before-first-submit ordering and routing are identical in both modes; only the input source differs.
+
 **Wire-field convention (IMPORTANT):** the existing protocol is **camelCase on the wire** (`callId`, `turnId`, `sessionId`). The spec's JSON examples used snake_case illustratively — **use camelCase** for all new fields (`callId`, `parametersSchema`). hax's `emit.c` already emits camelCase; match it.
 
 **Phase order (each phase is independently testable / committable):**
@@ -1044,55 +1046,140 @@ git commit -m "feat(mcp-host): McpClient interface + stdio client + result mappi
 - [ ] **Step 1: Failing test (fake Session + fake clients)**
 
 ```ts
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { McpHost } from "./host.js";
 import type { McpClient } from "./mcp-client.js";
 
-function fakeClient(tools: string[], onCall: (t: string, a: unknown) => { output: string; status: "ok" | "error" }): McpClient {
+// Tools declare a schema (properties) so cwd-injection can be schema-aware.
+function fakeClient(
+	tools: Array<{ name: string; props?: string[] }>,
+	onCall: (t: string, a: Record<string, unknown>) => { output: string; status: "ok" | "error" } | Promise<never>,
+): McpClient {
 	return {
-		listTools: async () => tools.map((name) => ({ name, description: "", parametersSchema: { type: "object" } })),
-		callTool: async (t, a) => onCall(t, a),
+		listTools: async () =>
+			tools.map((t) => ({
+				name: t.name,
+				description: "",
+				parametersSchema: {
+					type: "object",
+					properties: Object.fromEntries((t.props ?? []).map((p) => [p, { type: "string" }])),
+				},
+			})),
+		callTool: async (t, a) => onCall(t, a) as { output: string; status: "ok" | "error" },
 		close: async () => {},
 	};
 }
 
-it("registers namespaced tools and routes a delegated call", async () => {
+function fakeSession() {
 	const registered: unknown[] = [];
 	const results: Array<[string, string, string]> = [];
-	const session = {
-		registerDelegatedTools: (t: unknown) => registered.push(t),
-		sendToolResult: (id: string, out: string, st: string) => results.push([id, out, st]),
-		onEvent: undefined as undefined | ((e: unknown) => void),
+	return {
+		registered,
+		results,
+		session: {
+			registerDelegatedTools: (t: unknown) => registered.push(t),
+			sendToolResult: (id: string, out: string, st: string) => results.push([id, out, st]),
+		},
 	};
-	const host = new McpHost({
-		mode: "mounted",
-		cwd: "/repo",
-		toolPolicy: {},
-		connect: async () => fakeClient(["recall_memory"], (t, a) => ({ output: `called ${t} ${JSON.stringify(a)}`, status: "ok" })),
-		servers: [{ name: "cortex", command: "x", args: [] }],
-	});
-	await host.start(session as never);
-	expect(registered[0]).toEqual([{ name: "cortex__recall_memory", description: "", parametersSchema: { type: "object" } }]);
+}
 
-	// simulate hax emitting a delegated request
-	await host.handleEvent({ type: "tool_call_requested", turnId: "t", callId: "c1", name: "cortex__recall_memory", args: { q: 1 } });
-	expect(results).toEqual([["c1", `called recall_memory {"q":1,"worktreePath":"/repo"}`, "ok"]]);
+it("registers namespaced tools and routes a call, injecting cwd from schema", async () => {
+	const fx = fakeSession();
+	const host = new McpHost({
+		mode: "mounted", cwd: "/repo", toolPolicy: {},
+		servers: [{ name: "cortex", command: "x", args: [] }],
+		connect: async () =>
+			fakeClient([{ name: "recall_memory", props: ["query", "worktreePath"] }], (t, a) => ({
+				output: `called ${t} ${JSON.stringify(a)}`,
+				status: "ok",
+			})),
+	});
+	await host.start(fx.session as never);
+	expect((fx.registered[0] as Array<{ name: string }>)[0].name).toBe("cortex__recall_memory");
+
+	await host.handleEvent({ type: "tool_call_requested", turnId: "t", callId: "c1", name: "cortex__recall_memory", args: { query: "x" } });
+	expect(fx.results[0]).toEqual(["c1", `called recall_memory {"query":"x","worktreePath":"/repo"}`, "ok"]);
+});
+
+it("overrides model-supplied worktreePath AND path (no drift)", async () => {
+	const fx = fakeSession();
+	let seen: Record<string, unknown> = {};
+	const host = new McpHost({
+		mode: "mounted", cwd: "/repo", toolPolicy: {},
+		servers: [{ name: "cortex", command: "x", args: [] }],
+		connect: async () =>
+			fakeClient([{ name: "suggest_files", props: ["task", "path", "worktreePath"] }], (_t, a) => {
+				seen = a;
+				return { output: "ok", status: "ok" };
+			}),
+	});
+	await host.start(fx.session as never);
+	await host.handleEvent({
+		type: "tool_call_requested", turnId: "t", callId: "c1", name: "cortex__suggest_files",
+		args: { task: "auth", path: "/evil", worktreePath: "/evil" },
+	});
+	expect(seen.path).toBe("/repo");
+	expect(seen.worktreePath).toBe("/repo");
+});
+
+it("does NOT add an injected arg the tool's schema lacks", async () => {
+	const fx = fakeSession();
+	let seen: Record<string, unknown> = {};
+	const host = new McpHost({
+		mode: "mounted", cwd: "/repo", toolPolicy: {},
+		servers: [{ name: "stub", command: "x", args: [] }],
+		connect: async () =>
+			fakeClient([{ name: "ping", props: ["msg"] }], (_t, a) => {
+				seen = a;
+				return { output: "ok", status: "ok" };
+			}),
+	});
+	await host.start(fx.session as never);
+	await host.handleEvent({ type: "tool_call_requested", turnId: "t", callId: "c1", name: "stub__ping", args: { msg: "hi" } });
+	expect("worktreePath" in seen).toBe(false);
+	expect("path" in seen).toBe(false);
 });
 
 it("denies a policy-blocked tool without calling the server", async () => {
-	const results: Array<[string, string, string]> = [];
-	const session = { registerDelegatedTools: () => {}, sendToolResult: (id: string, o: string, s: string) => results.push([id, o, s]) };
+	const fx = fakeSession();
 	const call = vi.fn();
 	const host = new McpHost({
 		mode: "mounted", cwd: "/repo", toolPolicy: { cortex__purge_memory: "deny" },
-		connect: async () => fakeClient(["purge_memory"], (t, a) => { call(); return { output: "x", status: "ok" }; }),
 		servers: [{ name: "cortex", command: "x", args: [] }],
+		connect: async () => fakeClient([{ name: "purge_memory" }], () => { call(); return { output: "x", status: "ok" }; }),
 	});
-	await host.start(session as never);
+	await host.start(fx.session as never);
 	await host.handleEvent({ type: "tool_call_requested", turnId: "t", callId: "c2", name: "cortex__purge_memory", args: {} });
 	expect(call).not.toHaveBeenCalled();
-	expect(results[0][2]).toBe("error");
-	expect(results[0][1]).toMatch(/blocked|denied|policy/i);
+	expect(fx.results[0][2]).toBe("error");
+	expect(fx.results[0][1]).toMatch(/blocked|denied|policy/i);
+});
+
+it("returns an error tool_result when the server call rejects (crash) — no missing reply", async () => {
+	const fx = fakeSession();
+	const host = new McpHost({
+		mode: "mounted", cwd: "/repo", toolPolicy: {},
+		servers: [{ name: "cortex", command: "x", args: [] }],
+		connect: async () => fakeClient([{ name: "recall_memory", props: ["worktreePath"] }], () => Promise.reject(new Error("server died"))),
+	});
+	await host.start(fx.session as never);
+	await host.handleEvent({ type: "tool_call_requested", turnId: "t", callId: "c3", name: "cortex__recall_memory", args: {} });
+	expect(fx.results[0][0]).toBe("c3");
+	expect(fx.results[0][2]).toBe("error");
+	expect(fx.results[0][1]).toMatch(/failed|died/i);
+});
+
+it("returns an error tool_result when a call exceeds the per-call timeout (before hax backstop)", async () => {
+	const fx = fakeSession();
+	const host = new McpHost({
+		mode: "mounted", cwd: "/repo", toolPolicy: {}, callTimeoutMs: 20,
+		servers: [{ name: "cortex", command: "x", args: [] }],
+		connect: async () => fakeClient([{ name: "recall_memory", props: ["worktreePath"] }], () => new Promise(() => {}) as Promise<never>),
+	});
+	await host.start(fx.session as never);
+	await host.handleEvent({ type: "tool_call_requested", turnId: "t", callId: "c4", name: "cortex__recall_memory", args: {} });
+	expect(fx.results[0][2]).toBe("error");
+	expect(fx.results[0][1]).toMatch(/timed out|failed/i);
 });
 ```
 
@@ -1104,7 +1191,7 @@ Expected: FAIL — `McpHost` missing.
 - [ ] **Step 3: Implement `host.ts`**
 
 ```ts
-import type { ProtocolEvent } from "@ai-ezio/protocol";
+import type { DelegatedToolDef, ProtocolEvent } from "@ai-ezio/protocol";
 import type { Session } from "@ai-ezio/harness";
 import { decidePolicy, type RunMode } from "./policy.js";
 import type { ToolPolicy } from "./config.js";
@@ -1117,6 +1204,11 @@ export interface McpHostOptions {
 	cwd: string;
 	servers: ServerConfig[];
 	toolPolicy: Record<string, ToolPolicy>;
+	/** Repo-root arg names forced to cwd (default ["worktreePath","path"] — the
+	 * ai-* convention). Drift-proof: overrides model-supplied values. */
+	injectArgs?: string[];
+	/** Per-call timeout; the host ALWAYS replies before hax's 120s backstop. Default 60s. */
+	callTimeoutMs?: number;
 	/** Injectable for tests; defaults to stdio connect. */
 	connect?: (server: ServerConfig) => Promise<McpClient>;
 	/** One-line warnings surfaced ONLY on failure (per spec). Defaults to stderr. */
@@ -1128,6 +1220,8 @@ export interface McpHostOptions {
 export class McpHost {
 	private readonly routes = new RouteMap();
 	private readonly clients = new Map<string, McpClient>();
+	/** Namespaced name → def (for schema-aware cwd injection). */
+	private readonly defsByName = new Map<string, DelegatedToolDef>();
 	private session?: Pick<Session, "registerDelegatedTools" | "sendToolResult">;
 
 	constructor(private readonly opts: McpHostOptions) {}
@@ -1144,7 +1238,9 @@ export class McpHost {
 				this.clients.set(server.name, client);
 				for (const def of await client.listTools()) {
 					const name = this.routes.add(server.name, def.name);
-					defs.push({ ...def, name });
+					const namespaced = { ...def, name };
+					this.defsByName.set(name, namespaced);
+					defs.push(namespaced);
 				}
 			} catch (e) {
 				this.warn(`mcp: server "${server.name}" failed to connect: ${(e as Error).message}`);
@@ -1171,19 +1267,33 @@ export class McpHost {
 		const client = this.clients.get(route.server);
 		if (!client) return this.reply(callId, `server "${route.server}" unavailable`, "error");
 		try {
-			const injected = this.injectCwd(route.tool, args);
-			const res = await client.callTool(route.tool, injected);
+			const injected = this.injectCwd(name, args);
+			const res = await withTimeout(
+				client.callTool(route.tool, injected),
+				this.opts.callTimeoutMs ?? 60_000,
+				`call ${name}`,
+			);
 			this.reply(callId, res.output, res.status);
 		} catch (e) {
+			// Covers BOTH a per-call timeout AND a crashed/hung/down server: the host
+			// ALWAYS replies, so hax never reaches its 120s backstop and never hangs.
 			this.warn(`mcp: call ${name} failed: ${(e as Error).message}`);
 			this.reply(callId, `tool call failed: ${(e as Error).message}`, "error");
 		}
 	}
 
-	/** Fill worktreePath/path from cwd when the tool expects them and the model omitted them. */
-	private injectCwd(_tool: string, args: Record<string, unknown>): Record<string, unknown> {
+	/** Force repo-root args (worktreePath/path) to the session cwd. Overrides any
+	 * model-supplied value (drift-proof) AND fills when omitted — but ONLY for args
+	 * the tool's own schema declares, so we never add a property the server would
+	 * reject and never clobber an unrelated `path`. */
+	private injectCwd(name: string, args: Record<string, unknown>): Record<string, unknown> {
+		const schema = this.defsByName.get(name)?.parametersSchema as
+			| { properties?: Record<string, unknown> }
+			| undefined;
+		const props = schema?.properties ?? {};
+		const injectArgs = this.opts.injectArgs ?? ["worktreePath", "path"];
 		const out = { ...args };
-		if (out.worktreePath == null) out.worktreePath = this.opts.cwd;
+		for (const arg of injectArgs) if (arg in props) out[arg] = this.opts.cwd;
 		return out;
 	}
 
@@ -1200,6 +1310,15 @@ export class McpHost {
 		this.clients.clear();
 	}
 }
+
+/** Reject after `ms` so a hung/crashed server can't stall the host (and thus
+ * never reaches hax's backstop). */
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+	return Promise.race([
+		p,
+		new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${what} timed out`)), ms)),
+	]);
+}
 ```
 
 Export `McpHost`, `loadConfig`, `parseConfig`, types from `src/index.ts`.
@@ -1214,6 +1333,103 @@ Expected: PASS.
 ```bash
 git add packages/mcp-host/src/host.ts packages/mcp-host/src/index.ts packages/mcp-host/src/host.test.ts
 git commit -m "feat(mcp-host): McpHost wires Session <-> MCP servers (register, route, policy, cwd-inject)"
+```
+
+### Task 3.7: Shared `loadMcpHost` factory (the single both-modes entry point)
+
+Both Session creators (standalone CLI + mounted adapter) must build the host the same way. Factor that into one helper so the two call sites stay one line each and behave identically.
+
+**Files:**
+- Create: `packages/mcp-host/src/attach.ts`
+- Modify: `packages/mcp-host/src/index.ts` (export `createMcpHost`, `loadMcpHost`)
+- Test: `packages/mcp-host/src/attach.test.ts`
+
+- [ ] **Step 1: Failing test**
+
+```ts
+import { expect, it } from "vitest";
+import { createMcpHost } from "./attach.js";
+import type { McpClient } from "./mcp-client.js";
+
+it("builds a host from an explicit config and registers tools in mounted mode", async () => {
+	const registered: unknown[] = [];
+	const session = { registerDelegatedTools: (t: unknown) => registered.push(t), sendToolResult: () => {} };
+	const fake: McpClient = {
+		listTools: async () => [{ name: "recall_memory", description: "", parametersSchema: { type: "object" } }],
+		callTool: async () => ({ output: "", status: "ok" }),
+		close: async () => {},
+	};
+	const host = createMcpHost(
+		{ servers: [{ name: "cortex", command: "x", args: [] }], toolPolicy: {} },
+		{ mode: "mounted", cwd: "/repo", connect: async () => fake },
+	);
+	await host.start(session as never);
+	expect((registered[0] as Array<{ name: string }>)[0].name).toBe("cortex__recall_memory");
+});
+
+it("builds a no-op host (no servers) when config is empty", async () => {
+	const registered: unknown[] = [];
+	const session = { registerDelegatedTools: (t: unknown) => registered.push(t), sendToolResult: () => {} };
+	const host = createMcpHost({ servers: [], toolPolicy: {} }, { mode: "standalone", cwd: "/repo" });
+	await host.start(session as never);
+	expect(registered).toEqual([]); // nothing registered → native behavior unchanged
+});
+```
+
+- [ ] **Step 2: Run; expect failure**
+
+Run: `pnpm --filter @ai-ezio/mcp-host test`
+Expected: FAIL — `createMcpHost` missing.
+
+- [ ] **Step 3: Implement `attach.ts`**
+
+```ts
+import { McpHost } from "./host.js";
+import { loadConfig, type HostConfig, type ServerConfig } from "./config.js";
+import type { McpClient } from "./mcp-client.js";
+import type { RunMode } from "./policy.js";
+
+export interface CreateHostOptions {
+	mode: RunMode;
+	cwd?: string;
+	/** Standalone-only confirm prompt. */
+	confirm?: (name: string) => Promise<boolean>;
+	/** Injectable connect (tests). */
+	connect?: (server: ServerConfig) => Promise<McpClient>;
+}
+
+/** Build an MCP host from an explicit config (pure — no disk). */
+export function createMcpHost(cfg: HostConfig, opts: CreateHostOptions): McpHost {
+	return new McpHost({
+		mode: opts.mode,
+		cwd: opts.cwd ?? process.cwd(),
+		servers: cfg.servers,
+		toolPolicy: cfg.toolPolicy,
+		confirm: opts.confirm,
+		connect: opts.connect,
+	});
+}
+
+/** Build an MCP host from `mcp.json` on disk (the both-modes entry point). The
+ * caller MUST: (1) construct the Session with onEvent fanning to host.handleEvent,
+ * (2) await session.start(), (3) `await host.start(session)` BEFORE the first
+ * submit so the first turn sees the tools. */
+export function loadMcpHost(opts: CreateHostOptions & { env?: NodeJS.ProcessEnv }): McpHost {
+	return createMcpHost(loadConfig(opts.env ?? process.env), opts);
+}
+```
+
+- [ ] **Step 4: Export + run; expect pass**
+
+Add `createMcpHost`, `loadMcpHost`, `CreateHostOptions` to `src/index.ts`.
+Run: `pnpm --filter @ai-ezio/mcp-host test`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/mcp-host/src/attach.ts packages/mcp-host/src/index.ts packages/mcp-host/src/attach.test.ts
+git commit -m "feat(mcp-host): loadMcpHost/createMcpHost factory shared by both run modes"
 ```
 
 ---
@@ -1390,7 +1606,9 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 
 - [ ] **Step 4: Wire the real assembly in `cli.ts`**
 
-Add a `runStandalone(argv)` that: resolves the binary; constructs a `Session` with `onEvent` fanned to BOTH the M7/M8 surface renderer (from `@ai-ezio/surface`) and `host.handleEvent`; `await session.start({ args })` (spawns headless hax via the harness, which already passes `--mount-mode`); loads config (`loadConfig`), constructs `McpHost({ mode: "standalone", cwd: process.cwd(), ... })`, `await host.start(session)` **before** enabling input; sets `process.stdin.setRawMode(true)` and adapts stdin to an async `keys` iterable (decode chunks → chars); then `await runStandaloneRepl({...})`. In `main()`, route to `runStandalone` when the invocation is interactive (not `wantsVersionJson`, not `isNativeSubcommand`, not `-p` one-shot, not an explicit mounted invocation). Keep `-p` one-shot using a single `session.submitAndWait(prompt)` then print `content`. Keep `isMountInvocation` (someone passing `--mount-mode`/fds explicitly) on the existing forward path.
+Add a `runStandalone(argv)` that, in this order: (1) `const host = loadMcpHost({ mode: "standalone", cwd: process.cwd(), confirm: terminalConfirm })` (built but not started); (2) constructs a `Session` with `onEvent` fanned to BOTH the M7/M8 surface renderer (from `@ai-ezio/surface`) and `(e) => void host.handleEvent(e)`; (3) `await session.start({ args })` (spawns headless hax via the harness, which already passes `--mount-mode`); (4) `await host.start(session)` **before** enabling input (so the first turn sees the tools); (5) sets `process.stdin.setRawMode(true)` and adapts stdin to an async `keys` iterable (decode chunks → chars); (6) `await runStandaloneRepl({...})`. Provide `terminalConfirm(name)` that prints a y/N prompt and reads one key (standalone-only; mounted degrades `confirm`→`deny` in policy). In `main()`, route to `runStandalone` when the invocation is interactive (not `wantsVersionJson`, not `isNativeSubcommand`, not `-p` one-shot, not an explicit mounted invocation). Keep `-p` one-shot using a single `session.submitAndWait(prompt)` then print `content` — and wire `loadMcpHost`+`host.start` there too so `-p` also gets memory.
+
+**Note on `isMountInvocation`:** a raw `ai-ezio --mount-mode --protocol-fd=.. --control-fd=..` forwarded straight to hax (the old `mountStdio` path) is a transparent fd bridge that creates **no** `Session`, so it cannot host MCP. Mounted ezio under ai-whisper does NOT use this path — it imports `@ai-ezio/harness` and creates a Session in the adapter (wired in Task 4.3). Leave the raw forward path as-is (a no-MCP escape hatch) and document it as such; the both-modes MCP guarantee is delivered by the two Session creators (standalone here + adapter in 4.3).
 
 - [ ] **Step 5: Run; expect pass**
 
@@ -1402,6 +1620,39 @@ Expected: PASS + build green. Manual smoke (optional, requires a real provider k
 ```bash
 git add packages/cli/src/repl/standalone.ts packages/cli/src/cli.ts packages/cli/src/repl/standalone.test.ts packages/cli/package.json
 git commit -m "feat(cli): self-mount standalone REPL (headless hax + surface + mcp-host)"
+```
+
+### Task 4.3: Mounted-mode wiring (ai-whisper adapter) — close the both-modes gap
+
+The mounted Session is created by ai-whisper's adapter, so the host must be attached there too. This is the **one-line** ai-whisper touch the spec's "ai-whisper unaffected" did not account for; without it mounted ezio has no MCP tools.
+
+**Repo:** ai-whisper (`~/Dev/ai-whisper`). **Files:**
+- Modify: `packages/adapter-ai-ezio/src/create-ai-ezio-live-session.ts`
+- Test: `packages/adapter-ai-ezio/src/create-ai-ezio-live-session.mcp.test.ts` (new)
+
+- [ ] **Step 1: Failing mounted-ordering test**
+
+In the adapter test, drive the live-session factory with a fake `Session` (capturing `registerDelegatedTools`/`sendToolResult`/submit order) and a fake `connect` yielding one tool. Assert that, on mount start, `registerDelegatedTools` is called **before** the first `submit` is possible (i.e. `host.start` is awaited during session start-up), and that a `tool_call_requested` event routed through the adapter's event handler produces a `sendToolResult`. Use `@ai-ezio/mcp-host`'s `createMcpHost({...}, { mode: "mounted", connect })` so no real server spawns.
+
+- [ ] **Step 2: Run; expect failure**
+
+Run (in ai-whisper): `pnpm --filter @ai-whisper/adapter-ai-ezio test`
+Expected: FAIL — no host wired.
+
+- [ ] **Step 3: Wire `loadMcpHost` into the adapter**
+
+In `create-ai-ezio-live-session.ts`, where the harness `Session` is constructed and started: build `const host = loadMcpHost({ mode: "mounted", cwd: workspaceRoot })`; ensure the Session's event handler also calls `host.handleEvent(event)` (the adapter already forwards events to the renderer — add a second fan-out); after `session.start()` resolves and before the first submit is accepted, `await host.start(session)`. On teardown, `await host.stop()`. Add `@ai-ezio/mcp-host` to the adapter's `package.json` deps. `mode: "mounted"` ensures `confirm`→`deny` (no human prompt in a workflow pane).
+
+- [ ] **Step 4: Run; expect pass**
+
+Run (in ai-whisper): `pnpm --filter @ai-whisper/adapter-ai-ezio test`
+Expected: PASS.
+
+- [ ] **Step 5: Commit (in the ai-whisper repo)**
+
+```bash
+git -C ~/Dev/ai-whisper add packages/adapter-ai-ezio/src/create-ai-ezio-live-session.ts packages/adapter-ai-ezio/src/create-ai-ezio-live-session.mcp.test.ts packages/adapter-ai-ezio/package.json
+git -C ~/Dev/ai-whisper commit -m "feat(adapter-ai-ezio): attach MCP host to the mounted Session (M9)"
 ```
 
 ---
@@ -1564,14 +1815,19 @@ git commit -m "docs: reframe ezio as the ecosystem MCP-host agent; maintained-fo
 - Delegated-tool seam (registry, advertise, dispatch branch, blocking read) → Phase 1 (1.1–1.5). ✓
 - Protocol: 1 event + 2 controls, clean separation, camelCase → Phase 0. ✓
 - Interrupt + timeout safety, no-deadlock, native-unchanged invariant → Task 1.5 (e2e cases). ✓
-- `@ai-ezio/mcp-host`: config, namespacing, policy, client, cwd injection, lifecycle, health-on-failure-only → Phase 3 (3.1–3.6). ✓
-- Standalone unification + line-buffered reader + `-p` preserved → Phase 4 (4.1–4.2). ✓
+- `@ai-ezio/mcp-host`: config, namespacing, policy, client, cwd injection, lifecycle, health-on-failure-only → Phase 3 (3.1–3.7). ✓
+- **MCP host in BOTH modes** → shared `loadMcpHost` factory (3.7) wired in standalone (4.2) **and** the mounted adapter (4.3). ✓
+- Standalone unification + line-buffered reader + `-p` preserved (now also wires the host) → Phase 4 (4.1–4.2). ✓
 - cortex as server #1 + e2e → Phase 5. ✓
 - Doc updates (protocol/architecture/milestones/README/AGENTS/UPSTREAM) → Phase 0.1 + Phase 6. ✓
-- Defaults: deny-list (`purge`/`trash`/`promote`), timeouts (60s host is enforced in `connectStdio`/`callTool` timeouts — add a per-call `withTimeout(callTool, 60_000)` in `host.handleEvent` if not already; hax backstop 120s) → policy.ts + Task 1.5. **Action:** ensure `host.handleEvent` wraps `client.callTool` in a 60s timeout so the host always replies before hax's 120s backstop.
+- Defaults: deny-list (`purge`/`trash`/`promote`) → `policy.ts` (3.4). Timeouts: host per-call 60s implemented in `host.handleEvent` via `withTimeout(client.callTool, 60_000)` (3.6) + regression test; hax 120s backstop → Task 1.5. ✓
 
 **Placeholder scan:** no "TBD"/"handle edge cases" without code; every code step shows code; C steps that can't show 100% (file-specific writer names, exact SDK import subpaths) explicitly instruct "read the file / verify against installed version and reuse the existing symbol" rather than leaving a blank. ✓
 
-**Type consistency:** `DelegatedToolDef { name, description, parametersSchema }` used identically in protocol, harness, mcp-client, host. `tool_result` fields `callId/output/status` consistent. Event `tool_call_requested` fields `turnId/callId/name/args` consistent across docs, TS type, hax emit, host handler. `McpHost` methods `start/handleEvent/stop` consistent across host.ts and standalone.ts deps. ✓
+**Type consistency:** `DelegatedToolDef { name, description, parametersSchema }` used identically in protocol, harness, mcp-client, host, attach. `tool_result` fields `callId/output/status` consistent. Event `tool_call_requested` fields `turnId/callId/name/args` consistent across docs, TS type, hax emit, host handler. `McpHost` methods `start/handleEvent/stop` consistent across host.ts, attach.ts, standalone.ts, and the adapter. ✓
 
-**Fix applied inline:** added the explicit 60s per-call host timeout note (above) so the host-owns-primary-timeout / hax-owns-backstop split from the spec is actually implemented — wrap `client.callTool` in `withTimeout(..., 60_000)` inside `host.handleEvent`, returning a `status:"error"` result on timeout.
+**Reviewer findings addressed (round 1):**
+1. *Host in both modes* — added shared `loadMcpHost`/`createMcpHost` factory (Task 3.7); wired in standalone (4.2) AND the ai-whisper mounted adapter (4.3, with a mounted register-before-submit ordering test). The raw `--mount-mode` fd-forward path is documented as a deliberate no-MCP escape hatch (not the ai-whisper mounted path). ✓
+2. *cwd/worktree injection drift + `path`* — `injectCwd` is now schema-aware: it **overrides** model-supplied `worktreePath` **and** `path` (drift-proof) for any tool whose schema declares them, and never adds an arg the schema lacks. Tests cover override-drift for both args and the no-spurious-add case (3.6). ✓
+3. *Host 60s per-call timeout* — implemented in code (`withTimeout(client.callTool, callTimeoutMs ?? 60_000)` in `host.handleEvent`), with a regression test asserting a slow call returns `tool_result{status:"error"}` well before hax's 120s backstop (3.6). ✓
+4. *Server-crash coverage* — added a regression test where `callTool` rejects (simulated crash/down server) and asserts the host still emits an error `tool_result` (no missing reply, no hang) (3.6). ✓
