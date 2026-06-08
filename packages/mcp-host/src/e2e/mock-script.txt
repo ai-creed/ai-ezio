@@ -1,0 +1,8 @@
+# M9 e2e: turn 1 calls the delegated tool stub__echo; the agent dispatches it
+# (delegated → request emitted → host routes to the stub → result), then turn 2
+# closes the chain with a plain text turn.
+text Calling the delegated tool.
+tool stub__echo {"msg":"hi"}
+end-turn
+text done
+end-turn

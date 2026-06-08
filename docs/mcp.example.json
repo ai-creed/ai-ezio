@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "cortex": { "command": "ai-cortex", "args": ["mcp"] }
+  },
+  "toolPolicy": {
+    "cortex__purge_memory": "deny",
+    "cortex__trash_memory": "deny",
+    "cortex__promote_to_global": "deny"
+  }
+}
