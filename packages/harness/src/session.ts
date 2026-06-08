@@ -7,6 +7,7 @@ import {
 	FdTransport,
 	isProtocolCompatible,
 	PROTOCOL_VERSION,
+	type DelegatedToolDef,
 	type ProtocolControl,
 	type ProtocolEvent,
 	type ReadyEvent,
@@ -167,6 +168,18 @@ export class Session {
 	/** Cancel the in-flight turn. */
 	interrupt(): void {
 		this.control({ type: "interrupt" });
+	}
+
+	/** Advertise host-provided (delegated) tools to the engine. Call once after
+	 * `start()`'s `ready` resolves and BEFORE the first submit, so the first turn
+	 * sees them. Their results are returned via `sendToolResult` (M9). */
+	registerDelegatedTools(tools: DelegatedToolDef[]): void {
+		this.control({ type: "register_delegated_tools", tools });
+	}
+
+	/** Reply to a `tool_call_requested` (correlated by callId) (M9). */
+	sendToolResult(callId: string, output: string, status: "ok" | "error"): void {
+		this.control({ type: "tool_result", callId, output, status });
 	}
 
 	/** Re-fetch the last handback without re-running a turn (no clipboard).

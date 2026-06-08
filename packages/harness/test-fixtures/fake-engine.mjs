@@ -69,6 +69,24 @@ if (mode === "exit-after-ready") {
 				emit({ type: "idle" });
 				continue;
 			}
+			if (ctl.type === "register_delegated_tools") {
+				// M9: simulate the model immediately calling the first delegated tool.
+				const t = ctl.tools[0];
+				emit({
+					type: "tool_call_requested",
+					turnId: "t1",
+					callId: "c1",
+					name: t.name,
+					args: { k: "v" },
+				});
+				continue;
+			}
+			if (ctl.type === "tool_result") {
+				// Echo the host's delegated result back so the harness can assert it.
+				emit({ type: "assistant_turn_finished", turnId: "t1", content: `result:${ctl.output}:${ctl.status}` });
+				emit({ type: "idle" });
+				continue;
+			}
 			if (ctl.type === "status") {
 				emit({
 					type: "status",
