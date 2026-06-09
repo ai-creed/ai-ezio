@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
 	type BridgeDeps,
@@ -6,6 +7,7 @@ import {
 	renderManagedBlock,
 	upsertManagedBlock,
 } from "./bridge.js";
+import { shellSingleQuote } from "./shell.js";
 
 describe("managed export block (A/B/C)", () => {
 	it("renders a shell-escaped block", () =>
@@ -99,5 +101,21 @@ describe("persistBridge", () => {
 		const r = persistBridge(true, deps);
 		expect(r.action).toBe("no-profile");
 		expect(r.currentShellHint).toContain(`export AI_EZIO_HAX_BIN='/data/ai-ezio/hax'`);
+	});
+
+	it("shell-escapes the profile PATH in the printed `source` command (HOME with spaces, §5.4/§7)", () => {
+		const profile = "/Users/u/AI Ezio/.zshrc";
+		const { deps } = harness({ profilePath: () => profile });
+		const hint = persistBridge(true, deps).currentShellHint;
+		const quoted = shellSingleQuote(profile);
+		expect(hint).toContain(`source ${quoted}`); // the printed path is quoted
+		// ...and that quoted token parses as EXACTLY ONE argument == the path in a real
+		// shell (no truncation at the space -> the copy-paste `source` won't exit 127).
+		for (const sh of ["sh", "zsh"]) {
+			const out = execFileSync(sh, ["-c", `set -- ${quoted}; [ "$#" -eq 1 ] && printf %s "$1"`], {
+				encoding: "utf8",
+			});
+			expect(out).toBe(profile);
+		}
 	});
 });

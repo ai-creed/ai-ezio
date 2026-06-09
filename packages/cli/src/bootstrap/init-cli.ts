@@ -286,7 +286,13 @@ export function computeWiredState(env: NodeJS.ProcessEnv = process.env) {
 	const { parsed } = loadMcp(env);
 	const cortexConfigured = parsed.ok && Boolean(parsed.obj.mcpServers?.cortex);
 	const profile = chosenProfile(env);
-	const text = profile && existsSync(profile) ? readFileSync(profile, "utf8") : "";
+	let text = "";
+	try {
+		if (profile && existsSync(profile)) text = readFileSync(profile, "utf8");
+	} catch {
+		// Unreadable profile (EACCES) -> doctor must still report wired state
+		// (treat the bridge as not-persisted), never crash (spec §5.2/§6).
+	}
 	const bridgePersisted = text.includes(BEGIN) || hasUserOwnedExport(text);
 	return {
 		cortexConfigured,

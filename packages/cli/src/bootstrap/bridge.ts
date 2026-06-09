@@ -59,24 +59,24 @@ export function persistBridge(consent: boolean, deps: BridgeDeps): BridgeResult 
 			currentShellHint: `Add to your shell profile: ${exportLine}`,
 			transientEnvNote: transient,
 		};
+	// The printed `source <profile>` is a copy-paste command, so the PATH must be
+	// shell-escaped too (not just the export value) — a HOME with spaces otherwise
+	// truncates it and the command exits 127 (shell-safe current-shell action, §5.4).
+	const sourceHint = `Run \`source ${shellSingleQuote(profile)}\` (or open a new terminal), then \`whisper collab mount ezio\`.`;
 	const current = deps.readFile(profile) ?? "";
 	if (hasUserOwnedExport(current))
-		return {
-			action: "left-user-owned",
-			currentShellHint: `Run \`source ${profile}\` (or open a new terminal), then \`whisper collab mount ezio\`.`,
-			transientEnvNote: transient,
-		};
+		return { action: "left-user-owned", currentShellHint: sourceHint, transientEnvNote: transient };
 	if (!consent)
 		return {
 			action: "declined",
-			currentShellHint: `To wire future shells, add to ${profile}: ${exportLine}`,
+			currentShellHint: `To wire future shells, add to ${shellSingleQuote(profile)}: ${exportLine}`,
 			transientEnvNote: transient,
 		};
 	const had = current.includes(BEGIN);
 	deps.writeFile(profile, upsertManagedBlock(current, link));
 	return {
 		action: had ? "updated" : "created",
-		currentShellHint: `Run \`source ${profile}\` (or open a new terminal), then \`whisper collab mount ezio\`.`,
+		currentShellHint: sourceHint,
 		transientEnvNote: transient,
 	};
 }

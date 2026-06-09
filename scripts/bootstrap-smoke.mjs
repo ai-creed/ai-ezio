@@ -168,6 +168,35 @@ if (existsSync(`${urMcp}.bak`)) urFail("a backup was written for an UNREADABLE m
 chmodSync(urMcp, 0o644); // restore for cleanup
 rmSync(urHome, { recursive: true, force: true });
 
+// (7) `ai-ezio doctor` with an UNREADABLE ~/.zshrc must NOT crash — computeWiredState's
+// profile read is guarded; doctor renders wired state (bridge -> not persisted) and exits
+// per hax availability (0 here), never uncaught EACCES (doctor wired-state, spec §5.2/§6).
+const docHome = mkdtempSync(join(tmpdir(), "ezio-boot-doc-"));
+const docProfile = join(docHome, ".zshrc");
+writeFileSync(docProfile, "# rc\n");
+chmodSync(docProfile, 0o000); // unreadable profile
+const docEnv = {
+	...process.env,
+	HOME: docHome,
+	XDG_CONFIG_HOME: join(docHome, ".config"),
+	XDG_DATA_HOME: join(docHome, ".local/share"),
+	AI_EZIO_HAX_BIN: join(repoRoot, "vendor/hax/build/hax"),
+	SHELL: "/bin/zsh",
+};
+const docFail = (m) => {
+	console.error(`BOOTSTRAP SMOKE FAIL: ${m}`);
+	chmodSync(docProfile, 0o644);
+	rmSync(docHome, { recursive: true, force: true });
+	process.exit(1);
+};
+const doc = spawnSync("node", [cli, "doctor"], { env: docEnv, encoding: "utf8" });
+const docOut = `${doc.stdout ?? ""}${doc.stderr ?? ""}`;
+if (doc.status !== 0)
+	docFail(`doctor crashed on an unreadable profile (exit ${doc.status}) — output:\n${docOut}`);
+if (!/bootstrap:/.test(docOut)) docFail(`doctor did not render wired state:\n${docOut}`);
+chmodSync(docProfile, 0o644);
+rmSync(docHome, { recursive: true, force: true });
+
 console.log(
-	"BOOTSTRAP SMOKE PASS: wiring, zero-install-when-present, no-duplicate rerun, distinct backups, read-only-profile degrades to guidance (exit 0), unreadable mcp.json degrades to read guidance (exit 0)",
+	"BOOTSTRAP SMOKE PASS: wiring, zero-install-when-present, no-duplicate rerun, distinct backups, read-only-profile degrades to guidance (exit 0), unreadable mcp.json degrades to read guidance (exit 0), doctor survives an unreadable profile (exit 0)",
 );
