@@ -13,12 +13,24 @@ export interface InitOptions {
 	whisper: boolean;
 	reconfigure: boolean;
 }
+/** Result of backing up a malformed mcp.json. `ok:true,path` means a backup file
+ * was actually created; `ok:true,path:null` means there was nothing to back up;
+ * `ok:false` means the backup write FAILED — the caller must NOT then overwrite the
+ * malformed file or claim success (finding 2, §5.4). */
+export type BackupResult =
+	| { ok: true; path: string }
+	| { ok: true; path: null }
+	| { ok: false; error: string };
+
 export interface InitDeps {
 	detect: () => Environment;
 	checkCompat: (peer: PeerName, installed: string | null) => CompatResult;
 	askYesNo: (question: string, defaultYes: boolean) => Promise<boolean>;
 	installPeer: (manager: "npm" | "pnpm", pkg: string) => { ok: boolean; error?: string };
 	classifyCortex: () => CortexKind;
+	/** Backs up a malformed mcp.json as a distinct, result-returning step so the
+	 * "backed up" claim is printed IFF a backup actually landed (finding 2). */
+	backupMalformedMcp: () => BackupResult;
 	applyCortex: () => boolean; // writes the resolved cortex entry; false if it SKIPPED (unresolvable)
 	persistBridge: (consent: boolean) => BridgeResult;
 	whisperPrereqGuidance: () => string[];
@@ -114,17 +126,33 @@ export async function runInit(opts: InitOptions, deps: InitDeps): Promise<number
 		const kind = deps.classifyCortex();
 		const unresolved =
 			"could not resolve ai-cortex to a working mcp entry — see the guidance above";
-		if (kind === "missing") {
+		if (kind === "unreadable") {
+			// The file exists but could not be read (e.g. permissions). Do NOT back up,
+			// write, or claim success — that would be a false "added/repaired" (finding 1,
+			// §6). Print guidance and skip cortex wiring entirely.
+			deps.out("could not read mcp.json — fix permissions, then `ai-ezio init --reconfigure`");
+		} else if (kind === "missing") {
 			deps.out(deps.applyCortex() ? "added portable cortex entry to mcp.json" : unresolved);
 		} else if (kind === "malformed") {
-			// No decline path: a malformed mcp.json is ALWAYS backed up (applyCortex backs
-			// up before it even checks the entry) and then repaired, or — when cortex can't
-			// be resolved — the intended entry is printed. Never "left as-is" (finding 2).
-			deps.out(
-				deps.applyCortex()
-					? "backed up malformed mcp.json and wrote a fresh portable cortex entry"
-					: `backed up malformed mcp.json; ${unresolved} — intended entry: {"command":"ai-cortex","args":["mcp"]}`,
-			);
+			// No decline path. Back up FIRST as a distinct step so the "backed up" claim is
+			// printed IFF a backup actually landed (finding 2). On backup FAILURE, preserve
+			// the malformed file (do NOT overwrite) and emit guidance — never claim success
+			// and never write a fresh entry over data we failed to save.
+			const backup = deps.backupMalformedMcp();
+			if (!backup.ok) {
+				deps.out(
+					`could not back up malformed mcp.json: ${backup.error} — left it untouched; fix permissions, then \`ai-ezio init --reconfigure\``,
+				);
+			} else {
+				if (backup.path !== null) deps.out(`backed up malformed mcp.json to ${backup.path}`);
+				// Then write the fresh portable entry, or — when cortex can't be resolved —
+				// print the intended entry. Never "left as-is".
+				deps.out(
+					deps.applyCortex()
+						? "wrote a fresh portable cortex entry to mcp.json"
+						: `${unresolved} — intended entry: {"command":"ai-cortex","args":["mcp"]}`,
+				);
+			}
 		} else if (kind === "broken") {
 			const repair = interactive
 				? await deps.askYesNo("Repair the broken cortex mcp entry to the portable form?", true)

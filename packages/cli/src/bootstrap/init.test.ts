@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Environment } from "./detect.js";
-import { type InitDeps, parseInitArgs, remediationFor, runInit } from "./init.js";
+import {
+	type BackupResult,
+	type InitDeps,
+	parseInitArgs,
+	remediationFor,
+	runInit,
+} from "./init.js";
 
 const absent: Environment = {
 	isTTY: true,
@@ -27,6 +33,7 @@ function deps(env: Environment, over: Partial<InitDeps> = {}): InitDeps {
 		askYesNo: vi.fn(async () => true),
 		installPeer: vi.fn(() => ({ ok: true })),
 		classifyCortex: vi.fn(() => "missing"),
+		backupMalformedMcp: vi.fn(() => ({ ok: true, path: null }) as BackupResult),
 		applyCortex: vi.fn(() => true),
 		persistBridge: vi.fn(() => ({
 			action: "created" as const,
@@ -144,34 +151,84 @@ describe("runInit gating", () => {
 		const out = vi.fn();
 		const ask = vi.fn(async () => false); // would decline if asked — but it must NOT be asked
 		const applyCortex = vi.fn(() => true);
+		const backupMalformedMcp = vi.fn(() => ({ ok: true, path: "/c/mcp.json.bak" }) as BackupResult);
 		const d = deps(present(), {
 			classifyCortex: () => "malformed",
+			backupMalformedMcp,
 			applyCortex,
 			askYesNo: ask,
 			out,
 		});
 		await runInit({ yes: false, cortex: true, whisper: false, reconfigure: false }, d);
+		expect(backupMalformedMcp).toHaveBeenCalled(); // backed up before writing
 		expect(applyCortex).toHaveBeenCalled(); // reconciled regardless of consent
 		// no "Repair …?" prompt for the malformed kind (it has no decline path)
 		expect(ask.mock.calls.flat().some((a) => String(a).includes("Repair"))).toBe(false);
 		const text = out.mock.calls.flat().join("\n");
-		expect(text).toContain("backed up malformed mcp.json");
+		expect(text).toContain("backed up malformed mcp.json to /c/mcp.json.bak");
+		expect(text).toContain("wrote a fresh portable cortex entry");
 		expect(text).not.toContain("left"); // never "left as-is"
 	});
 
 	it("malformed mcp.json with an UNRESOLVABLE cortex still reports the backup + prints the intended entry (finding 2)", async () => {
 		const out = vi.fn();
-		// applyCortex returns false (skipped) but, per init-cli, has ALREADY backed up the file.
+		// applyCortex returns false (skipped); the backup is a distinct step that succeeded.
 		const d = deps(present(), {
 			classifyCortex: () => "malformed",
+			backupMalformedMcp: vi.fn(() => ({ ok: true, path: "/c/mcp.json.bak" }) as BackupResult),
 			applyCortex: vi.fn(() => false),
 			out,
 		});
 		await runInit({ yes: true, cortex: true, whisper: false, reconfigure: false }, d);
 		const text = out.mock.calls.flat().join("\n");
-		expect(text).toContain("backed up malformed mcp.json");
+		expect(text).toContain("backed up malformed mcp.json to /c/mcp.json.bak");
 		expect(text).toContain(`{"command":"ai-cortex","args":["mcp"]}`); // intended entry printed
 		expect(text).not.toContain("left"); // never "left as-is"
+	});
+
+	it("malformed mcp.json whose BACKUP FAILS: no success message, file preserved, no fresh write (finding 2 §5.4)", async () => {
+		const out = vi.fn();
+		const applyCortex = vi.fn(() => true);
+		const d = deps(present(), {
+			classifyCortex: () => "malformed",
+			backupMalformedMcp: vi.fn(
+				() => ({ ok: false, error: "EACCES: permission denied" }) as BackupResult,
+			),
+			applyCortex,
+			out,
+		});
+		await runInit({ yes: true, cortex: true, whisper: false, reconfigure: false }, d);
+		const text = out.mock.calls.flat().join("\n");
+		// honest failure guidance, naming the cause and a retry
+		expect(text).toContain("could not back up malformed mcp.json");
+		expect(text).toContain("EACCES");
+		expect(text).toContain("left it untouched");
+		expect(text).toContain("ai-ezio init --reconfigure");
+		// NEVER a false success and NEVER an overwrite of the unsaved malformed file
+		expect(text).not.toContain("backed up malformed mcp.json to");
+		expect(text).not.toContain("wrote a fresh portable cortex entry");
+		expect(applyCortex).not.toHaveBeenCalled();
+	});
+
+	it("unreadable mcp.json degrades to guidance, skips wiring entirely — no backup/write/false claim (finding 1 §6)", async () => {
+		const out = vi.fn();
+		const backupMalformedMcp = vi.fn(() => ({ ok: true, path: null }) as BackupResult);
+		const applyCortex = vi.fn(() => true);
+		const d = deps(present(), {
+			classifyCortex: () => "unreadable",
+			backupMalformedMcp,
+			applyCortex,
+			out,
+		});
+		await runInit({ yes: true, cortex: true, whisper: false, reconfigure: false }, d);
+		const text = out.mock.calls.flat().join("\n");
+		expect(text).toContain("could not read mcp.json");
+		expect(text).toContain("ai-ezio init --reconfigure");
+		expect(backupMalformedMcp).not.toHaveBeenCalled(); // NO backup
+		expect(applyCortex).not.toHaveBeenCalled(); // NO write
+		expect(text).not.toContain("added"); // no false "added/repaired" claim
+		expect(text).not.toContain("repaired");
+		expect(text).not.toContain("backed up");
 	});
 
 	it("prints an ACCURATE summary (not 'added') when applyCortex skips because nothing resolved", async () => {

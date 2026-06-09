@@ -126,6 +126,48 @@ if (!roOut.includes(roProfile)) roFail(`no guidance naming the read-only profile
 if (readFileSync(roProfile, "utf8") !== "# rc\n") roFail("read-only profile was modified");
 rmSync(roHome, { recursive: true, force: true });
 
+// (6) an UNREADABLE mcp.json (chmod 0000) must NOT crash init with EACCES — the read
+// is guarded and degrades to guidance; `ai-ezio init --yes` still exits 0 (finding 1,
+// spec §6). Cortex wiring is skipped entirely: NO backup, NO write, NO false claim.
+const urHome = mkdtempSync(join(tmpdir(), "ezio-boot-ur-"));
+const urBin = join(urHome, "bin");
+mkdirSync(urBin, { recursive: true });
+// Present cortex so the cortex step actually runs and attempts to read mcp.json.
+writeFileSync(join(urBin, "ai-cortex"), `#!/bin/sh\necho "ai-cortex 0.14.2"\n`, { mode: 0o755 });
+writeFileSync(join(urBin, "whisper"), `#!/bin/sh\necho "whisper 0.5.5"\n`, { mode: 0o755 });
+const urMcp = join(urHome, ".config/ai-ezio/mcp.json");
+mkdirSync(dirname(urMcp), { recursive: true });
+writeFileSync(urMcp, `{"mcpServers":{}}\n`);
+chmodSync(urMcp, 0o000); // unreadable -> the mcp.json read hits EACCES
+const urEnv = {
+	...process.env,
+	HOME: urHome,
+	XDG_CONFIG_HOME: join(urHome, ".config"),
+	XDG_DATA_HOME: join(urHome, ".local/share"),
+	PATH: `${urBin}:${process.env.PATH}`,
+	AI_EZIO_HAX_BIN: join(repoRoot, "vendor/hax/build/hax"),
+	SHELL: "/bin/zsh",
+};
+const urFail = (m) => {
+	console.error(`BOOTSTRAP SMOKE FAIL: ${m}`);
+	chmodSync(urMcp, 0o644); // restore so the temp dir can be cleaned
+	rmSync(urHome, { recursive: true, force: true });
+	process.exit(1);
+};
+// spawnSync so a non-zero exit is observable instead of throwing.
+const ur = spawnSync("node", [cli, "init", "--yes"], { env: urEnv, encoding: "utf8" });
+const urOut = `${ur.stdout ?? ""}${ur.stderr ?? ""}`;
+if (ur.status !== 0)
+	urFail(`unreadable mcp.json crashed init (exit ${ur.status}) — output:\n${urOut}`);
+if (/EACCES/.test(urOut) && !/could not read mcp\.json/.test(urOut))
+	urFail(`raw EACCES surfaced without read guidance:\n${urOut}`);
+if (!/could not read mcp\.json/.test(urOut))
+	urFail(`no "could not read mcp.json" guidance emitted:\n${urOut}`);
+// cortex wiring must have been skipped: no backup created next to the unreadable file
+if (existsSync(`${urMcp}.bak`)) urFail("a backup was written for an UNREADABLE mcp.json");
+chmodSync(urMcp, 0o644); // restore for cleanup
+rmSync(urHome, { recursive: true, force: true });
+
 console.log(
-	"BOOTSTRAP SMOKE PASS: wiring, zero-install-when-present, no-duplicate rerun, distinct backups, read-only-profile degrades to guidance (exit 0)",
+	"BOOTSTRAP SMOKE PASS: wiring, zero-install-when-present, no-duplicate rerun, distinct backups, read-only-profile degrades to guidance (exit 0), unreadable mcp.json degrades to read guidance (exit 0)",
 );

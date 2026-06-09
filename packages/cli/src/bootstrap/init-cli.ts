@@ -11,7 +11,7 @@ import { cortexHookGuidance, whisperPrereqGuidance } from "./guidance.js";
 import { type InitDeps, parseInitArgs, runInit } from "./init.js";
 import { installPeer } from "./install-peers.js";
 import { writeMarker } from "./marker.js";
-import { bridgeSymlinkPath } from "./paths.js";
+import { bridgeSymlinkPath, selectBashProfile } from "./paths.js";
 import { askYesNo, nodePromptIO } from "./prompt.js";
 import {
 	applyCortex,
@@ -66,10 +66,14 @@ function chosenProfile(env: NodeJS.ProcessEnv): string | null {
 	const shell = env.SHELL ?? "";
 	const home = env.HOME ?? homedir();
 	if (shell.includes("zsh")) return `${home}/.zshrc`;
-	// macOS login bash sources ~/.bash_profile, NOT ~/.bashrc; Linux sources ~/.bashrc
-	// for interactive shells. Pick the file a login shell actually reads (finding 4).
+	// Linux sources ~/.bashrc for interactive shells. macOS login bash reads the FIRST
+	// existing of ~/.bash_profile -> ~/.bash_login -> ~/.profile; selectBashProfile picks
+	// that one so we don't shadow an existing ~/.profile by creating ~/.bash_profile
+	// (finding 4). Only when none exist does it fall back to creating ~/.bash_profile.
 	if (shell.includes("bash"))
-		return process.platform === "darwin" ? `${home}/.bash_profile` : `${home}/.bashrc`;
+		return process.platform === "darwin"
+			? selectBashProfile({ home, fileExists: existsSync })
+			: `${home}/.bashrc`;
 	return null; // ambiguous -> bridge prints the export line
 }
 function detect(env: NodeJS.ProcessEnv): Environment {
@@ -113,10 +117,23 @@ function resolveCortexEntry(): CortexEntry | null {
 function cortexEntryWorks(e: { command: string; args?: string[] }): boolean {
 	return cortexEntryLaunches(e, { onPath: (c) => which(c) !== null, fileExists: existsSync });
 }
+/** Load mcp.json, GUARDING the read (finding 1, §6): an unreadable file (e.g.
+ * `chmod 0000`) must not throw EACCES out of init. `readError` is set when the file
+ * exists but the read failed, so classifyCortex can return "unreadable" and the
+ * orchestrator degrades to guidance instead of crashing. */
 function loadMcp(env: NodeJS.ProcessEnv) {
 	const path = configPath(env);
-	const raw = existsSync(path) ? readFileSync(path, "utf8") : null;
-	return { path, raw, parsed: parseMcp(raw) };
+	const exists = existsSync(path);
+	let raw: string | null = null;
+	let readError: Error | null = null;
+	if (exists) {
+		try {
+			raw = readFileSync(path, "utf8");
+		} catch (e) {
+			readError = e as Error;
+		}
+	}
+	return { path, raw, exists, readError, parsed: parseMcp(raw) };
 }
 
 export async function runInitCli(argv: string[]): Promise<number> {
@@ -142,20 +159,37 @@ export async function runInitCli(argv: string[]): Promise<number> {
 				},
 			}),
 		classifyCortex: () => {
-			const { parsed } = loadMcp(env);
+			const { exists, readError, parsed } = loadMcp(env);
+			// A present-but-UNREADABLE mcp.json is "unreadable" — the orchestrator prints
+			// guidance and skips wiring (NO backup/write/false claim, finding 1, §6).
+			if (exists && readError !== null) return "unreadable";
 			// A present-but-unparseable mcp.json is "malformed" (always backed up, never
 			// declined) — distinct from a parseable-but-non-launching entry ("broken").
 			return parsed.ok ? classifyCortex(parsed.obj, { entryWorks: cortexEntryWorks }) : "malformed";
 		},
-		applyCortex: () => {
+		backupMalformedMcp: () => {
+			// Distinct, result-returning backup step (finding 2): runInit prints "backed up …"
+			// IFF this actually wrote a .bak. On FAILURE we report it so runInit preserves the
+			// malformed file and emits guidance instead of falsely claiming success. The mkdir
+			// + backup write are guarded so an fs error degrades to guidance, never a crash.
 			const { path, raw, parsed } = loadMcp(env);
-			// CRITICAL (finding 2): a malformed file is backed up BEFORE we decide whether
-			// the cortex entry resolves, so data is never lost even when we then bail to
-			// guidance. mkdir + backup + writes are guarded so an fs error degrades to a
+			if (parsed.ok || raw === null) return { ok: true, path: null }; // nothing malformed to save
+			try {
+				mkdirSync(path.replace(/\/[^/]+$/, ""), { recursive: true });
+				const bak = nextBackupPath(path, existsSync); // collision-safe, never lose data
+				writeFileSync(bak, raw);
+				return { ok: true, path: bak };
+			} catch (e) {
+				return { ok: false, error: (e as Error).message };
+			}
+		},
+		applyCortex: () => {
+			const { path, parsed } = loadMcp(env);
+			// Writes the fresh/merged cortex entry only (the malformed backup is now a separate
+			// step — finding 2). mkdir + write are guarded so an fs error degrades to a
 			// non-fatal guidance line instead of crashing first-run (finding 1, §6).
 			try {
 				mkdirSync(path.replace(/\/[^/]+$/, ""), { recursive: true });
-				if (!parsed.ok && raw !== null) writeFileSync(nextBackupPath(path, existsSync), raw); // collision-safe, never lose data
 				const entry = resolveCortexEntry(); // portable, resolved-node fallback, or null
 				if (!entry) {
 					process.stderr.write(
@@ -190,7 +224,17 @@ export async function runInitCli(argv: string[]): Promise<number> {
 						}
 					},
 					profilePath: () => chosenProfile(env),
-					readFile: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
+					readFile: (p) => {
+						// Guard the PROFILE read too (finding 1, §6): an unreadable profile must
+						// degrade to guidance, not throw EACCES out of init. Tag it so the outer
+						// catch renders a non-fatal "could not read …" guidance line.
+						if (!existsSync(p)) return null;
+						try {
+							return readFileSync(p, "utf8");
+						} catch (e) {
+							throw new BridgeFsError(`could not read ${p}`, e);
+						}
+					},
 					writeFile: (p, s) => {
 						try {
 							writeFileSync(p, s);
