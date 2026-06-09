@@ -22,6 +22,10 @@ packaging/*/bin/
 # temporary idea docs (scratch notes; not published)
 docs/superpowers/ideas/
 
+# implementation plans (local guide for agents; canonical copy lives in
+# ~/.ai-pref-nsync/local-docs). Specs ARE committed; plans are not.
+docs/superpowers/plans/
+
 # manual smoke checklists (local QA scratch; not published)
 docs/smoke/
 
