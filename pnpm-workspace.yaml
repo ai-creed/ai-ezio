@@ -1,3 +1,4 @@
 packages:
   - "packages/*"
   - "packaging/*"
+  - "!packaging/alias-ai-ezio"

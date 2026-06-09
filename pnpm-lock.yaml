@@ -35,16 +35,16 @@ importers:
 
   packages/cli:
     optionalDependencies:
-      '@ai-ezio/hax-darwin-arm64':
+      '@ai-creed/hax-darwin-arm64':
         specifier: workspace:*
         version: link:../../packaging/hax-darwin-arm64
-      '@ai-ezio/hax-darwin-x64':
+      '@ai-creed/hax-darwin-x64':
         specifier: workspace:*
         version: link:../../packaging/hax-darwin-x64
-      '@ai-ezio/hax-linux-arm64':
+      '@ai-creed/hax-linux-arm64':
         specifier: workspace:*
         version: link:../../packaging/hax-linux-arm64
-      '@ai-ezio/hax-linux-x64':
+      '@ai-creed/hax-linux-x64':
         specifier: workspace:*
         version: link:../../packaging/hax-linux-x64
     devDependencies:

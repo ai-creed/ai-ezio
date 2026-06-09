@@ -1,5 +1,5 @@
 {
-	"name": "ai-ezio",
+	"name": "@ai-creed/ai-ezio",
 	"version": "0.1.0-beta.0",
 	"description": "ai-ezio: hax-derived, workflow-native coding agent",
 	"license": "MIT",
@@ -29,10 +29,10 @@
 		"postpack": "node ../../scripts/make-publish-manifest.mjs restore"
 	},
 	"optionalDependencies": {
-		"@ai-ezio/hax-darwin-arm64": "workspace:*",
-		"@ai-ezio/hax-darwin-x64": "workspace:*",
-		"@ai-ezio/hax-linux-x64": "workspace:*",
-		"@ai-ezio/hax-linux-arm64": "workspace:*"
+		"@ai-creed/hax-darwin-arm64": "workspace:*",
+		"@ai-creed/hax-darwin-x64": "workspace:*",
+		"@ai-creed/hax-linux-x64": "workspace:*",
+		"@ai-creed/hax-linux-arm64": "workspace:*"
 	},
 	"devDependencies": {
 		"@ai-ezio/harness": "workspace:*",

@@ -2,7 +2,7 @@
 /**
  * Single-install smoke test — proves the M1 milestone contract:
  * "one install produces a working ai-ezio" with the hax binary embedded and
- * resolved from the @ai-ezio/hax-<os>-<cpu> platform package (NOT the dev
+ * resolved from the @ai-creed/hax-<os>-<cpu> platform package (NOT the dev
  * fallback, NOT a separate hax install).
  *
  * Steps:
@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const hostPkg = `@ai-ezio/hax-${process.platform}-${process.arch}`;
+const hostPkg = `@ai-creed/hax-${process.platform}-${process.arch}`;
 const hostPkgDir = join(repoRoot, "packaging", `hax-${process.platform}-${process.arch}`);
 
 function run(cmd, args, opts = {}) {

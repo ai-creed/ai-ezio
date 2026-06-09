@@ -1,5 +1,5 @@
 {
-	"name": "@ai-ezio/hax-darwin-arm64",
+	"name": "@ai-creed/hax-darwin-arm64",
 	"version": "0.1.0-beta.0",
 	"description": "Prebuilt hax engine binary for ai-ezio (darwin/arm64)",
 	"license": "MIT",

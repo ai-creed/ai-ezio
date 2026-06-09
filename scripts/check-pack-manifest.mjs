@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-/** Pack guard (spec §5.1): the published ai-ezio tarball must have NO dependencies,
- * NO workspace:* specifier in ANY section, only the four @ai-ezio/hax-* under
- * optionalDependencies, and a preserved haxBaseCommit + exports. */
+/** Pack guard (spec §5.1): the published @ai-creed/ai-ezio tarball must have NO
+ * dependencies, NO workspace:* specifier in ANY section, only the four
+ * @ai-creed/hax-* under optionalDependencies, and a preserved haxBaseCommit +
+ * exports. No leaked @ai-ezio/* internal libs anywhere. */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,17 +28,22 @@ try {
 	if (pkg.dependencies && Object.keys(pkg.dependencies).length > 0)
 		errors.push(`dependencies must be empty, found: ${Object.keys(pkg.dependencies)}`);
 
-	// (c) precise per-section messages for the common dep fields
+	// (c) precise per-section messages for the common dep fields. The four
+	// @ai-creed/hax-* binary packages are the ONLY scoped deps allowed, and only
+	// under optionalDependencies. Internal @ai-ezio/* libs are bundled into the
+	// dist (never shipped as deps), so a leaked @ai-ezio/* in ANY section is a bug.
 	for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
 		for (const [name, spec] of Object.entries(pkg[section] ?? {})) {
 			if (String(spec).startsWith("workspace:")) errors.push(`workspace: specifier in ${section}: ${name}@${spec}`);
-			if (section !== "optionalDependencies" && name.startsWith("@ai-ezio/"))
-				errors.push(`@ai-ezio/* outside optionalDependencies: ${section}.${name}`);
+			if (name.startsWith("@ai-ezio/"))
+				errors.push(`leaked @ai-ezio/* internal lib in ${section}: ${section}.${name}`);
+			if (section !== "optionalDependencies" && name.startsWith("@ai-creed/"))
+				errors.push(`@ai-creed/* outside optionalDependencies: ${section}.${name}`);
 		}
 	}
 
 	// (c) optionalDependencies == exactly the four hax packages
-	const expected = ["@ai-ezio/hax-darwin-arm64", "@ai-ezio/hax-darwin-x64", "@ai-ezio/hax-linux-arm64", "@ai-ezio/hax-linux-x64"];
+	const expected = ["@ai-creed/hax-darwin-arm64", "@ai-creed/hax-darwin-x64", "@ai-creed/hax-linux-arm64", "@ai-creed/hax-linux-x64"];
 	const opt = Object.keys(pkg.optionalDependencies ?? {}).sort();
 	if (opt.join(",") !== expected.sort().join(",")) errors.push(`optionalDependencies != the 4 hax packages: ${opt}`);
 
