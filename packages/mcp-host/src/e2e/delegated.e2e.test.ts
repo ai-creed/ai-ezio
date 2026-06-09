@@ -26,7 +26,7 @@ describe.skipIf(!bin)("M9 delegated round-trip (real hax + stub MCP server)", ()
 	it("the model calls a delegated tool and gets the host's result", async () => {
 		const events: ProtocolEvent[] = [];
 		const host = createMcpHost(
-			{ servers: [{ name: "stub", command: process.execPath, args: [STUB] }], toolPolicy: {} },
+			{ servers: [{ name: "stub", command: process.execPath, args: [STUB] }], toolPolicy: {}, hostPrivateTools: [] },
 			{ mode: "mounted", cwd: process.cwd() },
 		);
 		// onEvent tees every event to BOTH the collector and the host (which services

@@ -3,7 +3,7 @@
 import { McpHost } from "./host.js";
 import { loadConfig, type HostConfig, type ServerConfig } from "./config.js";
 import type { McpClient } from "./mcp-client.js";
-import type { RunMode } from "./policy.js";
+import { DEFAULT_HOST_PRIVATE, type RunMode } from "./policy.js";
 
 export interface CreateHostOptions {
 	mode: RunMode;
@@ -21,6 +21,7 @@ export function createMcpHost(cfg: HostConfig, opts: CreateHostOptions): McpHost
 		cwd: opts.cwd ?? process.cwd(),
 		servers: cfg.servers,
 		toolPolicy: cfg.toolPolicy,
+		hostPrivateTools: [...new Set([...DEFAULT_HOST_PRIVATE, ...cfg.hostPrivateTools])],
 		confirm: opts.confirm,
 		connect: opts.connect,
 	});

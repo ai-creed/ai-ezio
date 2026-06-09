@@ -14,7 +14,7 @@ chmodSync(FAKE, 0o755);
 describe("runOneShot", () => {
 	it("submits the prompt through the unified Session + host and prints the handback", async () => {
 		const out: string[] = [];
-		const host = createMcpHost({ servers: [], toolPolicy: {} }, { mode: "mounted", cwd: "/repo" });
+		const host = createMcpHost({ servers: [], toolPolicy: {}, hostPrivateTools: [] }, { mode: "mounted", cwd: "/repo" });
 		const code = await runOneShot("hello", {
 			startOptions: { binary: FAKE, env: { ...process.env, FAKE_ENGINE_MODE: "ok" } },
 			host,

@@ -17,6 +17,10 @@ export interface McpHostOptions {
 	/** Repo-root arg names forced to cwd (default ["worktreePath","path"] — the
 	 * ai-* convention). Drift-proof: overrides model-supplied values. */
 	injectArgs?: string[];
+	/** Namespaced tool names that must NOT be advertised to the model (excluded from
+	 * registerDelegatedTools) but remain callable by the harness via callHostTool.
+	 * Generic: the host hardcodes no tool/server name; ezio config supplies the list. */
+	hostPrivateTools?: string[];
 	/** Per-call timeout; the host ALWAYS replies before hax's 120s backstop. Default 60s. */
 	callTimeoutMs?: number;
 	/** Injectable for tests; defaults to stdio connect. */
@@ -50,7 +54,7 @@ export class McpHost {
 					const name = this.routes.add(server.name, def.name);
 					const namespaced = { ...def, name };
 					this.defsByName.set(name, namespaced);
-					defs.push(namespaced);
+					if (!(this.opts.hostPrivateTools ?? []).includes(name)) defs.push(namespaced);
 				}
 			} catch (e) {
 				this.warn(`mcp: server "${server.name}" failed to connect: ${(e as Error).message}`);
@@ -91,6 +95,28 @@ export class McpHost {
 			this.warn(`mcp: call ${name} failed: ${(e as Error).message}`);
 			this.reply(callId, `tool call failed: ${(e as Error).message}`, "error");
 		}
+	}
+
+	/** Harness-private MCP call: invoke a tool directly, WITHOUT advertising it to the
+	 * model or riding the tool_call_requested path. For tools listed in
+	 * `hostPrivateTools` (e.g. cortex__capture_session). Policy `deny` still blocks;
+	 * the standalone `confirm` prompt is skipped (host-initiated calls are trusted). */
+	async callHostTool(
+		name: string,
+		args: Record<string, unknown>,
+	): Promise<{ output: string; status: "ok" | "error" }> {
+		const route = this.routes.resolve(name);
+		if (!route) throw new Error(`unknown host tool: ${name}`);
+		if (decidePolicy(name, this.opts.toolPolicy, this.opts.mode) === "deny")
+			throw new Error(`host tool "${name}" is blocked by policy`);
+		const client = this.clients.get(route.server);
+		if (!client) throw new Error(`server "${route.server}" unavailable`);
+		const injected = this.injectCwd(name, args);
+		return withTimeout(
+			client.callTool(route.tool, injected),
+			this.opts.callTimeoutMs ?? 60_000,
+			`host call ${name}`,
+		);
 	}
 
 	/** Force repo-root args (worktreePath/path) to the session cwd. Overrides any

@@ -10,6 +10,10 @@ export const DEFAULT_DENY: readonly string[] = [
 	"cortex__promote_to_global",
 ];
 
+/** Tools the host invokes itself and must NEVER advertise to the model (capture is a
+ * harness lifecycle action, not a model capability). Merged with config `hostPrivateTools`. */
+export const DEFAULT_HOST_PRIVATE: readonly string[] = ["cortex__capture_session"];
+
 /** Resolve the effective policy for a namespaced tool. Config wins; otherwise the
  * default deny-list applies, else allow. `confirm` only has teeth in standalone
  * (a human is present); in mounted it degrades to deny. */

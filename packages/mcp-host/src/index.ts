@@ -4,7 +4,7 @@ export { createMcpHost, loadMcpHost } from "./attach.js";
 export type { CreateHostOptions } from "./attach.js";
 export { loadConfig, parseConfig, configPath } from "./config.js";
 export type { HostConfig, ServerConfig, ToolPolicy } from "./config.js";
-export { decidePolicy, DEFAULT_DENY } from "./policy.js";
+export { decidePolicy, DEFAULT_DENY, DEFAULT_HOST_PRIVATE } from "./policy.js";
 export type { RunMode } from "./policy.js";
 export { encodeToolName, RouteMap } from "./namespace.js";
 export type { Route } from "./namespace.js";
