@@ -39,7 +39,9 @@ jobs:
       - name: Single-package install smoke on this target
         run: node scripts/smoke-install.mjs
       - uses: actions/upload-artifact@v4
-        with: { name: hax-${{ matrix.target }}, path: packaging/hax-${{ matrix.target }}/bin/hax }
+        with:
+          name: hax-${{ matrix.target }}
+          path: packaging/hax-${{ matrix.target }}/bin/hax
   verify:
     needs: build
     runs-on: ubuntu-24.04
