@@ -16,8 +16,28 @@ on:
       - "v*"
 
 jobs:
+  # Gate: the full TS build & test (mirrors ci.yml) must pass before we build any
+  # binary or publish anything. The hax-dependent e2e specs skip via describe.runIf
+  # when the engine is absent, so no submodule/hax build is needed here.
+  checks:
+    name: build & test gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm test
+
   # Build the hax engine for each target on its native runner and upload the binary.
   build-binaries:
+    needs: checks
     strategy:
       matrix:
         include:
