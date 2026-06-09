@@ -9,6 +9,7 @@
  */
 import type { Session } from "@ai-ezio/harness";
 import type { AssistantTurnFinishedEvent } from "@ai-ezio/protocol";
+import type { SessionRecorder } from "@ai-ezio/session-recorder";
 
 /** What the REPL should do after the controller handles a line. */
 export type SlashOutcome =
@@ -21,6 +22,9 @@ export type SlashOutcome =
 export interface SlashContext {
 	write(s: string): void;
 	session: Pick<Session, "newConversation" | "status">;
+	/** Optional session recorder — notified of the /new boundary so it rotates the
+	 * conversation and does a final capture before the engine resets. */
+	recorder?: Pick<SessionRecorder, "noteNewConversation">;
 	/** Last assistant turn's content (event-tracked); "" if none yet. */
 	lastContent(): string;
 	/** Last assistant turn's usage (event-tracked); undefined if none yet. */
@@ -94,6 +98,7 @@ function builtinCommands(listCommands: () => { name: string; summary: string }[]
 			aliases: ["clear"],
 			summary: "start a new conversation",
 			run: async (ctx) => {
+				ctx.recorder?.noteNewConversation();
 				await ctx.session.newConversation();
 				ctx.write("— new conversation —\n");
 			},

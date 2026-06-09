@@ -41,6 +41,9 @@ importers:
       '@ai-ezio/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@ai-ezio/session-recorder':
+        specifier: workspace:*
+        version: link:../session-recorder
       '@ai-ezio/surface':
         specifier: workspace:*
         version: link:../surface

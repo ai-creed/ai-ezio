@@ -5,6 +5,7 @@
  */
 import type { Session } from "@ai-ezio/harness";
 import type { McpHost } from "@ai-ezio/mcp-host";
+import type { SessionRecorder } from "@ai-ezio/session-recorder";
 import { feedKey, newLineBuffer } from "./input-reader.js";
 import type { SlashController } from "./slash.js";
 
@@ -22,6 +23,9 @@ export interface StandaloneReplDeps {
 	/** Draw a fresh input prompt. Used after a locally-handled command, where no
 	 * `idle` event follows to draw one. */
 	renderPrompt: () => void;
+	/** Optional session recorder — told the authoritative submit text before each
+	 * turn and closed on REPL exit so the final turn is captured. */
+	recorder?: Pick<SessionRecorder, "noteSubmit" | "close">;
 }
 
 /** The human REPL loop over headless hax: read a line → submit → wait for the
@@ -56,6 +60,7 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 			const outcome = await deps.slash.handle(r.submit);
 			if (outcome.action === "exit") break;
 			if (outcome.action === "submit") {
+				deps.recorder?.noteSubmit(outcome.text);
 				deps.session.submit(outcome.text);
 				// Wait for the turn to settle before reading the next line. The surface
 				// renders streamed events live via Session.onEvent; idle = prompt again.
@@ -67,6 +72,7 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 			}
 		}
 	}
+	deps.recorder?.close();
 	await deps.host.stop();
 	deps.session.close();
 }

@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { Session } from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
+import { createRecorder, ezioStateDir, recoverUncaptured, repoKeyForPath } from "@ai-ezio/session-recorder";
 import { createMountedRenderer } from "@ai-ezio/surface";
 import { discoverSkills, nodeSkillFs, type SkillEnv } from "../skills.js";
 import { makeClipboard } from "./clipboard.js";
@@ -70,13 +71,21 @@ async function* readKeys(stdin: NodeJS.ReadStream): AsyncGenerator<string> {
 
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(): Promise<number> {
-	const host = loadMcpHost({ mode: "standalone", cwd: process.cwd() });
+	const cwd = process.cwd();
+	const host = loadMcpHost({ mode: "standalone", cwd });
+	const stateDir = ezioStateDir();
+	const repoKey = repoKeyForPath(cwd);
+	// Session recorder: assemble turns from the protocol stream and feed cortex a
+	// Claude-format transcript via the host-private capture_session call. Cortex-blind
+	// except for the injected CortexSessionSink (inside createRecorder).
+	const recorder = createRecorder({ worktreePath: cwd, host, stateDir, repoKey });
 	const renderer = createMountedRenderer({ stdout: process.stdout });
 	let lastContent = "";
 	let lastUsage: AssistantTurnFinishedEvent["usage"];
 	const session = new Session({
 		onEvent: (e: ProtocolEvent) => {
 			renderer.handle(e);
+			recorder.handleEvent(e);
 			if (e.type === "assistant_turn_finished") {
 				lastContent = e.content;
 				lastUsage = e.usage;
@@ -94,6 +103,8 @@ export async function runStandalone(): Promise<number> {
 
 	// Register delegated tools BEFORE accepting input so the first turn sees them.
 	await host.start(session);
+	// Recover any projection orphaned by a crash before its final capture (idempotent).
+	await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd });
 
 	// Build the local slash controller with real capabilities. Skills are
 	// rediscovered per /skills call (cheap; reflects on-disk changes).
@@ -106,6 +117,7 @@ export async function runStandalone(): Promise<number> {
 	const slashCtx: SlashContext = {
 		write: (s) => void process.stdout.write(s),
 		session,
+		recorder,
 		lastContent: () => lastContent,
 		lastUsage: () => lastUsage,
 		skills: () =>
@@ -135,6 +147,7 @@ export async function runStandalone(): Promise<number> {
 			host,
 			write: (s) => void process.stdout.write(s),
 			slash,
+			recorder,
 			echoSubmittedInput: renderer.echoSubmittedInput,
 			renderPrompt: renderer.renderPrompt,
 		});

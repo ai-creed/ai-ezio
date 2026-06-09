@@ -9,6 +9,7 @@
 		{ "path": "../harness" },
 		{ "path": "../mcp-host" },
 		{ "path": "../protocol" },
+		{ "path": "../session-recorder" },
 		{ "path": "../surface" }
 	],
 	"include": ["src/**/*.ts"],
