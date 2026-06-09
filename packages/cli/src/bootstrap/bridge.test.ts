@@ -9,6 +9,17 @@ import {
 } from "./bridge.js";
 import { shellSingleQuote } from "./shell.js";
 
+// `sh` is always present; bash/zsh vary (zsh is NOT installed on the ubuntu CI
+// runner). Only round-trip through shells that actually exist to avoid ENOENT.
+const AVAILABLE_SHELLS = ["sh", "bash", "zsh"].filter((sh) => {
+	try {
+		execFileSync("sh", ["-c", `command -v ${sh}`], { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
+});
+
 describe("managed export block (A/B/C)", () => {
 	it("renders a shell-escaped block", () =>
 		expect(renderManagedBlock("/tmp/AI Ezio/hax")).toContain(
@@ -111,7 +122,7 @@ describe("persistBridge", () => {
 		expect(hint).toContain(`source ${quoted}`); // the printed path is quoted
 		// ...and that quoted token parses as EXACTLY ONE argument == the path in a real
 		// shell (no truncation at the space -> the copy-paste `source` won't exit 127).
-		for (const sh of ["sh", "zsh"]) {
+		for (const sh of AVAILABLE_SHELLS) {
 			const out = execFileSync(sh, ["-c", `set -- ${quoted}; [ "$#" -eq 1 ] && printf %s "$1"`], {
 				encoding: "utf8",
 			});
