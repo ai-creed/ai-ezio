@@ -43,7 +43,7 @@ jobs:
             brew install jansson meson ninja pkg-config
           fi
       - name: Build hax
-        run: meson setup vendor/hax/build && meson compile -C vendor/hax/build
+        run: meson setup vendor/hax/build vendor/hax && meson compile -C vendor/hax/build
       - name: Stage the binary into its platform package
         run: node scripts/stage-host-binary.mjs
       - name: Build + single-package install smoke

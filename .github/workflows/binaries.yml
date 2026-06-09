@@ -32,7 +32,7 @@ jobs:
             brew install jansson meson ninja pkg-config   # libcurl ships with macOS
           fi
       - name: Build hax for this target
-        run: meson setup vendor/hax/build && meson compile -C vendor/hax/build
+        run: meson setup vendor/hax/build vendor/hax && meson compile -C vendor/hax/build
       - name: Stage binary into its platform package
         run: node scripts/stage-host-binary.mjs   # writes packaging/hax-${{ matrix.target }}/bin/hax
       - run: pnpm install && pnpm --filter ai-ezio build
