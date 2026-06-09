@@ -538,6 +538,9 @@ export class SessionRecorder {
 	private current?: RecordedTurn;
 	private readonly callsById = new Map<string, RecordedToolCall>();
 	private readonly pendingSubmits: string[] = [];
+	/** True once the current conversation has a completed turn not yet flushed. Gates
+	 * flushes so an empty boundary (e.g. /new before any turn) is a no-op (spec §5). */
+	private hasUncaptured = false;
 	private debounce?: ReturnType<typeof setTimeout>;
 
 	constructor(private readonly opts: RecorderOptions) {
@@ -626,9 +629,10 @@ export class SessionRecorder {
 		this.turnIndex = 0;
 	}
 
-	/** Session shutdown / fd-3 EOF. */
-	close(): void {
-		this.triggerFlush("close");
+	/** Session shutdown / fd-3 EOF. Awaitable so the caller can ensure the final
+	 * capture completes before tearing down the MCP host / exiting the process. */
+	async close(): Promise<void> {
+		await this.doFlush("close");
 	}
 
 	private finalizeTurn(): void {
@@ -637,6 +641,7 @@ export class SessionRecorder {
 		this.current = undefined;
 		void Promise.resolve(this.opts.store.append(turn));
 		void Promise.resolve(this.opts.sink.onTurnComplete(turn));
+		this.hasUncaptured = true;
 		this.turnsSinceFlush++;
 		if (this.turnsSinceFlush >= this.everyKTurns) {
 			this.triggerFlush("everyK");
@@ -650,14 +655,23 @@ export class SessionRecorder {
 		this.debounce = setTimeout(() => this.triggerFlush("debounce"), this.idleDebounceMs);
 	}
 
+	/** Fire-and-forget flush (debounce / every-K / new) — never blocks the turn loop. */
 	private triggerFlush(reason: FlushReason): void {
+		void this.doFlush(reason);
+	}
+
+	/** Capture the current conversation IF it has an uncaptured turn; otherwise a no-op
+	 * (so /new before any turn does not flush — spec §5). Always clears the debounce
+	 * timer. Returns the sink's flush promise so close() can await the final capture. */
+	private doFlush(reason: FlushReason): void | Promise<void> {
 		if (this.debounce) {
 			clearTimeout(this.debounce);
 			this.debounce = undefined;
 		}
 		this.turnsSinceFlush = 0;
-		if (!this.conversationId) return; // nothing captured yet
-		void Promise.resolve(this.opts.sink.flush(this.ref(), reason));
+		if (!this.conversationId || !this.hasUncaptured) return; // nothing to capture
+		this.hasUncaptured = false;
+		return Promise.resolve(this.opts.sink.flush(this.ref(), reason));
 	}
 }
 ```
@@ -1785,9 +1799,18 @@ await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd });
 //    recorder.noteNewConversation();
 //    await session.newConversation();
 
-// 5. On shutdown (and/or session.onExit):
-//    recorder.close();
+// 5. On shutdown (and/or session.onExit), AWAIT close so the final capture completes
+//    before the host is torn down / the process exits:
+//    await recorder.close();
 ```
+
+Both entrypoints are wired this way: the interactive `runStandalone` (recorder fanned into
+`onEvent`, `noteSubmit` at standalone.ts's submit site, `noteNewConversation` in the `/new`
+slash command, `await recorder.close()` on REPL exit) AND the non-interactive one-shot
+`runOneShot` (`-p`) — a one-shot is a single-turn session and is captured the same way, with
+`await recorder.close()` in its `finally` so the lone turn is flushed before host teardown.
+The one-shot test redirects `$XDG_STATE_HOME` to a temp dir so it never touches the real home
+state tree.
 
 Also add the dependency to `packages/cli/package.json`: `"@ai-ezio/session-recorder": "workspace:*"`, and add `{ "path": "../session-recorder" }` to `packages/cli/tsconfig.json` references.
 
@@ -1819,7 +1842,7 @@ git commit -m "feat(session-recorder): factory + CLI wiring (recorder, recovery 
 | §3 Recovery sweep (in for v1) | 10, 11 |
 | §4 cortex `capture_session` tool (host-agnostic, thin) | 9 |
 | §4.1 Host-private MCP seam: `host.ts` filter + `callHostTool` AND config/`DEFAULT_HOST_PRIVATE`/`attach.ts` wiring so the DELIVERED host marks capture private | 8 |
-| §5 Edge cases (empty/tool-only turn, interrupt/error, no-turn idle, id sanitization, capture failure swallowed, rapid overlapping triggers tolerate `skipped-locked`) | 4, 5, 7 |
+| §5 Edge cases (empty/tool-only turn, interrupt/error, no-turn idle, id sanitization, capture failure swallowed, rapid overlapping triggers tolerate `skipped-locked`, **/new before any turn is a flush no-op but still rotates the id**) | 4, 5, 7 |
 | §6 Testing — recorder + submit correlation, projection shape + REAL cortex parser round-trip, trigger, boundary, recovery, host-private isolation (seam + wired default), concurrency/idempotency (overlapping `flush` + `skipped-locked`) | 3 (shape + guarded real round-trip), 4, 5 (trigger + rapid boundaries), 7 (sink + overlapping/`skipped-locked`), 8 (seam + wired default), 9 (cortex evidence round-trip), 10, 11 |
 
 **Coordination note (Lever B):** Task 9 keeps the `capture_session({worktreePath, sessionId, transcriptPath, embed})` signature stable; the parallel incremental-capture work changes only the body of `captureSession()`, so ezio is unaffected.
