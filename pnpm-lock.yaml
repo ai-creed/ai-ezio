@@ -78,6 +78,12 @@ importers:
 
   packages/protocol: {}
 
+  packages/session-recorder:
+    dependencies:
+      '@ai-ezio/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/surface:
     dependencies:
       '@ai-ezio/protocol':

@@ -5,6 +5,7 @@
 		{ "path": "packages/surface" },
 		{ "path": "packages/harness" },
 		{ "path": "packages/mcp-host" },
+		{ "path": "packages/session-recorder" },
 		{ "path": "packages/cli" }
 	]
 }
