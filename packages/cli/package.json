@@ -19,12 +19,14 @@
 		"dist",
 		"bin"
 	],
-	"dependencies": {
-		"@ai-ezio/harness": "workspace:*",
-		"@ai-ezio/mcp-host": "workspace:*",
-		"@ai-ezio/protocol": "workspace:*",
-		"@ai-ezio/session-recorder": "workspace:*",
-		"@ai-ezio/surface": "workspace:*"
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "tsc --build && node ../../scripts/bundle.mjs",
+		"test": "vitest run",
+		"prepack": "node ../../scripts/make-publish-manifest.mjs",
+		"postpack": "node ../../scripts/make-publish-manifest.mjs restore"
 	},
 	"optionalDependencies": {
 		"@ai-ezio/hax-darwin-arm64": "workspace:*",
@@ -32,8 +34,11 @@
 		"@ai-ezio/hax-linux-x64": "workspace:*",
 		"@ai-ezio/hax-linux-arm64": "workspace:*"
 	},
-	"scripts": {
-		"build": "tsc --build",
-		"test": "vitest run"
+	"devDependencies": {
+		"@ai-ezio/harness": "workspace:*",
+		"@ai-ezio/mcp-host": "workspace:*",
+		"@ai-ezio/protocol": "workspace:*",
+		"@ai-ezio/session-recorder": "workspace:*",
+		"@ai-ezio/surface": "workspace:*"
 	}
 }

@@ -5,6 +5,7 @@
 	"description": "ai-ezio: hax-derived, workflow-native coding agent (monorepo root)",
 	"license": "MIT",
 	"type": "module",
+	"packageManager": "pnpm@9.12.0",
 	"engines": {
 		"node": ">=20"
 	},
@@ -17,12 +18,16 @@
 		"format": "prettier --write \"packages/**/*.{ts,json}\" \"packaging/**/*.json\"",
 		"format:check": "prettier --check \"packages/**/*.{ts,json}\" \"packaging/**/*.json\"",
 		"smoke:install": "node scripts/smoke-install.mjs",
-		"smoke:cli-mount": "node scripts/cli-mount-smoke.mjs"
+		"smoke:cli-mount": "node scripts/cli-mount-smoke.mjs",
+		"smoke:bootstrap": "node scripts/bootstrap-smoke.mjs",
+		"check:pack": "node scripts/check-pack-manifest.mjs",
+		"check:binaries": "node scripts/check-platform-binaries.mjs"
 	},
 	"devDependencies": {
 		"@types/node": "^22.10.0",
 		"@typescript-eslint/eslint-plugin": "^8.18.0",
 		"@typescript-eslint/parser": "^8.18.0",
+		"esbuild": "^0.24",
 		"eslint": "^9.17.0",
 		"prettier": "^3.4.0",
 		"typescript": "^5.7.0",

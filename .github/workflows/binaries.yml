@@ -1,0 +1,48 @@
+name: binaries
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-14, target: darwin-arm64 }
+          - { os: macos-15-intel, target: darwin-x64 }   # macos-13 (Intel) retired 2025-12-04; macos-15-intel is the current public Intel image
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: ubuntu-24.04, target: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: pnpm/action-setup@v4   # NO `version:` — reads the root `packageManager: pnpm@9.12.0`; the v4 action errors ("Multiple versions of pnpm specified") if both are set and differ
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install hax build deps (libcurl, jansson, meson, ninja, pkg-config)
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y libcurl4-openssl-dev libjansson-dev meson ninja-build pkg-config
+          else
+            brew install jansson meson ninja pkg-config   # libcurl ships with macOS
+          fi
+      - name: Build hax for this target
+        run: meson setup vendor/hax/build && meson compile -C vendor/hax/build
+      - name: Stage binary into its platform package
+        run: node scripts/stage-host-binary.mjs   # writes packaging/hax-${{ matrix.target }}/bin/hax
+      - run: pnpm install && pnpm --filter ai-ezio build
+      - name: Single-package install smoke on this target
+        run: node scripts/smoke-install.mjs
+      - uses: actions/upload-artifact@v4
+        with: { name: hax-${{ matrix.target }}, path: packaging/hax-${{ matrix.target }}/bin/hax }
+  verify:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: /tmp/bins }
+      - name: Place all four binaries, then assert completeness
+        run: |
+          for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            mkdir -p packaging/hax-$t/bin && cp /tmp/bins/hax-$t/hax packaging/hax-$t/bin/hax
+          done
+          node scripts/check-platform-binaries.mjs

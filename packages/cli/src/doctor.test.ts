@@ -66,4 +66,24 @@ describe("formatDoctorReport", () => {
 		expect(text).toContain("[project] /proj/.agents/skills");
 		expect(text).toContain("[ai-ezio-global]"); // listed (engine-visible as of M4)
 	});
+
+	it("renders bootstrap/wired state and the reconfigure pointer", () => {
+		const r = buildDoctorReport({
+			version: { ezioVersion: "0.1.0", haxBaseCommit: "x" },
+			hax: { ok: true, path: "/hax", source: "platform-package", attempts: [] },
+			dirs: [],
+			dirExists: () => false,
+			skills: [],
+			wired: {
+				cortexConfigured: true,
+				bridgePersisted: false,
+				peers: { cortex: true, whisper: false },
+			},
+		});
+		const t = formatDoctorReport(r);
+		expect(t).toContain("bootstrap:");
+		expect(t).toContain("cortex mcp entry");
+		expect(t).toContain("AI_EZIO_HAX_BIN bridge persisted");
+		expect(t).toContain("ai-ezio init --reconfigure");
+	});
 });

@@ -13,12 +13,19 @@ export interface DoctorSkillDir extends SkillDir {
 	count: number;
 }
 
+export interface WiredState {
+	cortexConfigured: boolean;
+	bridgePersisted: boolean;
+	peers: { cortex: boolean; whisper: boolean };
+}
+
 export interface DoctorReport {
 	version: VersionInfo;
 	hax: HaxResolution;
 	skillDirs: DoctorSkillDir[];
 	skills: Skill[];
 	notes: string[];
+	wired?: WiredState;
 }
 
 export interface DoctorInputs {
@@ -27,6 +34,7 @@ export interface DoctorInputs {
 	dirs: SkillDir[];
 	dirExists: (path: string) => boolean;
 	skills: Skill[];
+	wired?: WiredState;
 }
 
 export function buildDoctorReport(input: DoctorInputs): DoctorReport {
@@ -49,7 +57,14 @@ export function buildDoctorReport(input: DoctorInputs): DoctorReport {
 		);
 	}
 
-	return { version: input.version, hax: input.hax, skillDirs, skills: input.skills, notes };
+	return {
+		version: input.version,
+		hax: input.hax,
+		skillDirs,
+		skills: input.skills,
+		notes,
+		wired: input.wired,
+	};
 }
 
 export function formatDoctorReport(r: DoctorReport): string {
@@ -77,6 +92,17 @@ export function formatDoctorReport(r: DoctorReport): string {
 		lines.push("");
 		lines.push("notes:");
 		for (const n of r.notes) lines.push(`  ! ${n}`);
+	}
+	if (r.wired) {
+		const yn = (b: boolean) => (b ? "✓" : "✗");
+		lines.push("", "bootstrap:");
+		lines.push(`  ${yn(r.wired.peers.cortex)} ai-cortex installed`);
+		lines.push(`  ${yn(r.wired.peers.whisper)} ai-whisper installed`);
+		lines.push(`  ${yn(r.wired.cortexConfigured)} cortex mcp entry in mcp.json`);
+		lines.push(
+			`  ${yn(r.wired.bridgePersisted)} AI_EZIO_HAX_BIN bridge persisted (in shell profile)`,
+		);
+		lines.push("  re-run setup any time: ai-ezio init --reconfigure");
 	}
 	return lines.join("\n");
 }

@@ -24,17 +24,19 @@ function currentSkillEnv(): SkillEnv {
 }
 
 /** Handle `ai-ezio skill ...` and `ai-ezio doctor`. Returns the exit code. */
-export function runNativeSubcommand(argv: readonly string[]): number {
+export async function runNativeSubcommand(argv: readonly string[]): Promise<number> {
 	const env = currentSkillEnv();
 	const fs = nodeSkillFs();
 
 	if (argv[0] === "doctor") {
+		const { computeWiredState } = await import("./bootstrap/init-cli.js");
 		const report = buildDoctorReport({
 			version: readVersionInfo(),
 			hax: describeHaxBinary(),
 			dirs: skillDirs(env),
 			dirExists: (p) => fs.isDirectory(p),
 			skills: discoverSkills(env, fs),
+			wired: computeWiredState(),
 		});
 		process.stdout.write(`${formatDoctorReport(report)}\n`);
 		return report.hax.ok ? 0 : 1;
@@ -129,6 +131,27 @@ export function wantsInteractiveSelfMount(argv: readonly string[]): boolean {
 	return argv.length === 0 && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
 }
 
+/** First-run gate predicate (pure; spec §5.2, finding E). */
+export function shouldRunFirstRun(
+	argv: readonly string[],
+	state: { isTTY: boolean; bootstrapped: boolean },
+): boolean {
+	return argv.length === 0 && state.isTTY && !state.bootstrapped;
+}
+
+export interface FirstRunDeps {
+	isTTY: () => boolean;
+	isBootstrapped: () => boolean;
+	runWizard: () => Promise<void>;
+}
+/** Dispatcher: actually runs the wizard once on a bare interactive launch with
+ * no marker. Injectable so the dispatch + run-once suppression is unit-tested. */
+export async function maybeRunFirstRun(argv: readonly string[], deps: FirstRunDeps): Promise<void> {
+	if (shouldRunFirstRun(argv, { isTTY: deps.isTTY(), bootstrapped: deps.isBootstrapped() })) {
+		await deps.runWizard();
+	}
+}
+
 /** The prompt for a `-p`/`--print <prompt>` one-shot, or undefined when there is
  * no concrete prompt arg (e.g. `-p` reading stdin) — those stay on passthrough. */
 export function oneShotPrompt(argv: readonly string[]): string | undefined {
@@ -154,10 +177,36 @@ export async function main(argv: string[]): Promise<number> {
 	}
 
 	if (isNativeSubcommand(argv)) {
-		return runNativeSubcommand(argv);
+		return await runNativeSubcommand(argv);
+	}
+
+	if (argv[0] === "init") {
+		const { runInitCli } = await import("./bootstrap/init-cli.js");
+		return runInitCli(argv.slice(1));
 	}
 
 	if (wantsInteractiveSelfMount(argv)) {
+		const [{ existsSync }, { isBootstrapped }] = await Promise.all([
+			import("node:fs"),
+			import("./bootstrap/marker.js"),
+		]);
+		await maybeRunFirstRun(argv, {
+			isTTY: () => true,
+			isBootstrapped: () => isBootstrapped(process.env, existsSync),
+			runWizard: async () => {
+				// First-run bootstrap is best-effort: ANY failure (incl. an fs EACCES that
+				// escaped the per-step guards) must NOT block entry into the REPL (finding
+				// 1, §6) — warn and proceed to runStandalone() below.
+				try {
+					const { runInitCli } = await import("./bootstrap/init-cli.js");
+					await runInitCli([]); // default-yes offers; writes the marker; failures non-fatal
+				} catch (error) {
+					process.stderr.write(
+						`ai-ezio: first-run setup did not complete (${(error as Error).message}); continuing. Run \`ai-ezio init\` later to finish.\n`,
+					);
+				}
+			},
+		});
 		const { runStandalone } = await import("./repl/standalone-runtime.js");
 		return runStandalone();
 	}

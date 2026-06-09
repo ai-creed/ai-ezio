@@ -15,6 +15,10 @@ vendor/hax/build-asan/
 artifacts/
 *.node
 
+# transient pack artifact: the dev manifest backup that make-publish-manifest.mjs
+# swaps in during prepack and restores in postpack
+packages/cli/package.json.dev
+
 # staged per-platform hax binaries (build artifacts; populated by the CI
 # cross-compile matrix or scripts/stage-host-binary.mjs — never committed)
 packaging/*/bin/
