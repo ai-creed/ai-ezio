@@ -28,7 +28,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with: { submodules: recursive }
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }} # read access to the private vendor/hax submodule (ai-creed/hax)
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
@@ -60,7 +62,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with: { submodules: recursive }
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULE_TOKEN }} # read access to the private vendor/hax submodule (ai-creed/hax)
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
