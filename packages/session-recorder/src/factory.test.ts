@@ -28,6 +28,9 @@ describe("createRecorder", () => {
 		const recordFile = join(stateDir, "sessions", "repo", "s1-0.record.jsonl");
 		expect(readFileSync(cortexFile, "utf8")).toContain('"type":"user"');
 		expect(readFileSync(recordFile, "utf8")).toContain('"userText":"hi"');
-		expect(callHostTool).toHaveBeenCalledWith("cortex__capture_session", expect.objectContaining({ sessionId: "s1-0" }));
+		expect(callHostTool).toHaveBeenCalledWith(
+			"cortex__capture_session",
+			expect.objectContaining({ sessionId: "s1-0" }),
+		);
 	});
 });

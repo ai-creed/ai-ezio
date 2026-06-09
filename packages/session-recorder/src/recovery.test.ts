@@ -14,9 +14,16 @@ describe("recoverUncaptured", () => {
 		writeFileSync(join(dir, "notes.txt"), "ignore me\n");
 
 		const callHostTool = vi.fn().mockResolvedValue({ output: "{}", status: "ok" });
-		await recoverUncaptured({ host: { callHostTool }, stateDir, repoKey: "repo", worktreePath: "/repo" });
+		await recoverUncaptured({
+			host: { callHostTool },
+			stateDir,
+			repoKey: "repo",
+			worktreePath: "/repo",
+		});
 
-		const captured = callHostTool.mock.calls.map((c) => (c[1] as { sessionId: string }).sessionId).sort();
+		const captured = callHostTool.mock.calls
+			.map((c) => (c[1] as { sessionId: string }).sessionId)
+			.sort();
 		expect(captured).toEqual(["s1-0", "s1-1"]);
 		expect(callHostTool).toHaveBeenCalledWith("cortex__capture_session", {
 			worktreePath: "/repo",
@@ -28,7 +35,12 @@ describe("recoverUncaptured", () => {
 
 	it("is a no-op when the sessions dir is absent", async () => {
 		const callHostTool = vi.fn();
-		await recoverUncaptured({ host: { callHostTool }, stateDir: "/nonexistent-xyz", repoKey: "repo", worktreePath: "/repo" });
+		await recoverUncaptured({
+			host: { callHostTool },
+			stateDir: "/nonexistent-xyz",
+			repoKey: "repo",
+			worktreePath: "/repo",
+		});
 		expect(callHostTool).not.toHaveBeenCalled();
 	});
 });

@@ -36,7 +36,11 @@ export function parseConfig(text: string | undefined): HostConfig {
 		args: s.args ?? [],
 		env: s.env,
 	}));
-	return { servers, toolPolicy: raw.toolPolicy ?? {}, hostPrivateTools: raw.hostPrivateTools ?? [] };
+	return {
+		servers,
+		toolPolicy: raw.toolPolicy ?? {},
+		hostPrivateTools: raw.hostPrivateTools ?? [],
+	};
 }
 
 /** Load from disk; returns the empty config if the file is absent or unreadable. */

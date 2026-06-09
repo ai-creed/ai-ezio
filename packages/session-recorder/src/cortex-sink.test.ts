@@ -14,19 +14,32 @@ function turn(i: number, tools: RecordedTurn["toolCalls"] = []): RecordedTurn {
 describe("CortexSessionSink", () => {
 	it("appends two projection lines per turn with monotonic turn numbers", () => {
 		const dir = mkdtempSync(join(tmpdir(), "ezio-cortex-"));
-		const sink = new CortexSessionSink({ host: { callHostTool: vi.fn() }, stateDir: dir, repoKey: "repo" });
+		const sink = new CortexSessionSink({
+			host: { callHostTool: vi.fn() },
+			stateDir: dir,
+			repoKey: "repo",
+		});
 		sink.onTurnComplete(turn(0));
 		sink.onTurnComplete(turn(1));
 
 		const file = join(dir, "sessions", "repo", "s1-0.cortex.jsonl");
-		const lines = readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+		const lines = readFileSync(file, "utf8")
+			.trim()
+			.split("\n")
+			.map((l) => JSON.parse(l));
 		expect(lines.map((l) => l.turn)).toEqual([0, 1, 2, 3]);
-		expect(lines[0]).toEqual({ type: "user", turn: 0, message: { content: [{ type: "text", text: "u0" }] } });
+		expect(lines[0]).toEqual({
+			type: "user",
+			turn: 0,
+			message: { content: [{ type: "text", text: "u0" }] },
+		});
 	});
 
 	it("flush calls capture_session via the host with the projection path", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ezio-cortex-"));
-		const callHostTool = vi.fn().mockResolvedValue({ output: '{"status":"captured"}', status: "ok" });
+		const callHostTool = vi
+			.fn()
+			.mockResolvedValue({ output: '{"status":"captured"}', status: "ok" });
 		const sink = new CortexSessionSink({ host: { callHostTool }, stateDir: dir, repoKey: "repo" });
 		sink.onTurnComplete(turn(0));
 		await sink.flush(ref, "debounce");
@@ -61,7 +74,12 @@ describe("CortexSessionSink", () => {
 			.fn()
 			.mockResolvedValueOnce({ output: '{"status":"captured","turnsProcessed":1}', status: "ok" })
 			.mockResolvedValueOnce({ output: '{"status":"skipped-locked"}', status: "ok" });
-		const sink = new CortexSessionSink({ host: { callHostTool }, stateDir: dir, repoKey: "repo", warn });
+		const sink = new CortexSessionSink({
+			host: { callHostTool },
+			stateDir: dir,
+			repoKey: "repo",
+			warn,
+		});
 		sink.onTurnComplete(turn(0));
 
 		// Two boundary triggers race (e.g. debounce timer fires as /new arrives):

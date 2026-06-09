@@ -55,7 +55,11 @@ describe("createMcpHost host-private default", () => {
 			close: async () => {},
 		};
 		const host = createMcpHost(
-			{ servers: [{ name: "cortex", command: "x", args: [] }], toolPolicy: {}, hostPrivateTools: [] },
+			{
+				servers: [{ name: "cortex", command: "x", args: [] }],
+				toolPolicy: {},
+				hostPrivateTools: [],
+			},
 			{ mode: "mounted", cwd: "/repo", connect: async () => client },
 		);
 		await host.start(session);
@@ -67,6 +71,8 @@ describe("createMcpHost host-private default", () => {
 
 	it("parseConfig carries hostPrivateTools (defaults to [])", () => {
 		expect(parseConfig(undefined).hostPrivateTools).toEqual([]);
-		expect(parseConfig(JSON.stringify({ hostPrivateTools: ["x__y"] })).hostPrivateTools).toEqual(["x__y"]);
+		expect(parseConfig(JSON.stringify({ hostPrivateTools: ["x__y"] })).hostPrivateTools).toEqual([
+			"x__y",
+		]);
 	});
 });

@@ -20,7 +20,13 @@ describe("SessionRecorder assembly", () => {
 	it("assembles a turn: user text echo, tool calls, final content + usage", () => {
 		const { sink, turns } = fakeSink();
 		const store = { append: vi.fn() };
-		const rec = new SessionRecorder({ worktreePath: "/repo", store, sink, idleDebounceMs: 9_999, everyKTurns: 999 });
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store,
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
 
 		rec.noteSubmit("look at foo.ts"); // authoritative source: the text ezio itself sent
 		feed(rec, [
@@ -28,8 +34,21 @@ describe("SessionRecorder assembly", () => {
 			{ type: "user_turn_started", turnId: "t1" }, // NOTE: no `text` echo — correlation must come from noteSubmit
 			{ type: "assistant_turn_started", turnId: "t1" },
 			{ type: "tool_call_started", turnId: "t1", name: "Read", callId: "c1", args: "src/foo.ts" },
-			{ type: "tool_call_finished", turnId: "t1", name: "Read", callId: "c1", status: "ok", output: "…", isDiff: false },
-			{ type: "assistant_turn_finished", turnId: "t1", content: "Done.", usage: { outputTokens: 12, contextTokens: 400 } },
+			{
+				type: "tool_call_finished",
+				turnId: "t1",
+				name: "Read",
+				callId: "c1",
+				status: "ok",
+				output: "…",
+				isDiff: false,
+			},
+			{
+				type: "assistant_turn_finished",
+				turnId: "t1",
+				content: "Done.",
+				usage: { outputTokens: 12, contextTokens: 400 },
+			},
 			{ type: "idle" },
 		]);
 
@@ -47,7 +66,13 @@ describe("SessionRecorder assembly", () => {
 
 	it("prefers the stashed submit text over the protocol echo", () => {
 		const { sink, turns } = fakeSink();
-		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink, idleDebounceMs: 9_999, everyKTurns: 999 });
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store: { append: vi.fn() },
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
 		rec.noteSubmit("authoritative");
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
@@ -60,7 +85,13 @@ describe("SessionRecorder assembly", () => {
 
 	it("falls back to the protocol echo when no submit was stashed", () => {
 		const { sink, turns } = fakeSink();
-		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink, idleDebounceMs: 9_999, everyKTurns: 999 });
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store: { append: vi.fn() },
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
 			{ type: "user_turn_started", turnId: "t1", text: "echo-fallback" },
@@ -72,13 +103,37 @@ describe("SessionRecorder assembly", () => {
 
 	it("upgrades a delegated tool's input from the requested args object", () => {
 		const { sink, turns } = fakeSink();
-		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink, idleDebounceMs: 9_999, everyKTurns: 999 });
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store: { append: vi.fn() },
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
 			{ type: "user_turn_started", turnId: "t1", text: "recall" },
-			{ type: "tool_call_started", turnId: "t1", name: "cortex__recall_memory", callId: "c1", args: "query=x" },
-			{ type: "tool_call_requested", turnId: "t1", name: "cortex__recall_memory", callId: "c1", args: { query: "x" } },
-			{ type: "tool_call_finished", turnId: "t1", name: "cortex__recall_memory", callId: "c1", status: "ok" },
+			{
+				type: "tool_call_started",
+				turnId: "t1",
+				name: "cortex__recall_memory",
+				callId: "c1",
+				args: "query=x",
+			},
+			{
+				type: "tool_call_requested",
+				turnId: "t1",
+				name: "cortex__recall_memory",
+				callId: "c1",
+				args: { query: "x" },
+			},
+			{
+				type: "tool_call_finished",
+				turnId: "t1",
+				name: "cortex__recall_memory",
+				callId: "c1",
+				status: "ok",
+			},
 			{ type: "assistant_turn_finished", turnId: "t1", content: "" },
 			{ type: "idle" },
 		]);
@@ -87,7 +142,13 @@ describe("SessionRecorder assembly", () => {
 
 	it("finalizes a partial turn at idle even with no assistant content (interrupt/error)", () => {
 		const { sink, turns } = fakeSink();
-		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink, idleDebounceMs: 9_999, everyKTurns: 999 });
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store: { append: vi.fn() },
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
 			{ type: "user_turn_started", turnId: "t1", text: "do a thing" },
@@ -100,7 +161,13 @@ describe("SessionRecorder assembly", () => {
 
 	it("ignores a stray idle with no open turn", () => {
 		const { sink, turns } = fakeSink();
-		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink, idleDebounceMs: 9_999, everyKTurns: 999 });
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store: { append: vi.fn() },
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
 			{ type: "idle" },

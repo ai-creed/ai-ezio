@@ -9,7 +9,12 @@ import { homedir } from "node:os";
 import { Session } from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
-import { createRecorder, ezioStateDir, recoverUncaptured, repoKeyForPath } from "@ai-ezio/session-recorder";
+import {
+	createRecorder,
+	ezioStateDir,
+	recoverUncaptured,
+	repoKeyForPath,
+} from "@ai-ezio/session-recorder";
 import { createMountedRenderer } from "@ai-ezio/surface";
 import { discoverSkills, nodeSkillFs, type SkillEnv } from "../skills.js";
 import { makeClipboard } from "./clipboard.js";

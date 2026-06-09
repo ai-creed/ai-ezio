@@ -66,29 +66,32 @@ describe("renderCortexLines", () => {
 // and in the workflow. Skipped (not failed) otherwise so ezio CI stays decoupled from cortex.
 const cortexDist = process.env.AI_CORTEX_DIST;
 const compactPath = cortexDist ? join(cortexDist, "lib/history/compact.js") : "";
-describe.skipIf(!cortexDist || !existsSync(compactPath))("renderCortexLines × cortex real parser", () => {
-	it("yields user prompts, tool calls, and file paths via cortex's parseTranscript+extractEvidence", async () => {
-		const { parseTranscript, extractEvidence } = (await import(compactPath)) as {
-			parseTranscript: (p: string) => unknown[];
-			extractEvidence: (t: unknown[]) => {
-				userPrompts: { text: string }[];
-				toolCalls: { name: string }[];
-				filePaths: { path: string }[];
+describe.skipIf(!cortexDist || !existsSync(compactPath))(
+	"renderCortexLines × cortex real parser",
+	() => {
+		it("yields user prompts, tool calls, and file paths via cortex's parseTranscript+extractEvidence", async () => {
+			const { parseTranscript, extractEvidence } = (await import(compactPath)) as {
+				parseTranscript: (p: string) => unknown[];
+				extractEvidence: (t: unknown[]) => {
+					userPrompts: { text: string }[];
+					toolCalls: { name: string }[];
+					filePaths: { path: string }[];
+				};
 			};
-		};
-		const turn: RecordedTurn = {
-			ref,
-			index: 0,
-			userText: "analyze the auth module",
-			assistantText: "reading",
-			toolCalls: [{ name: "Read", input: { file_path: "src/auth.ts" }, status: "ok" }],
-		};
-		const dir = mkdtempSync(join(tmpdir(), "ezio-rt-"));
-		const file = join(dir, "t.jsonl");
-		writeFileSync(file, `${renderCortexLines(turn, 0).join("\n")}\n`);
-		const ev = extractEvidence(parseTranscript(file));
-		expect(ev.userPrompts.map((u) => u.text)).toContain("analyze the auth module");
-		expect(ev.toolCalls.map((t) => t.name)).toContain("Read");
-		expect(ev.filePaths.map((f) => f.path)).toContain("src/auth.ts");
-	});
-});
+			const turn: RecordedTurn = {
+				ref,
+				index: 0,
+				userText: "analyze the auth module",
+				assistantText: "reading",
+				toolCalls: [{ name: "Read", input: { file_path: "src/auth.ts" }, status: "ok" }],
+			};
+			const dir = mkdtempSync(join(tmpdir(), "ezio-rt-"));
+			const file = join(dir, "t.jsonl");
+			writeFileSync(file, `${renderCortexLines(turn, 0).join("\n")}\n`);
+			const ev = extractEvidence(parseTranscript(file));
+			expect(ev.userPrompts.map((u) => u.text)).toContain("analyze the auth module");
+			expect(ev.toolCalls.map((t) => t.name)).toContain("Read");
+			expect(ev.filePaths.map((f) => f.path)).toContain("src/auth.ts");
+		});
+	},
+);

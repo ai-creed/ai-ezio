@@ -4,7 +4,13 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { renderCortexLines } from "./cortex-projection.js";
-import type { ConversationRef, FlushReason, HostToolCaller, RecordedTurn, SessionSink } from "./types.js";
+import type {
+	ConversationRef,
+	FlushReason,
+	HostToolCaller,
+	RecordedTurn,
+	SessionSink,
+} from "./types.js";
 
 export interface CortexSessionSinkOptions {
 	host: HostToolCaller;
@@ -24,7 +30,12 @@ export class CortexSessionSink implements SessionSink {
 	constructor(private readonly opts: CortexSessionSinkOptions) {}
 
 	private path(ref: ConversationRef): string {
-		return join(this.opts.stateDir, "sessions", this.opts.repoKey, `${ref.conversationId}.cortex.jsonl`);
+		return join(
+			this.opts.stateDir,
+			"sessions",
+			this.opts.repoKey,
+			`${ref.conversationId}.cortex.jsonl`,
+		);
 	}
 
 	onTurnComplete(turn: RecordedTurn): void {

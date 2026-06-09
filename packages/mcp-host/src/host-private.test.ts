@@ -3,7 +3,10 @@ import { McpHost } from "./host.js";
 import type { McpClient } from "./mcp-client.js";
 import type { DelegatedToolDef } from "@ai-ezio/protocol";
 
-function fakeClient(tools: string[], onCall: (tool: string, args: Record<string, unknown>) => void = () => {}): McpClient {
+function fakeClient(
+	tools: string[],
+	onCall: (tool: string, args: Record<string, unknown>) => void = () => {},
+): McpClient {
 	return {
 		listTools: async (): Promise<DelegatedToolDef[]> =>
 			tools.map((name) => ({
@@ -57,13 +60,19 @@ describe("McpHost host-private tools", () => {
 			servers: [{ name: "cortex", command: "x", args: [] }],
 			toolPolicy: {},
 			hostPrivateTools: ["cortex__capture_session"],
-			connect: async () => fakeClient(["capture_session"], (tool, args) => calls.push({ tool, args })),
+			connect: async () =>
+				fakeClient(["capture_session"], (tool, args) => calls.push({ tool, args })),
 		});
 		await host.start(session);
 
-		const res = await host.callHostTool("cortex__capture_session", { sessionId: "s1-0", worktreePath: "/wrong" });
+		const res = await host.callHostTool("cortex__capture_session", {
+			sessionId: "s1-0",
+			worktreePath: "/wrong",
+		});
 		expect(res).toEqual({ output: "ok", status: "ok" });
-		expect(calls).toEqual([{ tool: "capture_session", args: { sessionId: "s1-0", worktreePath: "/repo" } }]);
+		expect(calls).toEqual([
+			{ tool: "capture_session", args: { sessionId: "s1-0", worktreePath: "/repo" } },
+		]);
 	});
 
 	it("callHostTool throws on a denied tool and on an unknown tool", async () => {
@@ -77,7 +86,9 @@ describe("McpHost host-private tools", () => {
 			connect: async () => fakeClient(["capture_session"]),
 		});
 		await host.start(session);
-		await expect(host.callHostTool("cortex__capture_session", {})).rejects.toThrow(/blocked by policy/);
+		await expect(host.callHostTool("cortex__capture_session", {})).rejects.toThrow(
+			/blocked by policy/,
+		);
 		await expect(host.callHostTool("cortex__nope", {})).rejects.toThrow(/unknown host tool/);
 	});
 });
