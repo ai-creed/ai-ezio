@@ -3,6 +3,9 @@
 	"version": "0.1.0",
 	"description": "Prebuilt hax engine binary for ai-ezio (linux/arm64)",
 	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	},
 	"os": [
 		"linux"
 	],

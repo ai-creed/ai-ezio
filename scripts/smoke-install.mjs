@@ -33,11 +33,9 @@ function fail(msg) {
 	process.exit(1);
 }
 
-// 0. preconditions
-for (const pkg of ["protocol", "harness", "cli"]) {
-	if (!existsSync(join(repoRoot, "packages", pkg, "dist"))) {
-		fail(`packages/${pkg}/dist missing — run \`pnpm -r build\` first.`);
-	}
+// 0. preconditions: only the bundled cli dist is needed now
+if (!existsSync(join(repoRoot, "packages", "cli", "dist", "cli.js"))) {
+	fail("packages/cli/dist/cli.js missing — run `pnpm --filter ai-ezio build` first.");
 }
 
 // 1. stage host binary
@@ -50,19 +48,16 @@ const appDir = join(work, "app");
 const runDir = join(work, "run");
 run("mkdir", ["-p", tarDir, appDir, runDir]);
 
-const packDirs = [
-	join(repoRoot, "packages", "protocol"),
-	join(repoRoot, "packages", "harness"),
-	join(repoRoot, "packages", "cli"),
-	hostPkgDir,
-];
+const packDirs = [join(repoRoot, "packages", "cli"), hostPkgDir]; // bundled ai-ezio + host binary
+// `npm pack` (spec §7) runs the cli's prepack (publish-manifest generation) and does
+// NOT rewrite `workspace:` — the real publish path, so the smoke matches production.
 for (const dir of packDirs) {
-	run("pnpm", ["pack", "--pack-destination", tarDir], { cwd: dir });
+	run("npm", ["pack", "--pack-destination", tarDir], { cwd: dir });
 }
 const tarballs = readdirSync(tarDir)
 	.filter((f) => f.endsWith(".tgz"))
 	.map((f) => join(tarDir, f));
-if (tarballs.length !== 4) fail(`expected 4 tarballs, got ${tarballs.length}: ${tarballs}`);
+if (tarballs.length !== 2) fail(`expected 2 tarballs (bundled cli + host binary), got ${tarballs.length}: ${tarballs}`);
 
 // 3. clean install (no AI_EZIO_HAX_BIN, omit non-host optional platforms)
 run("npm", ["init", "-y"], { cwd: appDir, stdio: "ignore" });
