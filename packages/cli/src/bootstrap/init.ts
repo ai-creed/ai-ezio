@@ -116,6 +116,15 @@ export async function runInit(opts: InitOptions, deps: InitDeps): Promise<number
 			"could not resolve ai-cortex to a working mcp entry — see the guidance above";
 		if (kind === "missing") {
 			deps.out(deps.applyCortex() ? "added portable cortex entry to mcp.json" : unresolved);
+		} else if (kind === "malformed") {
+			// No decline path: a malformed mcp.json is ALWAYS backed up (applyCortex backs
+			// up before it even checks the entry) and then repaired, or — when cortex can't
+			// be resolved — the intended entry is printed. Never "left as-is" (finding 2).
+			deps.out(
+				deps.applyCortex()
+					? "backed up malformed mcp.json and wrote a fresh portable cortex entry"
+					: `backed up malformed mcp.json; ${unresolved} — intended entry: {"command":"ai-cortex","args":["mcp"]}`,
+			);
 		} else if (kind === "broken") {
 			const repair = interactive
 				? await deps.askYesNo("Repair the broken cortex mcp entry to the portable form?", true)

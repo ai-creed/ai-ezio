@@ -194,8 +194,17 @@ export async function main(argv: string[]): Promise<number> {
 			isTTY: () => true,
 			isBootstrapped: () => isBootstrapped(process.env, existsSync),
 			runWizard: async () => {
-				const { runInitCli } = await import("./bootstrap/init-cli.js");
-				await runInitCli([]); // default-yes offers; writes the marker; failures non-fatal
+				// First-run bootstrap is best-effort: ANY failure (incl. an fs EACCES that
+				// escaped the per-step guards) must NOT block entry into the REPL (finding
+				// 1, §6) — warn and proceed to runStandalone() below.
+				try {
+					const { runInitCli } = await import("./bootstrap/init-cli.js");
+					await runInitCli([]); // default-yes offers; writes the marker; failures non-fatal
+				} catch (error) {
+					process.stderr.write(
+						`ai-ezio: first-run setup did not complete (${(error as Error).message}); continuing. Run \`ai-ezio init\` later to finish.\n`,
+					);
+				}
 			},
 		});
 		const { runStandalone } = await import("./repl/standalone-runtime.js");

@@ -23,7 +23,10 @@ export function hasUserOwnedExport(profileText: string): boolean {
 	const e = profileText.indexOf(END);
 	const stripped =
 		b >= 0 && e > b ? profileText.slice(0, b) + profileText.slice(e + END.length) : profileText;
-	return stripped.split("\n").some((l) => /^(export\s+)?AI_EZIO_HAX_BIN=/.test(l.trim()));
+	// Only a real `export` is inherited by child processes (whisper's check), so a
+	// bare `AI_EZIO_HAX_BIN=…` assignment is NOT durable and must not suppress the
+	// managed block (finding 3).
+	return stripped.split("\n").some((l) => /^export\s+AI_EZIO_HAX_BIN=/.test(l.trim()));
 }
 
 export interface BridgeDeps {

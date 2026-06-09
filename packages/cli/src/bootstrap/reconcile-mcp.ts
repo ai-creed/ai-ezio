@@ -15,7 +15,7 @@ export interface CortexEntry {
 	command: string;
 	args: string[];
 }
-export type CortexKind = "missing" | "valid-portable" | "valid-hardcoded" | "broken";
+export type CortexKind = "missing" | "valid-portable" | "valid-hardcoded" | "broken" | "malformed";
 
 export function parseMcp(raw: string | null): { ok: true; obj: McpFile } | { ok: false } {
 	if (raw === null || raw.trim() === "") return { ok: true, obj: {} };

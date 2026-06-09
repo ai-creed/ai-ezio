@@ -140,6 +140,40 @@ describe("runInit gating", () => {
 		expect(d.applyCortex).not.toHaveBeenCalled();
 	});
 
+	it("malformed mcp.json is ALWAYS reconciled (no decline path): backs up + repairs, never asks (finding 2)", async () => {
+		const out = vi.fn();
+		const ask = vi.fn(async () => false); // would decline if asked — but it must NOT be asked
+		const applyCortex = vi.fn(() => true);
+		const d = deps(present(), {
+			classifyCortex: () => "malformed",
+			applyCortex,
+			askYesNo: ask,
+			out,
+		});
+		await runInit({ yes: false, cortex: true, whisper: false, reconfigure: false }, d);
+		expect(applyCortex).toHaveBeenCalled(); // reconciled regardless of consent
+		// no "Repair …?" prompt for the malformed kind (it has no decline path)
+		expect(ask.mock.calls.flat().some((a) => String(a).includes("Repair"))).toBe(false);
+		const text = out.mock.calls.flat().join("\n");
+		expect(text).toContain("backed up malformed mcp.json");
+		expect(text).not.toContain("left"); // never "left as-is"
+	});
+
+	it("malformed mcp.json with an UNRESOLVABLE cortex still reports the backup + prints the intended entry (finding 2)", async () => {
+		const out = vi.fn();
+		// applyCortex returns false (skipped) but, per init-cli, has ALREADY backed up the file.
+		const d = deps(present(), {
+			classifyCortex: () => "malformed",
+			applyCortex: vi.fn(() => false),
+			out,
+		});
+		await runInit({ yes: true, cortex: true, whisper: false, reconfigure: false }, d);
+		const text = out.mock.calls.flat().join("\n");
+		expect(text).toContain("backed up malformed mcp.json");
+		expect(text).toContain(`{"command":"ai-cortex","args":["mcp"]}`); // intended entry printed
+		expect(text).not.toContain("left"); // never "left as-is"
+	});
+
 	it("prints an ACCURATE summary (not 'added') when applyCortex skips because nothing resolved", async () => {
 		const out = vi.fn();
 		const d = deps(present(), {

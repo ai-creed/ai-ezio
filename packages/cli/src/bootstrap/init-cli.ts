@@ -25,6 +25,15 @@ import {
 } from "./reconcile-mcp.js";
 import { checkCompat } from "./versions.js";
 
+/** Tags an fs failure inside a bridge dep so persistBridge's wrapper can render it
+ * as non-fatal guidance (finding 1, §6) while keeping bridge.ts dep-pure. */
+class BridgeFsError extends Error {
+	constructor(message: string, cause: unknown) {
+		super(`${message}: ${(cause as Error)?.message ?? String(cause)}`);
+		this.name = "BridgeFsError";
+	}
+}
+
 function which(cmd: string): string | null {
 	try {
 		return (
@@ -57,7 +66,10 @@ function chosenProfile(env: NodeJS.ProcessEnv): string | null {
 	const shell = env.SHELL ?? "";
 	const home = env.HOME ?? homedir();
 	if (shell.includes("zsh")) return `${home}/.zshrc`;
-	if (shell.includes("bash")) return `${home}/.bashrc`;
+	// macOS login bash sources ~/.bash_profile, NOT ~/.bashrc; Linux sources ~/.bashrc
+	// for interactive shells. Pick the file a login shell actually reads (finding 4).
+	if (shell.includes("bash"))
+		return process.platform === "darwin" ? `${home}/.bash_profile` : `${home}/.bashrc`;
 	return null; // ambiguous -> bridge prints the export line
 }
 function detect(env: NodeJS.ProcessEnv): Environment {
@@ -131,40 +143,71 @@ export async function runInitCli(argv: string[]): Promise<number> {
 			}),
 		classifyCortex: () => {
 			const { parsed } = loadMcp(env);
-			return parsed.ok ? classifyCortex(parsed.obj, { entryWorks: cortexEntryWorks }) : "broken";
+			// A present-but-unparseable mcp.json is "malformed" (always backed up, never
+			// declined) — distinct from a parseable-but-non-launching entry ("broken").
+			return parsed.ok ? classifyCortex(parsed.obj, { entryWorks: cortexEntryWorks }) : "malformed";
 		},
 		applyCortex: () => {
-			const entry = resolveCortexEntry(); // portable, resolved-node fallback, or null
-			if (!entry) {
-				process.stderr.write(
-					"ai-ezio: ai-cortex is installed but not on PATH and its cli.js could not be located — add ai-cortex to PATH, then run `ai-ezio init --reconfigure`.\n",
-				);
-				return false; // skipped -> runInit prints an accurate "could not resolve" summary
-			}
 			const { path, raw, parsed } = loadMcp(env);
-			mkdirSync(path.replace(/\/[^/]+$/, ""), { recursive: true });
-			if (!parsed.ok) {
-				if (raw !== null) writeFileSync(nextBackupPath(path, existsSync), raw); // collision-safe, never lose data
-				writeFileSync(path, serializeMcp(applyCortex({}, entry)));
+			// CRITICAL (finding 2): a malformed file is backed up BEFORE we decide whether
+			// the cortex entry resolves, so data is never lost even when we then bail to
+			// guidance. mkdir + backup + writes are guarded so an fs error degrades to a
+			// non-fatal guidance line instead of crashing first-run (finding 1, §6).
+			try {
+				mkdirSync(path.replace(/\/[^/]+$/, ""), { recursive: true });
+				if (!parsed.ok && raw !== null) writeFileSync(nextBackupPath(path, existsSync), raw); // collision-safe, never lose data
+				const entry = resolveCortexEntry(); // portable, resolved-node fallback, or null
+				if (!entry) {
+					process.stderr.write(
+						"ai-ezio: ai-cortex is installed but not on PATH and its cli.js could not be located — add ai-cortex to PATH, then run `ai-ezio init --reconfigure`.\n",
+					);
+					return false; // skipped -> runInit prints an accurate "could not resolve" summary
+				}
+				writeFileSync(path, serializeMcp(applyCortex(parsed.ok ? parsed.obj : {}, entry)));
 				return true;
+			} catch (e) {
+				process.stderr.write(
+					`ai-ezio: could not write ${path}: ${(e as Error).message} — fix permissions, then run \`ai-ezio init --reconfigure\`.\n`,
+				);
+				return false; // skipped -> accurate "could not resolve" summary, never thrown
 			}
-			writeFileSync(path, serializeMcp(applyCortex(parsed.obj, entry)));
-			return true;
 		},
-		persistBridge: (consent) =>
-			persistBridge(consent, {
-				resolveHax: resolveHaxBinary,
-				symlinkPath: () => bridgeSymlinkPath(env),
-				ensureSymlink: (target, link) => {
-					mkdirSync(link.replace(/\/[^/]+$/, ""), { recursive: true });
-					rmSync(link, { force: true });
-					symlinkSync(target, link);
-				},
-				profilePath: () => chosenProfile(env),
-				readFile: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
-				writeFile: (p, s) => writeFileSync(p, s),
-				env,
-			}),
+		persistBridge: (consent) => {
+			// fs mutations degrade to guidance, not a crash (finding 1, §6): the symlink and
+			// profile writes throw a tagged BridgeFsError, which is caught here and turned
+			// into a non-fatal guidance result rather than letting EACCES escape uncaught.
+			try {
+				return persistBridge(consent, {
+					resolveHax: resolveHaxBinary,
+					symlinkPath: () => bridgeSymlinkPath(env),
+					ensureSymlink: (target, link) => {
+						try {
+							mkdirSync(link.replace(/\/[^/]+$/, ""), { recursive: true });
+							rmSync(link, { force: true });
+							symlinkSync(target, link);
+						} catch (e) {
+							throw new BridgeFsError(`could not create the ezio hax symlink at ${link}`, e);
+						}
+					},
+					profilePath: () => chosenProfile(env),
+					readFile: (p) => (existsSync(p) ? readFileSync(p, "utf8") : null),
+					writeFile: (p, s) => {
+						try {
+							writeFileSync(p, s);
+						} catch (e) {
+							throw new BridgeFsError(`could not write ${p}`, e);
+						}
+					},
+					env,
+				});
+			} catch (e) {
+				const detail = e instanceof BridgeFsError ? e.message : (e as Error).message;
+				return {
+					action: "no-profile",
+					currentShellHint: `ai-ezio: ${detail} — fix permissions, then run \`ai-ezio init --reconfigure\`.`,
+				};
+			}
+		},
 		whisperPrereqGuidance: () =>
 			whisperPrereqGuidance({
 				hasAnthropicKey: Boolean(env.ANTHROPIC_API_KEY),
@@ -172,11 +215,21 @@ export async function runInitCli(argv: string[]): Promise<number> {
 				hasCodex: which("codex") !== null,
 			}),
 		cortexHookGuidance,
-		writeMarker: () =>
-			writeMarker(env, {
-				mkdirp: (d) => mkdirSync(d, { recursive: true }),
-				writeFile: (p, s) => writeFileSync(p, s),
-			}),
+		writeMarker: () => {
+			// A read-only config dir must not crash the wizard — degrade to guidance so the
+			// REPL still launches (finding 1, §6). Worst case the marker is missing and the
+			// next bare launch re-offers, which is idempotent.
+			try {
+				writeMarker(env, {
+					mkdirp: (d) => mkdirSync(d, { recursive: true }),
+					writeFile: (p, s) => writeFileSync(p, s),
+				});
+			} catch (e) {
+				process.stderr.write(
+					`ai-ezio: could not write the bootstrap marker: ${(e as Error).message} — first-run setup may re-offer next launch.\n`,
+				);
+			}
+		},
 		out: (line) => process.stdout.write(`${line}\n`),
 	};
 	return runInit(parseInitArgs(argv), deps);

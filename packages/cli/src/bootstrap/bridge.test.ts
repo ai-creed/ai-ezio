@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	type BridgeDeps,
 	hasUserOwnedExport,
@@ -23,6 +23,12 @@ describe("managed export block (A/B/C)", () => {
 	it("detects a user-owned export outside the marker (finding C)", () => {
 		expect(hasUserOwnedExport("export AI_EZIO_HAX_BIN=/my/own\n")).toBe(true);
 		expect(hasUserOwnedExport(renderManagedBlock("/data/ai-ezio/hax"))).toBe(false);
+	});
+	it("requires a real `export` — a bare assignment is NOT durable (finding 3)", () => {
+		// `export AI_EZIO_HAX_BIN=…` is inherited by child processes (whisper's check),
+		// so it suppresses the managed block; a bare `AI_EZIO_HAX_BIN=/x` is not.
+		expect(hasUserOwnedExport("export AI_EZIO_HAX_BIN=/my/own\n")).toBe(true);
+		expect(hasUserOwnedExport("AI_EZIO_HAX_BIN=/x\n")).toBe(false);
 	});
 });
 
@@ -68,6 +74,30 @@ describe("persistBridge", () => {
 		const r = persistBridge(false, deps);
 		expect(r.action).toBe("declined");
 		expect(profile.text).toBe("# rc\n");
+		expect(r.currentShellHint).toContain(`export AI_EZIO_HAX_BIN='/data/ai-ezio/hax'`);
+	});
+	it("a bare (non-export) profile line does NOT suppress the managed block (finding 3)", () => {
+		const { deps, profile } = harness({}, "AI_EZIO_HAX_BIN=/x\n");
+		const r = persistBridge(true, deps);
+		expect(r.action).toBe("created"); // not left-user-owned
+		expect(profile.text).toContain(`export AI_EZIO_HAX_BIN='/data/ai-ezio/hax'`);
+		expect(profile.text).toContain("AI_EZIO_HAX_BIN=/x"); // the user's bare line is preserved
+	});
+	it("creates the symlink with (resolved hax, symlink path) (finding 7)", () => {
+		const ensureSymlink = vi.fn();
+		const { deps } = harness({
+			resolveHax: () => "/real/hax",
+			symlinkPath: () => "/data/ai-ezio/hax",
+			ensureSymlink,
+		});
+		persistBridge(true, deps);
+		expect(ensureSymlink).toHaveBeenCalledTimes(1);
+		expect(ensureSymlink).toHaveBeenCalledWith("/real/hax", "/data/ai-ezio/hax");
+	});
+	it("ambiguous profile (null) -> no-profile action + prints the export line (finding 7)", () => {
+		const { deps } = harness({ profilePath: () => null });
+		const r = persistBridge(true, deps);
+		expect(r.action).toBe("no-profile");
 		expect(r.currentShellHint).toContain(`export AI_EZIO_HAX_BIN='/data/ai-ezio/hax'`);
 	});
 });
