@@ -41,6 +41,9 @@ export class SessionRecorder {
 	private current?: RecordedTurn;
 	private readonly callsById = new Map<string, RecordedToolCall>();
 	private readonly pendingSubmits: string[] = [];
+	/** True once the current conversation has a completed turn not yet flushed. Gates
+	 * flushes so an empty boundary (e.g. /new before any turn) is a no-op (spec §5). */
+	private hasUncaptured = false;
 	private debounce?: ReturnType<typeof setTimeout>;
 
 	constructor(private readonly opts: RecorderOptions) {
@@ -129,9 +132,10 @@ export class SessionRecorder {
 		this.turnIndex = 0;
 	}
 
-	/** Session shutdown / fd-3 EOF. */
-	close(): void {
-		this.triggerFlush("close");
+	/** Session shutdown / fd-3 EOF. Awaitable so the caller can ensure the final
+	 * capture completes before tearing down the MCP host / exiting the process. */
+	async close(): Promise<void> {
+		await this.doFlush("close");
 	}
 
 	private finalizeTurn(): void {
@@ -140,6 +144,7 @@ export class SessionRecorder {
 		this.current = undefined;
 		void Promise.resolve(this.opts.store.append(turn));
 		void Promise.resolve(this.opts.sink.onTurnComplete(turn));
+		this.hasUncaptured = true;
 		this.turnsSinceFlush++;
 		if (this.turnsSinceFlush >= this.everyKTurns) {
 			this.triggerFlush("everyK");
@@ -153,13 +158,22 @@ export class SessionRecorder {
 		this.debounce = setTimeout(() => this.triggerFlush("debounce"), this.idleDebounceMs);
 	}
 
+	/** Fire-and-forget flush (debounce / every-K / new) — never blocks the turn loop. */
 	private triggerFlush(reason: FlushReason): void {
+		void this.doFlush(reason);
+	}
+
+	/** Capture the current conversation IF it has an uncaptured turn; otherwise a no-op
+	 * (so /new before any turn does not flush — spec §5). Always clears the debounce
+	 * timer. Returns the sink's flush promise so close() can await the final capture. */
+	private doFlush(reason: FlushReason): void | Promise<void> {
 		if (this.debounce) {
 			clearTimeout(this.debounce);
 			this.debounce = undefined;
 		}
 		this.turnsSinceFlush = 0;
-		if (!this.conversationId) return; // nothing captured yet
-		void Promise.resolve(this.opts.sink.flush(this.ref(), reason));
+		if (!this.conversationId || !this.hasUncaptured) return; // nothing to capture
+		this.hasUncaptured = false;
+		return Promise.resolve(this.opts.sink.flush(this.ref(), reason));
 	}
 }

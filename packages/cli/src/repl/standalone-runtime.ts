@@ -35,8 +35,18 @@ export interface OneShotOptions {
 export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Promise<number> {
 	const out = opts.out ?? ((s: string) => void process.stdout.write(s));
 	const err = opts.err ?? ((s: string) => void process.stderr.write(s));
-	const host = opts.host ?? loadMcpHost({ mode: "mounted", cwd: process.cwd() });
-	const session = new Session({ onEvent: (e: ProtocolEvent) => void host.handleEvent(e) });
+	const cwd = process.cwd();
+	const host = opts.host ?? loadMcpHost({ mode: "mounted", cwd });
+	const stateDir = ezioStateDir();
+	const repoKey = repoKeyForPath(cwd);
+	// Even a one-shot `-p` is a (single-turn) session: record it for cortex too.
+	const recorder = createRecorder({ worktreePath: cwd, host, stateDir, repoKey, warn: err });
+	const session = new Session({
+		onEvent: (e: ProtocolEvent) => {
+			recorder.handleEvent(e);
+			void host.handleEvent(e);
+		},
+	});
 
 	try {
 		await session.start(opts.startOptions ?? {});
@@ -46,15 +56,21 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 	}
 	// Register delegated tools BEFORE the submit so the one-shot turn sees them.
 	await host.start(session);
+	// Recover any projection orphaned by a crash before its final capture (idempotent).
+	await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd, warn: err });
 
 	let code = 0;
 	try {
+		recorder.noteSubmit(prompt);
 		const r = await session.submitAndWait(prompt);
 		out(r.content.endsWith("\n") ? r.content : `${r.content}\n`);
 	} catch (error) {
 		err(`ai-ezio: ${(error as Error).message}\n`);
 		code = 1;
 	} finally {
+		// Await the final capture BEFORE tearing the host down, so the one-shot turn is
+		// captured reliably (close() flushes the projection to cortex via callHostTool).
+		await recorder.close();
 		await host.stop();
 		session.close();
 	}

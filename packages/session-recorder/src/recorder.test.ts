@@ -192,14 +192,34 @@ describe("SessionRecorder trigger policy", () => {
 		});
 		ready(rec);
 		oneTurn(rec, 1);
-		// Boundaries fire back-to-back with no awaiting between them. triggerFlush is
-		// fire-and-forget (returns void), so the turn loop is never blocked; cortex's
-		// per-session lock turns the redundant captures into `skipped-locked` no-ops.
+		// Boundaries fire back-to-back with no awaiting between them — never throws or
+		// blocks. Only the FIRST boundary has an uncaptured turn; the empty repeats and
+		// the close are recorder-level no-ops (cortex never even sees redundant captures).
 		expect(() => {
 			rec.noteNewConversation();
 			rec.noteNewConversation();
-			rec.close();
+			void rec.close();
 		}).not.toThrow();
-		expect(flush.mock.calls.map((c) => c[1])).toEqual(["new", "new", "close"]);
+		expect(flush.mock.calls.map((c) => c[1])).toEqual(["new"]);
+	});
+
+	it("new_conversation before any turn is a capture no-op but still rotates the id (spec §5)", () => {
+		const flush = vi.fn();
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store: { append: vi.fn() },
+			sink: { onTurnComplete: vi.fn(), flush },
+		});
+		ready(rec);
+		rec.noteNewConversation(); // before any turn → no flush
+		expect(flush).not.toHaveBeenCalled();
+		// …but the id rotated: the next captured turn lands in conversation s1-1.
+		oneTurn(rec, 1);
+		void rec.close();
+		expect(flush).toHaveBeenCalledTimes(1);
+		expect(flush).toHaveBeenLastCalledWith(
+			{ sessionId: "s1", conversationId: "s1-1", worktreePath: "/repo" },
+			"close",
+		);
 	});
 });

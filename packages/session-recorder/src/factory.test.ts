@@ -22,8 +22,7 @@ describe("createRecorder", () => {
 		rec.handleEvent({ type: "user_turn_started", turnId: "t1" });
 		rec.handleEvent({ type: "assistant_turn_finished", turnId: "t1", content: "hello" });
 		rec.handleEvent({ type: "idle" });
-		rec.close();
-		await Promise.resolve();
+		await rec.close();
 
 		const cortexFile = join(stateDir, "sessions", "repo", "s1-0.cortex.jsonl");
 		const recordFile = join(stateDir, "sessions", "repo", "s1-0.record.jsonl");

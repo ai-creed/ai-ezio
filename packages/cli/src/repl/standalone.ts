@@ -72,7 +72,7 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 			}
 		}
 	}
-	deps.recorder?.close();
+	await deps.recorder?.close();
 	await deps.host.stop();
 	deps.session.close();
 }

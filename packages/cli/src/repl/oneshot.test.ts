@@ -1,6 +1,8 @@
-import { chmodSync } from "node:fs";
+import { chmodSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMcpHost } from "@ai-ezio/mcp-host";
 import { runOneShot } from "./standalone-runtime.js";
 
@@ -10,6 +12,18 @@ const FAKE = fileURLToPath(
 	new URL("../../../harness/test-fixtures/fake-engine.mjs", import.meta.url),
 );
 chmodSync(FAKE, 0o755);
+
+// The wired-in session recorder writes under ezioStateDir() ($XDG_STATE_HOME/ezio);
+// redirect it to a temp dir so the test never touches the real home state tree.
+let prevStateHome: string | undefined;
+beforeAll(() => {
+	prevStateHome = process.env.XDG_STATE_HOME;
+	process.env.XDG_STATE_HOME = mkdtempSync(join(tmpdir(), "ezio-oneshot-state-"));
+});
+afterAll(() => {
+	if (prevStateHome === undefined) delete process.env.XDG_STATE_HOME;
+	else process.env.XDG_STATE_HOME = prevStateHome;
+});
 
 describe("runOneShot", () => {
 	it("submits the prompt through the unified Session + host and prints the handback", async () => {
