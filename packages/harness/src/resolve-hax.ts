@@ -3,7 +3,7 @@
  *
  * Resolution order:
  *   1. AI_EZIO_HAX_BIN env override (dev / CI / tests)
- *   2. matching @ai-ezio/hax-<platform>-<arch> package via require.resolve
+ *   2. matching @ai-creed/hax-<platform>-<arch> package via require.resolve
  *   3. local vendor/hax/build/hax dev fallback (after `meson compile`)
  *
  * If none resolve, throw HaxBinaryNotFoundError pointing at `ai-ezio doctor`.
@@ -54,7 +54,7 @@ export interface HaxResolution {
 
 /** The npm package name carrying the prebuilt hax binary for a platform. */
 export function platformPackageName(platform: string, arch: string): string {
-	return `@ai-ezio/hax-${platform}-${arch}`;
+	return `@ai-creed/hax-${platform}-${arch}`;
 }
 
 function defaultResolvePackageJson(specifier: string): string {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Generate the published package.json (spec §5.1): preserve name/version/bin/
  * files/type/exports/haxBaseCommit/description/license/publishConfig + the four
- * @ai-ezio/hax-* optionalDependencies; strip dependencies + devDependencies so
+ * @ai-creed/hax-* optionalDependencies; strip dependencies + devDependencies so
  * the tarball carries NO @ai-ezio/* runtime deps and NO workspace:* anywhere.
  * Backs up the dev manifest to package.json.dev; `restore` swaps it back. */
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +25,7 @@ if (process.argv[2] === "restore") {
 const pkg = JSON.parse(readFileSync(manifest, "utf8"));
 copyFileSync(manifest, backup);
 
-// Rewrite the four @ai-ezio/hax-* optionalDependencies from `workspace:*` to each
+// Rewrite the four @ai-creed/hax-* optionalDependencies from `workspace:*` to each
 // platform package's CONCRETE version. `npm pack` (the real publish path, per spec
 // §7) does NOT rewrite `workspace:` the way `pnpm pack` does, so leaving them would
 // ship an uninstallable manifest with a `workspace:` specifier.
@@ -33,7 +33,7 @@ const repoRoot = join(process.cwd(), "..", "..");
 function pinnedOptionalDeps(optDeps) {
 	const out = {};
 	for (const name of Object.keys(optDeps ?? {})) {
-		const dir = name.replace("@ai-ezio/", ""); // @ai-ezio/hax-darwin-arm64 -> hax-darwin-arm64
+		const dir = name.replace("@ai-creed/", ""); // @ai-creed/hax-darwin-arm64 -> hax-darwin-arm64
 		out[name] = JSON.parse(readFileSync(join(repoRoot, "packaging", dir, "package.json"), "utf8")).version;
 	}
 	return out;

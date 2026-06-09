@@ -11,7 +11,7 @@ const ARCH = "arm64";
 
 describe("platformPackageName", () => {
 	it("builds the per-platform package name", () => {
-		expect(platformPackageName("linux", "x64")).toBe("@ai-ezio/hax-linux-x64");
+		expect(platformPackageName("linux", "x64")).toBe("@ai-creed/hax-linux-x64");
 	});
 });
 
@@ -43,13 +43,13 @@ describe("resolveHaxBinary", () => {
 			platform: PLATFORM,
 			arch: ARCH,
 			resolvePackageJson: (spec) => {
-				expect(spec).toBe("@ai-ezio/hax-darwin-arm64/package.json");
-				return "/store/@ai-ezio/hax-darwin-arm64/package.json";
+				expect(spec).toBe("@ai-creed/hax-darwin-arm64/package.json");
+				return "/store/@ai-creed/hax-darwin-arm64/package.json";
 			},
-			fileExists: (p) => p === "/store/@ai-ezio/hax-darwin-arm64/bin/hax",
+			fileExists: (p) => p === "/store/@ai-creed/hax-darwin-arm64/bin/hax",
 			devRoot: undefined,
 		});
-		expect(bin).toBe("/store/@ai-ezio/hax-darwin-arm64/bin/hax");
+		expect(bin).toBe("/store/@ai-creed/hax-darwin-arm64/bin/hax");
 	});
 
 	it("branch 3: falls back to vendor/hax/build/hax in dev", () => {
@@ -99,8 +99,8 @@ describe("describeHaxBinary", () => {
 			env: {},
 			platform: PLATFORM,
 			arch: ARCH,
-			resolvePackageJson: () => "/store/@ai-ezio/hax-darwin-arm64/package.json",
-			fileExists: (p) => p === "/store/@ai-ezio/hax-darwin-arm64/bin/hax",
+			resolvePackageJson: () => "/store/@ai-creed/hax-darwin-arm64/package.json",
+			fileExists: (p) => p === "/store/@ai-creed/hax-darwin-arm64/bin/hax",
 			devRoot: undefined,
 		});
 		expect(r.source).toBe("platform-package");
@@ -120,6 +120,6 @@ describe("describeHaxBinary", () => {
 		});
 		expect(r.ok).toBe(false);
 		expect(r.error).toMatch(/Could not locate the hax binary/);
-		expect(r.attempts).toContain("@ai-ezio/hax-darwin-arm64 (not installed)");
+		expect(r.attempts).toContain("@ai-creed/hax-darwin-arm64 (not installed)");
 	});
 });

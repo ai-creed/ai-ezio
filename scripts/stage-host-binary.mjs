@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Copy the locally-built hax binary into the host platform package so that
-// `pnpm pack`/install resolves the engine from the @ai-ezio/hax-<os>-<cpu>
+// `pnpm pack`/install resolves the engine from the @ai-creed/hax-<os>-<cpu>
 // package (the real distribution path) rather than the dev fallback.
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";

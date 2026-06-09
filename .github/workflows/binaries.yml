@@ -1,5 +1,10 @@
 name: binaries
-on: [push, workflow_dispatch]
+# Branch pushes + manual only — tag pushes are handled by publish.yml (which does
+# its own four-target build), so binaries.yml does not double-run on `v*` tags.
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
 jobs:
   build:
     strategy:
