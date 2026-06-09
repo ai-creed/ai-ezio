@@ -1,0 +1,102 @@
+name: Publish
+
+# Publishes all five ai-ezio packages to npm on a `v*` tag: the `ai-ezio` CLI plus
+# the four `@ai-ezio/hax-<os>-<cpu>` prebuilt-binary packages. A prerelease version
+# (the version contains "-", e.g. 0.1.0-beta.0) publishes under the `beta` dist-tag,
+# NOT `latest`, so `npm i -g ai-ezio` ignores it and only `ai-ezio@beta` installs it.
+#
+# Release steps: bump the cli + four hax package versions, commit, then
+#   git tag v<version> && git push origin v<version>
+# Requires an `NPM_TOKEN` repo secret (npm automation token) and the public
+# `@ai-ezio` scope on npm.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # Build the hax engine for each target on its native runner and upload the binary.
+  build-binaries:
+    strategy:
+      matrix:
+        include:
+          - { os: macos-14, target: darwin-arm64 }
+          - { os: macos-15-intel, target: darwin-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: ubuntu-24.04, target: linux-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Install hax build deps (libcurl, jansson, meson, ninja, pkg-config)
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y libcurl4-openssl-dev libjansson-dev meson ninja-build pkg-config
+          else
+            brew install jansson meson ninja pkg-config
+          fi
+      - name: Build hax
+        run: meson setup vendor/hax/build && meson compile -C vendor/hax/build
+      - name: Stage the binary into its platform package
+        run: node scripts/stage-host-binary.mjs
+      - name: Build + single-package install smoke
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter ai-ezio build
+          node scripts/smoke-install.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hax-${{ matrix.target }}
+          path: packaging/hax-${{ matrix.target }}/bin/hax
+
+  # Download all four binaries, then publish the four platform packages + the CLI.
+  publish:
+    needs: build-binaries
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with: { path: /tmp/bins }
+      - name: Stage all four binaries + completeness gate
+        run: |
+          for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            mkdir -p "packaging/hax-$t/bin"
+            cp "/tmp/bins/hax-$t/hax" "packaging/hax-$t/bin/hax"
+            chmod +x "packaging/hax-$t/bin/hax"
+          done
+          node scripts/check-platform-binaries.mjs
+      - name: Build the CLI bundle + pack guard
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter ai-ezio build
+          node scripts/check-pack-manifest.mjs
+      - name: Verify the git tag matches the package version
+        run: |
+          PKG=$(node -p "require('./packages/cli/package.json').version")
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "git tag v$TAG does not match packages/cli/package.json version $PKG"
+            exit 1
+          fi
+      - name: Publish (platform packages first, then the CLI)
+        run: |
+          VERSION=$(node -p "require('./packages/cli/package.json').version")
+          TAGFLAG=""
+          if [[ "$VERSION" == *-* ]]; then TAGFLAG="--tag beta"; fi
+          echo "Publishing ai-ezio@$VERSION ${TAGFLAG:-(latest)}"
+          for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            (cd "packaging/hax-$t" && npm publish --access public $TAGFLAG)
+          done
+          (cd packages/cli && npm publish --access public $TAGFLAG)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
