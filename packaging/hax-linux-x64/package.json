@@ -1,6 +1,6 @@
 {
 	"name": "@ai-creed/hax-linux-x64",
-	"version": "0.1.0-beta.0",
+	"version": "0.1.0-beta.1",
 	"description": "Prebuilt hax engine binary for ai-ezio (linux/x64)",
 	"license": "MIT",
 	"publishConfig": {
