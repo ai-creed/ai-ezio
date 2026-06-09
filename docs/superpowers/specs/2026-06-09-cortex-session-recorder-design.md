@@ -86,8 +86,9 @@ Three components; **every cortex-ism lives in one adapter**.
   formats, or MCP. Swapping it points ezio at a different memory system, or none.
 - **`CortexSessionSink`** (the quarantine): the only code that knows the Claude-Code
   transcript schema, the projection file path, and the `capture_session` tool name.
-  Calls cortex through `mcp-host` **as the host** — never via
-  `register_delegated_tools`, so the model can neither see nor call it.
+  Calls cortex through `mcp-host` **as the host** via the host-private
+  `callHostTool` path (see [§4.1](#41-host-private-mcp-invocation-the-ezio-mcp-host-seam)) —
+  never via `register_delegated_tools`, so the model can neither see nor call it.
 
 **Location:** new package `packages/session-recorder` (recorder + `SessionSink` +
 `CortexSessionSink`), depending on `protocol` (event types) and `mcp-host` (to
@@ -199,6 +200,48 @@ transcript can call it; it is the generic "session-sink" capability cortex merel
 implements. **Follow-up B** (incremental capture) later swaps the *body* of
 `captureSession`, same signature, invisible to ezio.
 
+## §4.1 Host-private MCP invocation (the ezio `mcp-host` seam)
+
+§1 and §4 require `capture_session` to be **host-invoked and never model-visible**.
+Today that contract is unenforceable: `McpHost.start()`
+(`packages/mcp-host/src/host.ts:41–60`) lists *every* tool from *every* connected
+server and registers all of them with the session via
+`session.registerDelegatedTools(defs)` (`host.ts:59`) — making them model-visible —
+and the model invokes them through the `tool_call_requested` path
+(`McpHost.handleEvent`, `host.ts:64–94`). A cortex-exposed `capture_session` returned
+by `listTools()` would therefore be auto-advertised to the model, violating
+[§1](#1-architecture--boundaries) and the decisions log. This is the blocking gap.
+
+The recorder design **requires** the following additions to `mcp-host` — a
+**tool-visibility contract** plus a **host-private call method**:
+
+1. **`hostPrivateTools: string[]` in `McpHostOptions`** — an allowlist of *namespaced*
+   tool names (e.g. `cortex__capture_session`) that are **host-private**. Generic by
+   construction: `mcp-host` hardcodes no tool or server name; ezio's config supplies
+   the list, so cortex stays un-special-cased in the engine/host core.
+
+2. **`start()` partitions the listed tools.** Host-private tools are still recorded in
+   `routes` / `defsByName` / `clients` (so they remain routable and callable), but are
+   **excluded from the `defs` array** passed to `registerDelegatedTools`. They never
+   enter hax's advertised tool table, so the model can neither see nor call them. The
+   delegated/`tool_call_requested` path is unchanged for all other tools.
+
+3. **`McpHost.callHostTool(name, args): Promise<{ output, status }>`** — a new
+   harness-facing method that resolves the route, applies the existing `injectCwd`
+   (so `worktreePath` is forced to cwd), and calls `client.callTool` **directly**,
+   returning the result to its caller. It does **not** emit `tool_result` or ride the
+   `tool_call_requested` path, so the call never touches hax or the protocol's tool
+   surface at all. Policy `deny` is still honored (a denied host-private tool throws);
+   the standalone `confirm` prompt is skipped — host-initiated calls are trusted.
+
+`CortexSessionSink` invokes capture as
+`host.callHostTool("cortex__capture_session", { worktreePath, sessionId, transcriptPath, embed })`.
+The tool is absent from the delegated set (because it is in `hostPrivateTools`) **and**
+the call bypasses the model (because it goes through `callHostTool`) — the contract is
+satisfied two independent ways: off the advertised tool table *and* off the protocol
+tool-call path. `CortexSessionSink` depends only on this `callHostTool` surface, not on
+any cortex-specific host wiring.
+
 ## §5 Edge cases
 
 - **Empty / tool-only turn** (`content == ""`): still recorded; cortex tolerates it.
@@ -228,6 +271,11 @@ implements. **Follow-up B** (incremental capture) later swaps the *body* of
 5. **Recovery sweep** — a projection newer than cortex's last capture is swept on
    startup.
 6. **Concurrency/idempotency** — overlapping triggers tolerate `skipped-locked`.
+7. **Host-private tool isolation (§4.1)** — given a server that lists
+   `capture_session`, assert `start()` **excludes** it from the `defs` passed to
+   `registerDelegatedTools` (it never reaches hax's tool table), yet `callHostTool`
+   still routes and invokes it on the underlying client and returns its result.
+   A regression here re-exposes capture to the model, so this test is load-bearing.
 
 ## Open questions / future
 
@@ -243,6 +291,10 @@ implements. **Follow-up B** (incremental capture) later swaps the *body* of
 - **Trigger channel = generic MCP tool ezio's harness calls** (not bash-CLI, not a
   new socket, not a direct lib import). Honors the generic-MCP-host decision; capture
   stays off the model's tool surface.
+- **Host-private MCP seam (§4.1)** — `mcp-host` gains a generic `hostPrivateTools`
+  allowlist (excluded from `registerDelegatedTools`) plus a `callHostTool` method that
+  invokes the MCP client directly. This is what *enforces* "capture off the model's
+  tool surface"; the host core stays cortex-agnostic (the allowlist is config).
 - **Lever A (frequency policy) for v1**; Lever B (incremental capture) is a separate
   cortex track.
 - **ezio owns a durable session record** (with usage) as source of truth; the cortex
