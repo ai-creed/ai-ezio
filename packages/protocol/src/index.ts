@@ -12,6 +12,7 @@ export type {
 	AssistantDeltaEvent,
 	AssistantTurnFinishedEvent,
 	AssistantTurnStartedEvent,
+	CompactedEvent,
 	ErrorEvent,
 	EventType,
 	IdleEvent,
@@ -24,6 +25,7 @@ export type {
 	UserTurnStartedEvent,
 } from "./events.js";
 export type {
+	CompactControl,
 	ControlType,
 	CopyLastResponseControl,
 	DelegatedToolDef,

@@ -215,3 +215,30 @@ describe("M9 delegated-tool protocol", () => {
 		expect(encodeControl(res)).toBe(`${JSON.stringify(res)}\n`);
 	});
 });
+
+import type { CompactedEvent } from "./events.js";
+import type { CompactControl } from "./controls.js";
+
+describe("M11 compaction protocol", () => {
+	it("round-trips a compact control with dropLastTurns", () => {
+		const ctl: CompactControl = {
+			type: "compact",
+			summary: "[Context summary — session compacted]\nstate…",
+			keepLastTurns: 2,
+			dropLastTurns: 1,
+		};
+		expect(encodeControl(ctl)).toBe(`${JSON.stringify(ctl)}\n`);
+	});
+
+	it("absence stays absent: dropLastTurns omitted entirely when not set", () => {
+		const ctl: CompactControl = { type: "compact", summary: "S", keepLastTurns: 0 };
+		const line = encodeControl(ctl);
+		expect(line).not.toContain("dropLastTurns");
+	});
+
+	it("decodes a compacted event", () => {
+		const ev: CompactedEvent = { type: "compacted", droppedItems: 57, keptTurns: 2 };
+		const [decoded] = new JsonlDecoder().push(encodeEvent(ev));
+		expect(decoded).toEqual(ev);
+	});
+});

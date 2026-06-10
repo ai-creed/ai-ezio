@@ -52,10 +52,21 @@ export interface CopyLastResponseControl {
 	type: "copy_last_response";
 }
 
+/** Replace old history with a host-built summary, keeping a tail window (M11).
+ * Processed between turns, like new_conversation. Invalid values (empty
+ * summary, negative counts) are rejected engine-side with an `error` event. */
+export interface CompactControl {
+	type: "compact";
+	summary: string;
+	keepLastTurns: number;
+	/** Newest turns discarded entirely before the keep window (default 0). */
+	dropLastTurns?: number;
+}
+
 /** Controls implemented in M3. */
 export type M3Control = SubmitControl | InterruptControl;
 
-/** Full control surface (M3 + M4 groundwork types). */
+/** Full control surface (M3 + M4 groundwork types + M9 + M11). */
 export type ProtocolControl =
 	| SubmitControl
 	| InterruptControl
@@ -63,6 +74,7 @@ export type ProtocolControl =
 	| ToolResultControl
 	| NewConversationControl
 	| StatusControl
-	| CopyLastResponseControl;
+	| CopyLastResponseControl
+	| CompactControl;
 
 export type ControlType = ProtocolControl["type"];

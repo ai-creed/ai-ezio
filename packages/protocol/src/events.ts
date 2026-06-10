@@ -102,6 +102,16 @@ export interface StatusEvent {
 	effort?: string;
 }
 
+/** Confirms a `compact` control was applied (M11). Followed by `idle`.
+ * `droppedItems` counts removed items (summarized-away prefix + drop window;
+ * the inserted summary item is not counted); `keptTurns` is the user turns
+ * kept verbatim (may be lower than requested when history was shorter). */
+export interface CompactedEvent {
+	type: "compacted";
+	droppedItems: number;
+	keptTurns: number;
+}
+
 export type ProtocolEvent =
 	| ReadyEvent
 	| UserTurnStartedEvent
@@ -113,6 +123,7 @@ export type ProtocolEvent =
 	| AssistantTurnFinishedEvent
 	| IdleEvent
 	| ErrorEvent
-	| StatusEvent;
+	| StatusEvent
+	| CompactedEvent;
 
 export type EventType = ProtocolEvent["type"];
