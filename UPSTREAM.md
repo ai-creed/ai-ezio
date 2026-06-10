@@ -75,6 +75,11 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
   confined to `src/protocol/emit.{c,h}` + a few `agent.c` lines + an engine-level
   test — surfacing data hax already computes (provider/model/effort, per-turn
   usage); a candidate to upstream as part of the observer/emitter seam.
+- **M11 (compaction):** `agent_session_compact` (drop window + keep window +
+  summary swap, `agent_core.{c,h}`), the `compact` control / `compacted` event
+  (parse-time validation + turn-less error, `emit.{c,h}`), and the
+  `agent_compact` handler + transcript/session-log re-seed in `agent.{c,h}` —
+  still confined to the documented seam files; tests in `tests/protocol/`.
 - **M8 (mounted display fidelity):** the emitter now also emits **tool events from
   the `agent.c` dispatch seam** — `emit_tool_started` carries a human-readable
   `args` summary (via a small `tool_display_arg` helper in `agent_dispatch.{c,h}`
