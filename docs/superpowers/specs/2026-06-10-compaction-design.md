@@ -148,20 +148,44 @@ gate therefore ships with three API guarantees:
    unchanged. This makes even a legacy/external `submit` + `waitForEvent`
    caller safe rather than merely deprecated.
 
+**Gate execution model (how a cycle holds the gate without deadlocking).**
+The gate is a non-reentrant promise-chain mutex, so the cycle must not call
+the public gate-acquiring methods from inside its own critical section.
+The `Session` is structured as private **unlocked implementations**
+(`#submitAndWaitUnlocked`, `#compactUnlocked`, …) wrapped by the public
+methods, which are nothing more than "acquire gate → run unlocked impl →
+release". Multi-step critical sections use:
+
+```ts
+session.runExclusive(async (s) => { ... })
+```
+
+`runExclusive` acquires the gate once and passes `fn` an **exclusive facet**
+(`s`) exposing the unlocked `submitAndWait` / `compact` variants; the facet
+throws if used after `fn` settles, so the unlocked primitives cannot escape
+the critical section. The Compactor's entire cycle is one `runExclusive`
+call — single acquisition, no reentrancy, executable as written. Two
+`runExclusive` calls serialize with each other and with every public
+turn-initiating method.
+
 ## 3. Compactor — TS policy owner, shared by both modes
 
 New module `compactor.ts` in `@ai-ezio/harness`, constructed with:
 
 - the harness session,
 - resolved compaction config (section 5),
-- an **injected** `rehydrate?: () => Promise<string | null>` callback.
+- an **injected** `rehydrate?: () => Promise<string | null>` callback,
+- an **injected** `fallbackDigest?: () => Promise<string | null>` callback —
+  the data source for the digest fallback (section "Failure handling").
 
-The injection keeps layering clean: the harness never depends on `mcp-host`.
-The standalone CLI and the ai-whisper adapter — which already call
-`loadMcpHost` — wire the cortex callback via the host's tool-calling surface
-(`callHostTool` → e.g. cortex pinned memories / rehydration). The returned
-block is truncated to 4,000 characters (fixed constant; not config — YAGNI
-until proven otherwise).
+Both injections keep layering clean: the harness never depends on `mcp-host`
+or `session-recorder`. The standalone CLI and the ai-whisper adapter — which
+already call `loadMcpHost` and own the `SessionRecorder` — wire the cortex
+callback via the host's tool-calling surface (`callHostTool` → e.g. cortex
+pinned memories / rehydration) and build `fallbackDigest` from the recorder's
+recorded turns (user goals, truncated assistant text, tool names + file
+paths). The rehydration block is truncated to 4,000 characters (fixed
+constant; not config — YAGNI until proven otherwise).
 
 **Trigger.** The Compactor tracks the latest `contextTokens`/`contextLimit`
 from each `assistant_turn_finished.usage`. At each `idle`: if `auto` is
@@ -174,7 +198,9 @@ in-progress flag makes reentry (`/compact` during a cycle) a friendly no-op.
 Manual `/compact` does not read the limit at all — it works even when
 `contextLimit` is unknown.
 
-**Cycle.**
+**Cycle.** The whole cycle is one `session.runExclusive` call (section 2's
+execution model); the steps below run on the exclusive facet, never on the
+public gate-acquiring methods.
 
 1. `submitAndWait` a fixed summarization instruction — the model summarizes
    from its own context: task state, key decisions, files touched, open
@@ -214,16 +240,17 @@ control directly — the protocol is the contract.
 
 **Failure handling.**
 
-- Summarize turn fails (provider error, interrupt): fall back to a
-  deterministic TS digest built from the recorder's turns (user goals,
-  assistant text truncated, tool names + file paths) and still compact —
-  survival beats summary quality at 0.8 fullness. The failed summarize turn
-  still entered history (the engine absorbs aborted turns, and a pre-stream
-  failure leaves a dangling user message), so the fallback compact also sends
-  `dropLastTurns: 1`.
-- Digest also unavailable (e.g. recorder disabled): abort untouched, print a
-  warning, and re-arm only after `contextTokens` exceeds its
-  failure-time value by 2% of `contextLimit` — no retry-every-turn loops.
+- Summarize turn fails (provider error, interrupt): fall back to the
+  deterministic digest from the injected `fallbackDigest` callback (built by
+  the wiring layer from the recorder's turns — section 3's constructor) and
+  still compact — survival beats summary quality at 0.8 fullness. The failed
+  summarize turn still entered history (the engine absorbs aborted turns, and
+  a pre-stream failure leaves a dangling user message), so the fallback
+  compact also sends `dropLastTurns: 1`.
+- Digest unavailable (`fallbackDigest` not injected — e.g. recorder disabled —
+  or it returns null): abort untouched, print a warning, and re-arm only
+  after `contextTokens` exceeds its failure-time value by 2% of
+  `contextLimit` — no retry-every-turn loops.
 - `contextLimit` unknown: auto-compact disarms silently; `/usage` shows no
   limit and `doctor` reports "auto-compact inactive: context limit unknown
   (set HAX_CONTEXT_LIMIT)". Manual `/compact` still works.
@@ -284,10 +311,15 @@ rules worth carrying forward.**
   `compacted` → `idle` ordering; assert the rotated session log resumes to
   post-compact state.
 - **Protocol:** codec round-trip + absence coverage for both messages.
-- **Compactor unit:** fake session + fake rehydrator — threshold arming,
-  in-progress guard, digest fallback (including that it sends
-  `dropLastTurns: 1`), abort + re-arm rule, unknown-limit disarm, config
-  clamping with the doctor-visible note emitted.
+- **Compactor unit:** fake session + fake rehydrator + fake digest provider —
+  threshold arming, in-progress guard, digest fallback via the injected
+  callback (including that it sends `dropLastTurns: 1`), digest-absent
+  abort + re-arm rule, unknown-limit disarm, config clamping with the
+  doctor-visible note emitted.
+- **Gate execution model:** two `runExclusive` calls serialize; public
+  turn-initiating methods defer while a `runExclusive` body runs; a cycle
+  calling the facet's `submitAndWait`/`compact` completes without deadlock;
+  the facet throws when used after its critical section settles.
 - **Turn gate:** harness tests proving the caller-visible contract, not just
   event ordering — (a) a `submit` issued while a compaction cycle holds the
   gate is deferred until after `compact` lands, and its returned promise
