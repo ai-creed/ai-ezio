@@ -254,6 +254,11 @@ export class Session {
 
 	private control(control: ProtocolControl): void {
 		if (!this.transport) throw new Error("session not started");
+		// A dead engine (fd-3 EOF) cannot accept controls: surface the typed
+		// lifecycle error instead of racing a write against the closed socket
+		// (which throws write-after-end or emits an async EPIPE depending on
+		// teardown timing).
+		if (this.ended) throw new EngineExitedError("engine exited (control channel closed)");
 		this.transport.send(control);
 	}
 

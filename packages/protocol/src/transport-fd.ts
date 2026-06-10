@@ -15,7 +15,14 @@ export class FdTransport implements Transport {
 	constructor(
 		private readonly eventStream: Readable,
 		private readonly controlStream: Writable,
-	) {}
+	) {
+		// A dead control consumer (engine exited) is an expected lifecycle
+		// state, not a crash: writes racing the child's teardown surface as
+		// EPIPE / write-after-end 'error' events that would otherwise be
+		// unhandled and kill the process. fd-3 EOF is the authoritative death
+		// signal; control-channel write errors are noise past that point.
+		this.controlStream.on("error", () => {});
+	}
 
 	async *events(): AsyncIterable<ProtocolEvent> {
 		for await (const chunk of this.eventStream) {
