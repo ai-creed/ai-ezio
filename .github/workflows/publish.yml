@@ -122,7 +122,15 @@ jobs:
           for t in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
             (cd "packaging/hax-$t" && npm publish --access public $TAGFLAG)
           done
+          # Scoped CLI: transform package.json ON DISK first so npm captures the
+          # PINNED optionalDependencies in the REGISTRY manifest, not workspace:* (npm
+          # reads the registry manifest BEFORE prepack runs, so a prepack-only rewrite
+          # fixes the tarball but not the metadata `npm install` resolves against — the
+          # beta.1 EUNSUPPORTEDPROTOCOL bug). Guard the exact on-disk bytes, then restore.
+          (cd packages/cli && node ../../scripts/make-publish-manifest.mjs)
+          node scripts/check-pack-manifest.mjs --ondisk
           (cd packages/cli && npm publish --access public $TAGFLAG)
+          (cd packages/cli && node ../../scripts/make-publish-manifest.mjs restore)
           # Unscoped `ai-ezio` alias: sync its version + its @ai-creed/ai-ezio dep to the
           # release version (a node one-liner is more reliable than `npm pkg set` for a
           # scoped dependency key), then publish. Must come AFTER the scoped CLI exists.
