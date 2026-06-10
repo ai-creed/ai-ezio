@@ -42,14 +42,21 @@ disrupts MCP registration and mounted clients).
 The only C change. An idle-time control handled alongside `new_conversation`:
 
 ```json
-{"type": "compact", "summary": "<text>", "keepLastTurns": 2}
+{"type": "compact", "summary": "<text>", "keepLastTurns": 2, "dropLastTurns": 1}
 ```
 
-A pure helper `agent_session_compact(sess, summary, keep_k)` in
+A pure helper `agent_session_compact(sess, summary, keep_k, drop_d)` in
 `agent_core.{c,h}`:
 
-- **Cut point:** walk `items` backward to the start of the K-th-from-last
-  `ITEM_USER_MESSAGE`. Cutting at user-message starts (not
+- **Drop window:** first discard the newest `dropLastTurns` turns entirely
+  (default 0). A "turn" starts at an `ITEM_USER_MESSAGE`; the drop also covers
+  a dangling user-message-only turn (e.g. a pre-stream failure) and an
+  absorbed-aborted turn. The engine does not know *why* the host drops
+  trailing turns — for the ezio Compactor it is how the in-session
+  summarization exchange is excluded (section 3), but the mechanism is
+  host-agnostic.
+- **Cut point:** in what remains, walk `items` backward to the start of the
+  K-th-from-last `ITEM_USER_MESSAGE`. Cutting at user-message starts (not
   `ITEM_TURN_BOUNDARY`, which marks HTTP round-trips) guarantees
   tool_call/tool_result pairs and reasoning items never straddle the cut.
 - **Swap:** new vector = `[ITEM_USER_MESSAGE carrying the summary text]` +
@@ -57,11 +64,14 @@ A pure helper `agent_session_compact(sess, summary, keep_k)` in
   freed. The operation is atomic in memory: it fully applies or the session is
   untouched.
 - **Bounds:** `keepLastTurns >= 0` (`0` = summary only — valid generic
-  operation; host policy simply defaults higher). `keepLastTurns >=` current
-  user-turn count → no-op success with `droppedItems: 0`. `summary` is
-  required non-empty. An invalid control (empty summary, missing/negative
-  `keepLastTurns`) leaves the session untouched and emits an `error` event,
-  like other malformed controls.
+  operation; host policy simply defaults higher); `dropLastTurns >= 0`.
+  `dropLastTurns >=` current turn count → vector becomes `[summary]` only.
+  After dropping, `keepLastTurns >=` remaining turn count → no further items
+  dropped (`droppedItems` counts only the summarized-away prefix plus the
+  drop window). `summary` is required non-empty. An invalid control (empty
+  summary, missing/negative `keepLastTurns`, negative `dropLastTurns`) leaves
+  the session untouched and emits an `error` event, like other malformed
+  controls.
 - **Logs:** the session log rotates to a fresh file (same mechanism as
   `new_conversation`) and the full post-compact history is appended to it, so
   `--resume` of the new file reproduces post-compact state exactly. The
@@ -89,9 +99,26 @@ version-gates on `ready`.
 
 - `@ai-ezio/protocol`: `compact` control and `compacted` event types + codec
   entries, with presence/absence coverage like M7/M8.
-- `@ai-ezio/harness`: `session.compact(summary, keepLastTurns)` — sends the
-  control, resolves on `compacted`; the event also flows to all `onEvent`
-  subscribers (surface, recorder).
+- `@ai-ezio/harness`: `session.compact(summary, keepLastTurns, dropLastTurns)`
+  — sends the control, resolves on `compacted`; the event also flows to all
+  `onEvent` subscribers (surface, recorder).
+
+**Session turn gate.** The harness `Session` gains an internal async mutex (a
+promise-chain) that every turn-initiating operation acquires: `submit`,
+`submitAndWait`, `newConversation`, and `compact`. This is the explicit
+serialization contract for both modes: `idle` is precisely the signal that
+releases a mounted caller to submit its next turn, so "cycles start at idle"
+alone cannot prevent a client submit from interleaving into a compaction
+cycle. The Compactor acquires the gate **once for its entire cycle**
+(summarize → compose → compact), so a concurrent caller's submit either runs
+to completion before the cycle starts or waits until the cycle has landed —
+it can never fall inside it. After acquiring the gate, the auto-trigger
+re-checks its arming condition (still idle, fullness still ≥ threshold with
+the latest usage) before proceeding, since a turn that ran while it waited
+changed both. Raw-protocol clients that bypass the harness get a documented
+ordering rule in `docs/protocol.md` instead: the engine processes controls
+strictly in arrival order at idle boundaries, so a host driving `compact`
+directly must not interleave its own `submit` between its cycle's steps.
 
 ## 3. Compactor — TS policy owner, shared by both modes
 
@@ -112,8 +139,10 @@ until proven otherwise).
 from each `assistant_turn_finished.usage`. At each `idle`: if `auto` is
 enabled and `contextTokens / contextLimit >= threshold` (default 0.8), run a
 cycle. `/compact` runs the same cycle manually via the existing slash registry
-(one `register()` call). Cycles only start at idle and are guarded by an
-in-progress flag; both run loops are sequential, so no mid-turn race exists.
+(one `register()` call). Every cycle runs as a single critical section under
+the session turn gate (section 2) — that, not idle timing, is what makes
+auto and manual compaction safe against a concurrent mounted submit — and an
+in-progress flag makes reentry (`/compact` during a cycle) a friendly no-op.
 Manual `/compact` does not read the limit at all — it works even when
 `contextLimit` is unknown.
 
@@ -126,12 +155,20 @@ Manual `/compact` does not read the limit at all — it works even when
    bounded cortex block.
 3. Compose the summary block: header (`[Context summary — session compacted]`)
    + model summary + cortex block.
-4. `session.compact(text, keepLastTurns)` (default 2).
+4. `session.compact(text, keepLastTurns, dropLastTurns)` (defaults: keep 2,
+   drop 1).
 5. Render the outcome.
 
-The summarization turn itself is swapped out by step 4 — it never pollutes
-post-compact history. The recorder, by contrast, records it like any turn
-(the lossless record keeps it; see section 6).
+The summarization exchange of step 1 is itself the newest turn in the
+engine's `items` when step 4 runs — without an explicit drop, the backward
+cut walk would count it as tail and post-compact history would be summary +
+K−1 real turns + the summarize turn. `dropLastTurns: 1` is what excludes it:
+the Compactor sets it to 1 whenever its summarization submit reached the
+engine (succeeded **or** was absorbed as an aborted/dangling turn), and 0 only
+when no summarize turn was ever submitted. Post-compact history is therefore
+always summary + the last K *real* turns. The recorder, by contrast, records
+the summarize turn like any other (the lossless record keeps it; see
+section 6).
 
 **UX during the cycle (standalone).** The surface suppresses normal assistant
 rendering for the summarize turn and shows a compacting indicator (spinner +
@@ -152,7 +189,10 @@ control directly — the protocol is the contract.
 - Summarize turn fails (provider error, interrupt): fall back to a
   deterministic TS digest built from the recorder's turns (user goals,
   assistant text truncated, tool names + file paths) and still compact —
-  survival beats summary quality at 0.8 fullness.
+  survival beats summary quality at 0.8 fullness. The failed summarize turn
+  still entered history (the engine absorbs aborted turns, and a pre-stream
+  failure leaves a dangling user message), so the fallback compact also sends
+  `dropLastTurns: 1`.
 - Digest also unavailable (e.g. recorder disabled): abort untouched, print a
   warning, and re-arm only after `contextTokens` exceeds its
   failure-time value by 2% of `contextLimit` — no retry-every-turn loops.
@@ -205,16 +245,31 @@ rules worth carrying forward.**
 - **Engine unit (`tests/protocol/`):** `agent_session_compact` cut-point
   cases — tool pairs adjacent to the cut, reasoning items in the tail,
   `keepLastTurns` ≥ turn count no-op, `keepLastTurns: 0`, summary item
-  placement, empty-summary rejection.
+  placement, empty-summary rejection; `dropLastTurns` cases — 0 and 1,
+  dropping a dangling user-message-only trailing turn, dropping an
+  absorbed-aborted trailing turn, `dropLastTurns` ≥ turn count →
+  summary-only vector.
 - **Engine e2e:** real hax + mock provider — three turns, send
-  `compact keepLastTurns=1`, assert via the `HAX_TRANSCRIPT` mirror that the
-  next provider request contains exactly summary + last turn; assert
+  `compact keepLastTurns=1 dropLastTurns=1`, assert via the `HAX_TRANSCRIPT`
+  mirror that the next provider request contains exactly summary + the
+  second turn (newest turn dropped, prefix summarized); assert
   `compacted` → `idle` ordering; assert the rotated session log resumes to
   post-compact state.
 - **Protocol:** codec round-trip + absence coverage for both messages.
 - **Compactor unit:** fake session + fake rehydrator — threshold arming,
-  in-progress guard, digest fallback, abort + re-arm rule, unknown-limit
-  disarm, config clamping.
+  in-progress guard, digest fallback (including that it sends
+  `dropLastTurns: 1`), abort + re-arm rule, unknown-limit disarm, config
+  clamping with the doctor-visible note emitted.
+- **Turn gate:** harness tests proving cross-caller serialization — a
+  `submit` issued while a compaction cycle holds the gate is deferred until
+  after `compact` lands (ordering asserted via the event stream), and the
+  auto-trigger re-checks fullness after acquiring the gate.
+- **Full-cycle integration:** drive a complete Compactor cycle against real
+  hax + mock provider and assert via the `HAX_TRANSCRIPT` mirror that the
+  next provider request contains the summary + the last K real turns and
+  **no trace of the summarization instruction or its assistant reply**.
+- **Recorder:** observes `compacted` → flushes with `reason: "compact"`,
+  conversation id unchanged.
 - **CLI:** `/compact` registry + reentrancy message; a standalone-REPL
   mock-provider run that drives a full auto-compact cycle.
 
