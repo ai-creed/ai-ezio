@@ -285,3 +285,55 @@ describe("SlashController.handle", () => {
 		expect(help.match(/\/fresh\b/g)?.length).toBe(1);
 	});
 });
+
+describe("/compact (M11)", () => {
+	it("runs the injected compactor", async () => {
+		const calls: string[] = [];
+		const { ctx, out } = fakeCtx({
+			compactor: {
+				compactNow: async () => {
+					calls.push("now");
+					return { kind: "compacted" };
+				},
+			},
+		});
+		const c = new SlashController(ctx);
+		expect(await c.handle("/compact")).toEqual({ action: "handled" });
+		expect(calls).toEqual(["now"]);
+		expect(out()).toBe(""); // success chrome comes from the Compactor's onNote
+	});
+
+	it("reports an in-progress cycle", async () => {
+		const { ctx, out } = fakeCtx({
+			compactor: { compactNow: async () => ({ kind: "skipped", reason: "in-progress" }) },
+		});
+		const c = new SlashController(ctx);
+		await c.handle("/compact");
+		expect(out()).toContain("compaction already in progress");
+	});
+
+	it("reports unavailability when no compactor is wired", async () => {
+		const { ctx, out } = fakeCtx();
+		const c = new SlashController(ctx);
+		await c.handle("/compact");
+		expect(out()).toContain("compaction unavailable");
+	});
+});
+
+describe("/usage fullness percent (M11)", () => {
+	it("appends the percentage when tokens and limit are present", async () => {
+		const { ctx, out } = fakeCtx({
+			lastUsage: () => ({ contextTokens: 142000, outputTokens: 9, contextLimit: 200000 }),
+		});
+		const c = new SlashController(ctx);
+		await c.handle("/usage");
+		expect(out()).toContain("71%");
+	});
+
+	it("no percentage without a limit", async () => {
+		const { ctx, out } = fakeCtx({ lastUsage: () => ({ contextTokens: 142000 }) });
+		const c = new SlashController(ctx);
+		await c.handle("/usage");
+		expect(out()).not.toContain("%");
+	});
+});

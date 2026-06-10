@@ -33,6 +33,11 @@ export interface SlashContext {
 	skills(): { name: string; source: string; description: string | null }[];
 	/** Copy text to the OS clipboard; rejects when no clipboard tool exists. */
 	clipboard(text: string): Promise<void>;
+	/** Optional compaction trigger (M11; wired by the standalone runtime).
+	 * Success/failure chrome comes from the Compactor's own onNote line. */
+	compactor?: {
+		compactNow(): Promise<{ kind: string; reason?: string }>;
+	};
 }
 
 export interface SlashCommand {
@@ -81,6 +86,9 @@ function formatUsage(u: AssistantTurnFinishedEvent["usage"]): string | null {
 	if (u.outputTokens !== undefined) parts.push(`output ${u.outputTokens}`);
 	if (u.cachedTokens !== undefined) parts.push(`cached ${u.cachedTokens}`);
 	if (u.contextLimit !== undefined) parts.push(`limit ${u.contextLimit}`);
+	if (u.contextTokens !== undefined && u.contextLimit !== undefined && u.contextLimit > 0) {
+		parts.push(`${Math.round((u.contextTokens / u.contextLimit) * 100)}%`);
+	}
 	return parts.length ? parts.join(" · ") : null;
 }
 
@@ -147,6 +155,21 @@ function builtinCommands(listCommands: () => { name: string; summary: string }[]
 			run: (ctx) => {
 				const formatted = formatUsage(ctx.lastUsage());
 				ctx.write(formatted ? `${formatted}\n` : "no usage yet\n");
+			},
+		},
+		{
+			name: "compact",
+			summary: "summarize old history and free context",
+			run: async (ctx) => {
+				if (!ctx.compactor) {
+					ctx.write("compaction unavailable\n");
+					return;
+				}
+				const out = await ctx.compactor.compactNow();
+				if (out.kind === "skipped" && out.reason === "in-progress") {
+					ctx.write("compaction already in progress\n");
+				}
+				// success/failure chrome comes from the Compactor's onNote line
 			},
 		},
 		{
