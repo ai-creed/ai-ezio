@@ -33,3 +33,10 @@ export {
 	type TurnResult,
 } from "./session.js";
 export { TurnGate } from "./turn-gate.js";
+export {
+	COMPACTION_DEFAULTS,
+	configFilePath,
+	loadConfig,
+	type CompactionConfig,
+	type EzioConfig,
+} from "./config.js";
