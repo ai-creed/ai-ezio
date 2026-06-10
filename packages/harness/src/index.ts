@@ -40,3 +40,9 @@ export {
 	type CompactionConfig,
 	type EzioConfig,
 } from "./config.js";
+export {
+	Compactor,
+	type CompactorOptions,
+	type CompactorSession,
+	type CompactOutcome,
+} from "./compactor.js";
