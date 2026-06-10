@@ -44,6 +44,7 @@ export async function connectStdio(
 		command: server.command,
 		args: server.args,
 		env: server.env,
+		stderr: "ignore",
 	});
 	const client = new Client({ name: "ai-ezio", version: "0.1.0" }, { capabilities: {} });
 	await withTimeout(client.connect(transport), connectTimeoutMs, `connect ${server.name}`);
