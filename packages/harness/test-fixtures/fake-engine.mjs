@@ -44,6 +44,8 @@ if (mode === "exit-after-ready") {
 	let submits = 0;
 	let lastTurnId = "";
 	let lastContent = "";
+	let compactSeq = 0;
+	const parked = []; // held compact replies (FAKE_COMPACT_MODE hold/hold-idle)
 	let buf = "";
 	const controls = fs.createReadStream(null, { fd: CONTROLS_FD });
 	controls.on("data", (chunk) => {
@@ -87,7 +89,33 @@ if (mode === "exit-after-ready") {
 				emit({ type: "idle" });
 				continue;
 			}
+			if (ctl.type === "compact") {
+				// M11. FAKE_COMPACT_MODE selects reply behavior, all FIFO-safe:
+				//   ok (default)  reply compacted+idle immediately
+				//   hold          park the whole reply; a later `status` control
+				//                 flushes parked replies (in order) BEFORE answering
+				//   hold-idle     reply compacted immediately, park the idle; a
+				//                 later `status` flushes parked idles first
+				// droppedItems = 100 + per-compact sequence, so tests can tell
+				// which control a compacted event answers.
+				compactSeq += 1;
+				const reply = { type: "compacted", droppedItems: 100 + compactSeq, keptTurns: ctl.keepLastTurns };
+				const cmode = process.env.FAKE_COMPACT_MODE ?? "ok";
+				if (cmode === "hold") {
+					parked.push(reply, { type: "idle" });
+				} else if (cmode === "hold-idle") {
+					emit(reply);
+					parked.push({ type: "idle" });
+				} else {
+					emit(reply);
+					emit({ type: "idle" });
+				}
+				continue;
+			}
 			if (ctl.type === "status") {
+				// Flush parked compact replies FIRST (the engine is FIFO; a held
+				// reply always precedes a later control's answer).
+				for (const ev of parked.splice(0)) emit(ev);
 				emit({
 					type: "status",
 					model: "fake-model",

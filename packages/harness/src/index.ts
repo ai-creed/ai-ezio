@@ -22,10 +22,14 @@ export {
 } from "./spawn.js";
 export { aiEzioGlobalSkillsDir } from "./skills-dir.js";
 export {
+	CompactTimeoutError,
+	type CompactResult,
 	EngineExitedError,
+	type ExclusiveSession,
 	ProtocolVersionError,
 	Session,
 	type SessionOptions,
 	TurnError,
 	type TurnResult,
 } from "./session.js";
+export { TurnGate } from "./turn-gate.js";

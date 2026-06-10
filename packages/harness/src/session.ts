@@ -15,6 +15,7 @@ import {
 	type Transport,
 } from "@ai-ezio/protocol";
 import { spawnHax, type SpawnedHax, type SpawnHaxOptions } from "./spawn.js";
+import { TurnGate } from "./turn-gate.js";
 
 export class ProtocolVersionError extends Error {
 	constructor(theirs: string, ours: string) {
@@ -51,10 +52,37 @@ export interface TurnResult {
 	content: string;
 }
 
+/** Result of a `compact` control (M11). */
+export interface CompactResult {
+	droppedItems: number;
+	keptTurns: number;
+}
+
+/** The engine never produced `compacted` (or its paired `idle`) within the
+ * deadline (spec §3: "compact control fails or times out" — abort the cycle,
+ * session untouched by atomicity, caller surfaces a warning and applies the
+ * re-arm rule). */
+export class CompactTimeoutError extends Error {
+	constructor(ms: number) {
+		super(`compact control timed out after ${ms}ms (no compacted event)`);
+		this.name = "CompactTimeoutError";
+	}
+}
+
+/** Unlocked operations available inside Session.runExclusive (M11). The facet
+ * throws once its critical section has settled. */
+export interface ExclusiveSession {
+	submitAndWait(text: string): Promise<TurnResult>;
+	compact(summary: string, keepLastTurns: number, dropLastTurns: number): Promise<CompactResult>;
+}
+
 export interface SessionOptions {
 	/** Observer (tee) called for every event, in order, before consumption.
 	 * Non-consuming — useful for recording the full sequence in tests/loggers. */
 	onEvent?: (event: ProtocolEvent) => void;
+	/** Deadline for a `compact` control to produce `compacted` + `idle`
+	 * (default 30_000ms). Injectable so tests use a tiny value. */
+	compactTimeoutMs?: number;
 }
 
 export class Session {
@@ -77,11 +105,53 @@ export class Session {
 		this.exitHandlers.push(handler);
 	}
 
+	private readonly gate = new TurnGate();
+	/** True while a runExclusive body runs: events route to the exclusive
+	 * stream and the public stream is paused (cycle-internal idles can never
+	 * resolve outside waiters; onEvent still sees everything). */
+	private cycleInternal = false;
+	private readonly exclusiveQueue: ProtocolEvent[] = [];
+	private readonly exclusiveWaiters: Array<(e: ProtocolEvent | null) => void> = [];
+	/** Timed-out compacts whose late `compacted` (+ paired idle) must be
+	 * swallowed from EVERY consumer stream. Controls are processed in arrival
+	 * order, so a count is FIFO-correct: the next N `compacted` events on the
+	 * wire belong to abandoned controls, never to a newer one. */
+	private staleCompactsPending = 0;
+	private swallowNextIdle = false;
+
 	private deliver(event: ProtocolEvent | null): void {
 		if (event && this.options.onEvent) this.options.onEvent(event);
+		if (event === null) {
+			// fatal EOF: flush BOTH waiter sets
+			while (this.exclusiveWaiters.length) this.exclusiveWaiters.shift()!(null);
+			const w = this.waiters.shift();
+			if (w) w(null);
+			return;
+		}
+		// Stale-compact swallow (timeout aftermath, spec §3 + the suppression
+		// contract): a timed-out compact's late `compacted` and its paired
+		// `idle` must reach NO consumer stream — a public waiter must not
+		// resolve on them, and a retry cycle's exclusive waits must not
+		// mistake them for its own replies. Checked BEFORE any routing; the
+		// onEvent tee (above) still observes everything.
+		if (event.type === "compacted" && this.staleCompactsPending > 0) {
+			this.staleCompactsPending--;
+			this.swallowNextIdle = true;
+			return;
+		}
+		if (event.type === "idle" && this.swallowNextIdle) {
+			this.swallowNextIdle = false;
+			return;
+		}
+		if (this.cycleInternal) {
+			const w = this.exclusiveWaiters.shift();
+			if (w) w(event);
+			else this.exclusiveQueue.push(event);
+			return;
+		}
 		const w = this.waiters.shift();
 		if (w) w(event);
-		else if (event) this.queue.push(event);
+		else this.queue.push(event);
 	}
 
 	private next(): Promise<ProtocolEvent | null> {
@@ -89,6 +159,37 @@ export class Session {
 		if (queued) return Promise.resolve(queued);
 		if (this.ended) return Promise.resolve(null);
 		return new Promise((resolve) => this.waiters.push(resolve));
+	}
+
+	/** Event source for unlocked internals: exclusive stream during a cycle,
+	 * public stream otherwise. With `ms` set, the wait carries a deadline that
+	 * DEREGISTERS its own pending waiter before rejecting — an abandoned wait
+	 * must never remain registered, or it would steal the next legitimate
+	 * event from a later caller (the orphaned-waiter leak). This holds for
+	 * BOTH streams: a public `session.compact()` timeout deregisters from the
+	 * public `waiters` array the same way. */
+	private nextEventWithin(ms?: number): Promise<ProtocolEvent | null> {
+		const queue = this.cycleInternal ? this.exclusiveQueue : this.queue;
+		const waiters = this.cycleInternal ? this.exclusiveWaiters : this.waiters;
+		const queued = queue.shift();
+		if (queued) return Promise.resolve(queued);
+		if (this.ended) return Promise.resolve(null);
+		if (ms === undefined) return new Promise((resolve) => waiters.push(resolve));
+		// Deadline path (today only compact uses it): one timer per wait, owned
+		// by the wait, cleared on delivery, deregistering on expiry.
+		return new Promise((resolve, reject) => {
+			const waiter = (e: ProtocolEvent | null): void => {
+				clearTimeout(timer);
+				resolve(e);
+			};
+			const timer = setTimeout(() => {
+				const i = waiters.indexOf(waiter);
+				if (i >= 0) waiters.splice(i, 1); // cancel: no orphan steals later events
+				reject(new CompactTimeoutError(ms));
+			}, ms);
+			timer.unref?.();
+			waiters.push(waiter);
+		});
 	}
 
 	/** Consume events until one of the given type arrives. Fatal EOF →
@@ -118,7 +219,7 @@ export class Session {
 				for await (const event of transport.events()) this.deliver(event);
 			} finally {
 				this.ended = true;
-				while (this.waiters.length) this.deliver(null);
+				while (this.waiters.length || this.exclusiveWaiters.length) this.deliver(null);
 			}
 		})();
 
@@ -136,23 +237,42 @@ export class Session {
 		this.transport.send(control);
 	}
 
-	/** Send a user turn without waiting (pair with waitForEvent/interrupt). */
-	submit(text: string): void {
-		this.control({ type: "submit", text });
+	/** Send a user turn; resolves once the control is actually written —
+	 * strictly ordered after any in-flight compaction cycle or queued turn
+	 * initiator (M11 turn gate). Still fire-and-forget for the *turn*: pair
+	 * with waitForEvent/interrupt, or prefer submitAndWait. */
+	async submit(text: string): Promise<void> {
+		const release = await this.gate.acquire();
+		try {
+			this.control({ type: "submit", text });
+		} finally {
+			release();
+		}
 	}
 
 	/**
 	 * Submit a user turn and resolve with its authoritative content at idle.
-	 * A turn-scoped `error` is captured and the loop **drains to `idle`** (so the
-	 * session settles at a clean boundary and a later submit works), then rejects
+	 * Holds the turn gate from control write until the turn's own `idle`, so
+	 * "the next idle after my submit" is provably mine (M11). A turn-scoped
+	 * `error` is captured and the loop **drains to `idle`** (so the session
+	 * settles at a clean boundary and a later submit works), then rejects
 	 * with TurnError. A fatal fd-3 EOF mid-turn rejects with EngineExitedError.
 	 */
 	async submitAndWait(text: string): Promise<TurnResult> {
+		const release = await this.gate.acquire();
+		try {
+			return await this.submitAndWaitUnlocked(text);
+		} finally {
+			release();
+		}
+	}
+
+	private async submitAndWaitUnlocked(text: string): Promise<TurnResult> {
 		this.control({ type: "submit", text });
 		let result: TurnResult | undefined;
 		let turnError: TurnError | undefined;
 		for (;;) {
-			const e = await this.next();
+			const e = await this.nextEventWithin();
 			if (e === null) throw new EngineExitedError("engine exited mid-turn");
 			if (e.type === "assistant_turn_finished") {
 				result = { turnId: e.turnId, content: e.content };
@@ -162,6 +282,105 @@ export class Session {
 				if (turnError) throw turnError;
 				return result ?? { turnId: "", content: "" };
 			}
+		}
+	}
+
+	/** Compact history (M11, spec §1): replace everything but the trailing
+	 * window with `summary`. Resolves on `compacted` (consuming the paired
+	 * idle); rejects TurnError on an engine-rejected control and
+	 * CompactTimeoutError when the engine never confirms in time. */
+	async compact(
+		summary: string,
+		keepLastTurns: number,
+		dropLastTurns: number,
+	): Promise<CompactResult> {
+		const release = await this.gate.acquire();
+		try {
+			return await this.compactUnlocked(summary, keepLastTurns, dropLastTurns);
+		} finally {
+			release();
+		}
+	}
+
+	private async compactUnlocked(
+		summary: string,
+		keepLastTurns: number,
+		dropLastTurns: number,
+	): Promise<CompactResult> {
+		// Spec §3: a hung compact (engine wedged, control path dead) must not
+		// park the cycle forever — the gate would never release and the
+		// Compactor's inProgress/re-arm bookkeeping would never run. The engine
+		// applies compact synchronously between turns (an in-memory swap + log
+		// rewrite), so the generous default only fires on a truly stuck engine.
+		// Each wait carries the REMAINING budget and cancels its own waiter on
+		// expiry (nextEventWithin) — no shared race, no orphaned waiter.
+		const ms = this.options.compactTimeoutMs ?? 30_000;
+		const startedAt = Date.now();
+		const remaining = (): number => Math.max(1, ms - (Date.now() - startedAt));
+		this.control({ type: "compact", summary, keepLastTurns, dropLastTurns });
+		let sawCompacted = false;
+		try {
+			for (;;) {
+				const e = await this.nextEventWithin(remaining());
+				if (e === null) throw new EngineExitedError('engine exited before "compacted"');
+				if (e.type === "error") throw new TurnError(e.message, e.turnId);
+				if (e.type === "compacted") {
+					sawCompacted = true;
+					// consume the paired idle so the stream settles at a boundary
+					for (;;) {
+						const i = await this.nextEventWithin(remaining());
+						if (i === null) throw new EngineExitedError('engine exited before "idle"');
+						if (i.type === "idle") break;
+					}
+					return { droppedItems: e.droppedItems, keptTurns: e.keptTurns };
+				}
+			}
+		} catch (e) {
+			// Arm the stale swallow for exactly what never arrived: the whole
+			// compacted+idle pair, or just the idle when compacted was already
+			// consumed before the deadline hit (see deliver()).
+			if (e instanceof CompactTimeoutError) {
+				if (sawCompacted) this.swallowNextIdle = true;
+				else this.staleCompactsPending++;
+			}
+			throw e;
+		}
+	}
+
+	/** Run `fn` as one gated critical section with unlocked turn primitives
+	 * (M11). While it runs, events route to the exclusive stream — outside
+	 * `waitForEvent` callers see nothing until the cycle completes. The facet
+	 * throws after `fn` settles (no escape). */
+	async runExclusive<T>(fn: (s: ExclusiveSession) => Promise<T>): Promise<T> {
+		const release = await this.gate.acquire();
+		this.cycleInternal = true;
+		let live = true;
+		const guard = (): void => {
+			if (!live) throw new Error("exclusive facet used after its critical section");
+		};
+		const facet: ExclusiveSession = {
+			submitAndWait: (text) => {
+				guard();
+				return this.submitAndWaitUnlocked(text);
+			},
+			compact: (summary, keep, drop) => {
+				guard();
+				return this.compactUnlocked(summary, keep, drop);
+			},
+		};
+		try {
+			return await fn(facet);
+		} finally {
+			live = false;
+			this.cycleInternal = false;
+			// Drain the exclusive stream: every event produced during the cycle
+			// belonged to the cycle's own controls, so leftovers (events that
+			// arrived after a timeout, or were never consumed) must not leak to
+			// the public stream. Dangling raced waiters are dropped too — their
+			// promises lost their deadline and are unreferenced.
+			this.exclusiveQueue.length = 0;
+			this.exclusiveWaiters.length = 0;
+			release();
 		}
 	}
 
@@ -191,10 +410,20 @@ export class Session {
 		return { turnId: e.turnId, content: e.content };
 	}
 
-	/** Start a fresh conversation; resolves once the engine is idle again. */
+	/** Start a fresh conversation; resolves once the engine is idle again.
+	 * Gate-serialized like every turn initiator (M11). */
 	async newConversation(): Promise<void> {
-		this.control({ type: "new_conversation" });
-		await this.waitForEvent("idle");
+		const release = await this.gate.acquire();
+		try {
+			this.control({ type: "new_conversation" });
+			for (;;) {
+				const e = await this.nextEventWithin();
+				if (e === null) throw new EngineExitedError('engine exited before "idle"');
+				if (e.type === "idle") return;
+			}
+		} finally {
+			release();
+		}
 	}
 
 	/** Request an engine/session status event. */
