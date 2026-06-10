@@ -7,7 +7,12 @@
  * The host stays name-agnostic (hostToolNames is generic discovery); picking
  * the rehydration tool is ezio's opinion and lives HERE, in the wiring layer.
  */
-import { Compactor, type CompactionConfig, type Session } from "@ai-ezio/harness";
+import {
+	Compactor,
+	SUMMARIZE_INSTRUCTION,
+	type CompactionConfig,
+	type Session,
+} from "@ai-ezio/harness";
 import type { McpHost } from "@ai-ezio/mcp-host";
 import type { RecordedTurn } from "@ai-ezio/session-recorder";
 
@@ -36,9 +41,12 @@ export async function callHostRehydration(host: RehydrationHost): Promise<string
 }
 
 /** Deterministic digest from the recorder's captured turns (spec §3 fallback:
- * survival beats summary quality when the summarizer is unavailable). */
+ * survival beats summary quality when the summarizer is unavailable).
+ * Summarize attempts are EXCLUDED: the failed summarize turn is finalized by
+ * the recorder before this runs, and including it would re-import the very
+ * exchange `dropLastTurns: 1` drops from history (spec §3 exclusion). */
 export function digestFromRecorder(source: DigestSource): string | null {
-	const turns = source.recentTurns();
+	const turns = source.recentTurns().filter((t) => t.userText !== SUMMARIZE_INSTRUCTION);
 	if (turns.length === 0) return null;
 	const lines = turns.slice(-30).map((t) => {
 		const tools = t.toolCalls.map((c) => c.name).join(",");

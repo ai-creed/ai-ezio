@@ -42,6 +42,7 @@ export {
 } from "./config.js";
 export {
 	Compactor,
+	SUMMARIZE_INSTRUCTION,
 	type CompactorOptions,
 	type CompactorSession,
 	type CompactOutcome,

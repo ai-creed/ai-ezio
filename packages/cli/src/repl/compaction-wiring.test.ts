@@ -6,7 +6,11 @@ import {
 	digestFromRecorder,
 	type RehydrationHost,
 } from "./compaction-wiring.js";
-import { COMPACTION_DEFAULTS, type ExclusiveSession } from "@ai-ezio/harness";
+import {
+	COMPACTION_DEFAULTS,
+	SUMMARIZE_INSTRUCTION,
+	type ExclusiveSession,
+} from "@ai-ezio/harness";
 
 function fakeHost(opts: {
 	names: string[];
@@ -76,6 +80,23 @@ describe("digestFromRecorder", () => {
 		expect(d).toContain("- fix the parser please [tools: bash,read]");
 		expect(d).toContain("- run tests");
 	});
+
+	it("excludes the failed summarize attempt (spec §3 exclusion on the digest path)", () => {
+		// The recorder finalizes the failed summarize turn (error drains to
+		// idle) BEFORE the fallback digest is built — it must not re-import
+		// the exchange that dropLastTurns: 1 just dropped from history.
+		const d = digestFromRecorder({
+			recentTurns: () => [turn("real work"), turn(SUMMARIZE_INSTRUCTION)],
+		});
+		expect(d).toContain("- real work");
+		expect(d).not.toContain("dense continuation brief");
+	});
+
+	it("only summarize attempts recorded -> null (digest unavailable, abort path)", () => {
+		expect(
+			digestFromRecorder({ recentTurns: () => [turn(SUMMARIZE_INSTRUCTION)] }),
+		).toBeNull();
+	});
 });
 
 describe("buildCompactor", () => {
@@ -96,5 +117,30 @@ describe("buildCompactor", () => {
 		expect(wired.compacting()).toBe(false); // span closed by the outcome note
 		expect(writes[0]).toContain("compacting…");
 		expect(writes[1]).toContain("✦ compacted — dropped 9 items");
+	});
+
+	it("digest fallback path excludes the failed summarize attempt end to end", async () => {
+		const writes: string[] = [];
+		const compactBlocks: string[] = [];
+		const facet: ExclusiveSession = {
+			submitAndWait: async () => {
+				throw new Error("summarize boom");
+			},
+			compact: async (s, keep) => {
+				compactBlocks.push(s);
+				return { droppedItems: 1, keptTurns: keep };
+			},
+		};
+		const wired = buildCompactor({
+			session: { runExclusive: (fn) => fn(facet) } as never,
+			config: { ...COMPACTION_DEFAULTS },
+			// the recorder already finalized the failed summarize attempt
+			digest: { recentTurns: () => [turn("real work"), turn(SUMMARIZE_INSTRUCTION)] },
+			write: (s) => writes.push(s),
+		});
+		const out = await wired.compactor.compactNow();
+		expect(out.kind).toBe("compacted");
+		expect(compactBlocks[0]).toContain("- real work");
+		expect(compactBlocks[0]).not.toContain("dense continuation brief");
 	});
 });

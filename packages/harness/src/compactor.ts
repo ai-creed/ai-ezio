@@ -28,7 +28,12 @@ export interface CompactorOptions {
 
 const REHYDRATE_MAX_CHARS = 4000;
 
-const SUMMARIZE_INSTRUCTION = [
+/** The in-session self-summarization prompt. Exported so digest builders can
+ * EXCLUDE the summarize attempt from their source turns: a failed summarize
+ * turn is finalized by the recorder before the fallback digest is built, and
+ * without the filter the digest would re-import the very exchange that
+ * `dropLastTurns: 1` just dropped from history (spec §3 exclusion). */
+export const SUMMARIZE_INSTRUCTION = [
 	"Summarize this conversation so far into a dense continuation brief for",
 	"yourself. Cover: the task and its current state, key decisions made and",
 	"why, files touched (exact paths), commands run and their outcomes, open",
