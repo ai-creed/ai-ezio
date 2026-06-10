@@ -49,6 +49,7 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 | `idle`                     | —                                        | Engine quiescent, ready for the next control. |
 | `error`                    | `message`, `turnId?`                     | Recoverable or fatal error; `turnId` if turn-scoped. |
 | `status`                   | `model`, `provider`, `effort?`, `protocol`, `sessionId`, `state`, `contextPercent?` | Reply to a `status` control (M4). `state` is `"idle"` in M4 (answered between turns); `contextPercent` is `null` until reliably known. `effort?` (M7) is the session's reasoning effort (string; omitted/empty when not set). |
+| `compacted`                | `droppedItems`, `keptTurns`              | (M11) Confirms a `compact` control was applied; followed by `idle`. `droppedItems` counts removed items (summarized-away prefix + drop window; the inserted summary item is not counted); `keptTurns` is the user turns kept verbatim (may be lower than requested when history was shorter). |
 
 ### M7 additions (optional, back-compatible)
 
@@ -91,6 +92,7 @@ Example stream:
 | `status`              | —        | Request a status event (engine/session health). |
 | `register_delegated_tools` | `tools[]` | (M9) Sent **once after `ready`, before the first `submit`**. Merges host-provided tool defs (`{name, description, parametersSchema}`) into the advertised tool table; they serialize to the model like native tools, but their results come from the host. |
 | `tool_result`         | `callId`, `output`, `status` | (M9) The host's reply to a `tool_call_requested`, correlated by `callId` (`status`: `ok` \| `error`). |
+| `compact`             | `summary`, `keepLastTurns`, `dropLastTurns?` | (M11) Replace old history with a host-built summary, keeping a tail window. Processed between turns (idle), like `new_conversation` — see the M11 section. |
 
 Example:
 
@@ -102,6 +104,7 @@ Example:
 {"type":"status"}
 {"type":"register_delegated_tools","tools":[{"name":"cortex__recall_memory","description":"…","parametersSchema":{"type":"object"}}]}
 {"type":"tool_result","callId":"c_9","output":"…","status":"ok"}
+{"type":"compact","summary":"[Context summary — session compacted]\n…","keepLastTurns":2,"dropLastTurns":1}
 ```
 
 ### M9 — host-delegated tools (generic MCP host)
@@ -120,6 +123,39 @@ is sequential, so at most one delegated call is outstanding. When no
 behavior is byte-for-byte identical. Delegated output is capped to hax's shared
 tool-output limit (`HAX_TOOL_OUTPUT_CAP`, default 50K) before entering history,
 exactly like native tools.
+
+### M11 — context compaction
+
+The `compact` control replaces all conversation history except a trailing
+window with a host-built summary. Processed between turns (idle), like
+`new_conversation`.
+
+```json
+{"type": "compact", "summary": "<text>", "keepLastTurns": 2, "dropLastTurns": 1}
+```
+
+- `summary` (string, required, non-empty): becomes the first item of the new
+  history, as a user message.
+- `keepLastTurns` (int >= 0, required): user turns kept verbatim at the tail.
+- `dropLastTurns` (int >= 0, optional, default 0): newest user turns discarded
+  entirely *before* the keep window is computed (covers dangling/aborted
+  trailing turns; the ezio harness uses it to exclude its in-session
+  summarization exchange).
+- Bounds: `dropLastTurns >=` turn count → history becomes `[summary]` only.
+  After dropping, `keepLastTurns >=` remaining turns → nothing further
+  dropped.
+- Invalid control (empty/missing summary, missing/negative `keepLastTurns`,
+  negative `dropLastTurns`): session untouched, an `error` event is emitted.
+- On success the engine rotates the session log and transcript mirror and
+  re-seeds them with the post-compact history (so `--resume`/`--continue` of
+  the rotated file reproduces post-compact state), emits `compacted`, then
+  `idle`.
+
+**Ordering rule for raw-protocol hosts:** the engine processes controls
+strictly in arrival order at idle boundaries. A host driving `compact`
+directly must not interleave its own `submit` between the steps of a
+summarize-then-compact cycle. (The ezio harness serializes this via its
+session turn gate.)
 
 ## Lifecycle / state machine
 
