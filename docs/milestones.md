@@ -206,3 +206,15 @@ the protocol; native behavior unchanged when no tools are registered. **Met.**
   upstream.~~ **Resolved:** we maintain our own hax fork as ezio's backbone and do
   not upstream; changes stay localized/minimal/rebaseable so the fork can still
   sync with upstream hax (see `UPSTREAM.md`).
+
+## Backlog
+
+- **ezio REPL resume.** `ai-ezio --continue` is not an ezio flag: unrecognized
+  argv falls through to the raw-hax TUI passthrough (`packages/cli/src/cli.ts`),
+  which resumes *outside* the unified architecture — no MCP host, no compactor,
+  no M7/M8 surface — and silently masquerades as an ezio feature. Found during
+  the M11 manual smoke (2026-06-10). Wire a first-class `--continue` /
+  `--resume[=id]` into the standalone self-mount by forwarding the flag to the
+  headless hax spawn — the engine already restores and re-mirrors history, and
+  the M11 engine e2e proves post-compact resume — and make the remaining
+  passthrough path degrade loudly instead of silently.
