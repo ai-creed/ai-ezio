@@ -97,6 +97,13 @@ export class McpHost {
 		}
 	}
 
+	/** Namespaced names of every connected tool (advertised + host-private).
+	 * Generic discovery surface for harness wiring (M11 — e.g. picking a
+	 * rehydration tool); the host itself hardcodes no tool or server name. */
+	hostToolNames(): string[] {
+		return [...this.defsByName.keys()];
+	}
+
 	/** Harness-private MCP call: invoke a tool directly, WITHOUT advertising it to the
 	 * model or riding the tool_call_requested path. For tools listed in
 	 * `hostPrivateTools` (e.g. cortex__capture_session). Policy `deny` still blocks;

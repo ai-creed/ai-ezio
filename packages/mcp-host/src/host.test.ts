@@ -197,3 +197,24 @@ it("returns an error tool_result when a call exceeds the per-call timeout (befor
 	expect(fx.results[0][2]).toBe("error");
 	expect(fx.results[0][1]).toMatch(/timed out|failed/i);
 });
+
+it("hostToolNames lists every connected tool, advertised and host-private (M11)", async () => {
+	const fx = fakeSession();
+	const host = new McpHost({
+		mode: "standalone",
+		cwd: "/repo",
+		toolPolicy: {},
+		servers: [{ name: "cortex", command: "x", args: [] }],
+		hostPrivateTools: ["cortex__capture_session"],
+		connect: async () =>
+			fakeClient(
+				[{ name: "rehydrate_project", props: ["path"] }, { name: "capture_session" }],
+				() => ({ output: "", status: "ok" }),
+			),
+	});
+	await host.start(fx.session as never);
+	expect(host.hostToolNames().sort()).toEqual([
+		"cortex__capture_session",
+		"cortex__rehydrate_project",
+	]);
+});

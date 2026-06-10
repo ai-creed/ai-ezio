@@ -35,6 +35,13 @@ export interface DoctorInputs {
 	dirExists: (path: string) => boolean;
 	skills: Skill[];
 	wired?: WiredState;
+	/** Compaction diagnostics (M11): config clamp notes + auto-arming hint. */
+	compaction?: {
+		auto: boolean;
+		configNotes: string[];
+		/** HAX_CONTEXT_LIMIT is set in the environment. */
+		contextLimitEnv: boolean;
+	};
 }
 
 export function buildDoctorReport(input: DoctorInputs): DoctorReport {
@@ -55,6 +62,15 @@ export function buildDoctorReport(input: DoctorInputs): DoctorReport {
 				`prompt — install it under .agents/skills/ or the hax-global dir to make it ` +
 				`engine-visible (see docs/skills.md).`,
 		);
+	}
+	if (input.compaction) {
+		notes.push(...input.compaction.configNotes);
+		if (input.compaction.auto && !input.compaction.contextLimitEnv) {
+			notes.push(
+				"auto-compact arms only when the provider reports a context limit " +
+					"(set HAX_CONTEXT_LIMIT to force one); /compact always works.",
+			);
+		}
 	}
 
 	return {

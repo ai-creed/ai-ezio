@@ -341,3 +341,23 @@ describe("SessionRecorder compaction (M11)", () => {
 		expect(sink.flush).not.toHaveBeenCalled();
 	});
 });
+
+describe("SessionRecorder recentTurns (M11)", () => {
+	it("exposes finalized turns, newest last, bounded", () => {
+		const { sink } = fakeSink();
+		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink });
+		feed(rec, [{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" }]);
+		for (let i = 0; i < 35; i++) {
+			rec.noteSubmit(`u${i}`);
+			feed(rec, [
+				{ type: "user_turn_started", turnId: `t${i}` },
+				{ type: "assistant_turn_finished", turnId: `t${i}`, content: `a${i}` },
+				{ type: "idle" },
+			]);
+		}
+		const recent = rec.recentTurns();
+		expect(recent).toHaveLength(30);
+		expect(recent[recent.length - 1]!.userText).toBe("u34");
+		expect(recent[0]!.userText).toBe("u5");
+	});
+});

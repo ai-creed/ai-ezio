@@ -6,9 +6,10 @@
  */
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { Session } from "@ai-ezio/harness";
+import { loadConfig, Session } from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
+import { buildCompactor } from "./compaction-wiring.js";
 import {
 	createRecorder,
 	ezioStateDir,
@@ -103,16 +104,31 @@ export async function runStandalone(): Promise<number> {
 	const renderer = createMountedRenderer({ stdout: process.stdout });
 	let lastContent = "";
 	let lastUsage: AssistantTurnFinishedEvent["usage"];
+	// Compaction (M11): wired after the session exists (it needs runExclusive),
+	// but the tee below already consults it — declare the slot first.
+	let wired: ReturnType<typeof buildCompactor> | undefined;
 	const session = new Session({
 		onEvent: (e: ProtocolEvent) => {
-			renderer.handle(e);
+			// During a compaction cycle the summarize turn is plumbing, not
+			// conversation: suppress its rendering ("compacting…" chrome shows
+			// instead). The recorder and host still see every event.
+			if (!wired?.compacting()) renderer.handle(e);
 			recorder.handleEvent(e);
 			if (e.type === "assistant_turn_finished") {
 				lastContent = e.content;
 				lastUsage = e.usage;
+				wired?.compactor.noteUsage(e.usage);
 			}
 			void host.handleEvent(e);
 		},
+	});
+	const { compaction } = loadConfig();
+	wired = buildCompactor({
+		session,
+		config: compaction,
+		host,
+		digest: recorder,
+		write: (s) => void process.stdout.write(s),
 	});
 
 	try {
@@ -139,6 +155,7 @@ export async function runStandalone(): Promise<number> {
 		write: (s) => void process.stdout.write(s),
 		session,
 		recorder,
+		compactor: wired.compactor,
 		lastContent: () => lastContent,
 		lastUsage: () => lastUsage,
 		skills: () =>
@@ -166,6 +183,7 @@ export async function runStandalone(): Promise<number> {
 			keys: readKeys(stdin),
 			session,
 			host,
+			compactor: wired.compactor,
 			write: (s) => void process.stdout.write(s),
 			slash,
 			recorder,

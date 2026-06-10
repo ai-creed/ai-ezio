@@ -11,8 +11,11 @@ import type { SlashController } from "./slash.js";
 
 export interface StandaloneReplDeps {
 	keys: AsyncIterable<string>;
-	session: Pick<Session, "submit" | "interrupt" | "waitForEvent" | "close">;
+	session: Pick<Session, "submitAndWait" | "interrupt" | "close">;
 	host: Pick<McpHost, "handleEvent" | "stop">;
+	/** Optional compaction policy (M11): the auto trigger runs after each
+	 * settled turn; /compact reaches it through the slash context. */
+	compactor?: { maybeAutoCompact(): Promise<unknown> };
 	write: (s: string) => void;
 	/** Local slash-command dispatch; a submitted line is routed here first. */
 	slash: Pick<SlashController, "handle">;
@@ -61,10 +64,14 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 			if (outcome.action === "exit") break;
 			if (outcome.action === "submit") {
 				deps.recorder?.noteSubmit(outcome.text);
-				deps.session.submit(outcome.text);
-				// Wait for the turn to settle before reading the next line. The surface
-				// renders streamed events live via Session.onEvent; idle = prompt again.
-				await deps.session.waitForEvent("idle");
+				// Gated full-turn primitive (M11): holds the turn gate from control
+				// write to this turn's OWN idle — never a compaction cycle's. The
+				// surface renders streamed events live via Session.onEvent; the
+				// resolved content is already on screen, so it is discarded here.
+				await deps.session.submitAndWait(outcome.text);
+				// Auto-compact check at the settled boundary; a cycle runs under
+				// the same gate and re-checks fullness after acquiring it.
+				await deps.compactor?.maybeAutoCompact();
 			} else {
 				// "handled" — no engine round-trip and so no idle to draw the next
 				// prompt; draw it here so the pane stays usable.

@@ -39,6 +39,10 @@ export class SessionRecorder {
 	private turnsSinceFlush = 0;
 
 	private current?: RecordedTurn;
+	/** Ring of the most recent finalized turns (M11: the deterministic-digest
+	 * source for compaction's summarizer fallback). Bounded; in-memory only. */
+	private readonly recent: RecordedTurn[] = [];
+	private static readonly RECENT_MAX = 30;
 	private readonly callsById = new Map<string, RecordedToolCall>();
 	private readonly pendingSubmits: string[] = [];
 	/** True once the current conversation has a completed turn not yet flushed. Gates
@@ -145,10 +149,17 @@ export class SessionRecorder {
 		await this.doFlush("close");
 	}
 
+	/** The most recent finalized turns (newest last), bounded to 30. */
+	recentTurns(): readonly RecordedTurn[] {
+		return this.recent;
+	}
+
 	private finalizeTurn(): void {
 		const turn = this.current;
 		if (!turn) return;
 		this.current = undefined;
+		this.recent.push(turn);
+		if (this.recent.length > SessionRecorder.RECENT_MAX) this.recent.shift();
 		void Promise.resolve(this.opts.store.append(turn));
 		void Promise.resolve(this.opts.sink.onTurnComplete(turn));
 		this.hasUncaptured = true;

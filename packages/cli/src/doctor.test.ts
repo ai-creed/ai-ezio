@@ -87,3 +87,31 @@ describe("formatDoctorReport", () => {
 		expect(t).toContain("ai-ezio init --reconfigure");
 	});
 });
+
+describe("doctor compaction diagnostics (M11)", () => {
+	it("surfaces config clamp notes and the auto-arming hint", () => {
+		const r = buildDoctorReport({
+			...inputs(),
+			compaction: {
+				auto: true,
+				configNotes: ["compaction.threshold 2 out of [0.3, 0.95] — clamped"],
+				contextLimitEnv: false,
+			},
+		});
+		expect(r.notes.some((n) => n.includes("threshold 2 out of"))).toBe(true);
+		expect(r.notes.some((n) => n.includes("auto-compact arms only"))).toBe(true);
+	});
+
+	it("no arming hint when auto is off or a limit override exists", () => {
+		const off = buildDoctorReport({
+			...inputs(),
+			compaction: { auto: false, configNotes: [], contextLimitEnv: false },
+		});
+		expect(off.notes.some((n) => n.includes("auto-compact"))).toBe(false);
+		const forced = buildDoctorReport({
+			...inputs(),
+			compaction: { auto: true, configNotes: [], contextLimitEnv: true },
+		});
+		expect(forced.notes.some((n) => n.includes("auto-compact"))).toBe(false);
+	});
+});

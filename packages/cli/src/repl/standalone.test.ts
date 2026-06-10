@@ -37,12 +37,12 @@ describe("runStandaloneRepl", () => {
 			for (const k of ["h", "i", "\r", "\x04"]) yield k;
 		}
 		const session = {
-			submit: (t: string) => submitted.push(t),
-			interrupt: () => {},
-			waitForEvent: async (e: string) => {
-				waited.push(e);
-				return { type: "idle" } as never;
+			submitAndWait: async (t: string) => {
+				submitted.push(t);
+				waited.push("turn"); // settled at its own idle (gated primitive)
+				return { turnId: "t1", content: "ok" };
 			},
+			interrupt: () => {},
 			close: () => {},
 		};
 		let stopped = false;
@@ -56,7 +56,7 @@ describe("runStandaloneRepl", () => {
 			...surface,
 		});
 		expect(submitted).toEqual(["hi"]);
-		expect(waited).toEqual(["idle"]);
+		expect(waited).toEqual(["turn"]);
 		// The submitted line is repainted as the magenta user-turn block; the surface
 		// draws the next prompt on idle (not the REPL).
 		expect(surface.echoed).toEqual(["hi"]);
@@ -70,9 +70,11 @@ describe("runStandaloneRepl", () => {
 			for (const k of ["x", "\x03", "\x04"]) yield k;
 		}
 		const session = {
-			submit: () => calls.push("submit"),
+			submitAndWait: async () => {
+				calls.push("submit");
+				return { turnId: "t", content: "" };
+			},
 			interrupt: () => calls.push("interrupt"),
-			waitForEvent: async () => ({ type: "idle" }) as never,
 			close: () => {},
 		};
 		await runStandaloneRepl({
@@ -93,12 +95,11 @@ describe("runStandaloneRepl", () => {
 			for (const k of ["/", "h", "e", "l", "p", "\r", "\x04"]) yield k;
 		}
 		const session = {
-			submit: () => calls.push("submit"),
-			interrupt: () => {},
-			waitForEvent: async () => {
-				calls.push("wait");
-				return { type: "idle" } as never;
+			submitAndWait: async () => {
+				calls.push("submit");
+				return { turnId: "t", content: "" };
 			},
+			interrupt: () => {},
 			close: () => {},
 		};
 		const surface = fakeSurface();
@@ -123,9 +124,11 @@ describe("runStandaloneRepl", () => {
 			for (const k of ["/", "q", "\r", "x", "\x04"]) yield k; // x/Ctrl-D after exit must not run
 		}
 		const session = {
-			submit: () => calls.push("submit"),
+			submitAndWait: async () => {
+				calls.push("submit");
+				return { turnId: "t", content: "" };
+			},
 			interrupt: () => {},
-			waitForEvent: async () => ({ type: "idle" }) as never,
 			close: () => calls.push("close"),
 		};
 		await runStandaloneRepl({
@@ -146,9 +149,11 @@ describe("runStandaloneRepl", () => {
 			for (const k of ["\r", "\x04"]) yield k; // bare Enter, then Ctrl-D
 		}
 		const session = {
-			submit: (t: string) => submitted.push(t),
+			submitAndWait: async (t: string) => {
+				submitted.push(t);
+				return { turnId: "t", content: "" };
+			},
 			interrupt: () => {},
-			waitForEvent: async () => ({ type: "idle" }) as never,
 			close: () => {},
 		};
 		const surface = fakeSurface();
@@ -162,5 +167,35 @@ describe("runStandaloneRepl", () => {
 		});
 		expect(submitted).toEqual([]);
 		expect(surface.echoed).toEqual([]);
+	});
+
+	it("runs the auto-compact check once after each settled turn (M11)", async () => {
+		const order: string[] = [];
+		async function* keys() {
+			for (const k of ["h", "i", "\r", "\x04"]) yield k;
+		}
+		const session = {
+			submitAndWait: async () => {
+				order.push("turn");
+				return { turnId: "t", content: "" };
+			},
+			interrupt: () => {},
+			close: () => {},
+		};
+		await runStandaloneRepl({
+			keys: keys(),
+			session: session as never,
+			host: { handleEvent: async () => {}, stop: async () => {} } as never,
+			compactor: {
+				maybeAutoCompact: async () => {
+					order.push("auto-compact");
+					return { kind: "skipped", reason: "not-armed" };
+				},
+			},
+			write: () => {},
+			slash: fakeSlash(),
+			...fakeSurface(),
+		});
+		expect(order).toEqual(["turn", "auto-compact"]);
 	});
 });

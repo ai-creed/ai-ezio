@@ -30,6 +30,8 @@ export async function runNativeSubcommand(argv: readonly string[]): Promise<numb
 
 	if (argv[0] === "doctor") {
 		const { computeWiredState } = await import("./bootstrap/init-cli.js");
+		const { loadConfig } = await import("@ai-ezio/harness");
+		const ezioConfig = loadConfig();
 		const report = buildDoctorReport({
 			version: readVersionInfo(),
 			hax: describeHaxBinary(),
@@ -37,6 +39,11 @@ export async function runNativeSubcommand(argv: readonly string[]): Promise<numb
 			dirExists: (p) => fs.isDirectory(p),
 			skills: discoverSkills(env, fs),
 			wired: computeWiredState(),
+			compaction: {
+				auto: ezioConfig.compaction.auto,
+				configNotes: ezioConfig.notes,
+				contextLimitEnv: Boolean(process.env.HAX_CONTEXT_LIMIT),
+			},
 		});
 		process.stdout.write(`${formatDoctorReport(report)}\n`);
 		return report.hax.ok ? 0 : 1;

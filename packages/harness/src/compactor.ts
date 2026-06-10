@@ -21,6 +21,9 @@ export interface CompactorOptions {
 	fallbackDigest?: () => Promise<string | null>;
 	/** Surface a user-visible warning/info line (CLI chrome, adapter log). */
 	onNote?: (line: string) => void;
+	/** Fired when a cycle actually begins (after the in-gate re-check passes) —
+	 * the surface uses it to switch to "compacting…" chrome / suppression. */
+	onCycleStart?: () => void;
 }
 
 const REHYDRATE_MAX_CHARS = 4000;
@@ -92,6 +95,7 @@ export class Compactor {
 	}
 
 	private async cycle(s: ExclusiveSession): Promise<CompactOutcome> {
+		this.opts.onCycleStart?.();
 		let summary: string | null = null;
 		// True once the summarize submit reached the engine — even a failed
 		// turn entered history (the engine absorbs aborted turns; a pre-stream
