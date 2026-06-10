@@ -290,3 +290,54 @@ describe("SessionRecorder trigger policy", () => {
 		);
 	});
 });
+
+describe("SessionRecorder compaction (M11)", () => {
+	it("flushes on compacted with reason 'compact' and keeps the conversation id", () => {
+		const { sink, turns } = fakeSink();
+		const store = { append: vi.fn() };
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store,
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
+
+		rec.noteSubmit("turn one");
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{ type: "user_turn_started", turnId: "t1" },
+			{ type: "assistant_turn_finished", turnId: "t1", content: "A." },
+			{ type: "idle" },
+			// compaction is a continuation, not a boundary (spec §6)
+			{ type: "compacted", droppedItems: 57, keptTurns: 2 },
+		]);
+
+		expect(sink.flush).toHaveBeenCalledTimes(1);
+		expect(sink.flush).toHaveBeenCalledWith(
+			{ sessionId: "s1", conversationId: "s1-0", worktreePath: "/repo" },
+			"compact",
+		);
+
+		// the next turn keeps the SAME conversation id and continues indexing
+		rec.noteSubmit("turn two");
+		feed(rec, [
+			{ type: "user_turn_started", turnId: "t2" },
+			{ type: "assistant_turn_finished", turnId: "t2", content: "B." },
+			{ type: "idle" },
+		]);
+		expect(turns).toHaveLength(2);
+		expect(turns[1]!.ref.conversationId).toBe("s1-0");
+		expect(turns[1]!.index).toBe(1);
+	});
+
+	it("compacted with nothing uncaptured is a no-op flush", () => {
+		const { sink } = fakeSink();
+		const rec = new SessionRecorder({ worktreePath: "/repo", store: { append: vi.fn() }, sink });
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{ type: "compacted", droppedItems: 1, keptTurns: 0 },
+		]);
+		expect(sink.flush).not.toHaveBeenCalled();
+	});
+});

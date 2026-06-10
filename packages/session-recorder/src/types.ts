@@ -36,7 +36,7 @@ export interface RecordedTurn {
 	usage?: TokenUsage;
 }
 
-export type FlushReason = "debounce" | "everyK" | "new" | "close";
+export type FlushReason = "debounce" | "everyK" | "new" | "close" | "compact";
 
 /** The generic session-sink seam. The recorder appends completed turns (`onTurnComplete`)
  * and asks the sink to trigger capture (`flush`) per the recorder's policy. Knows nothing

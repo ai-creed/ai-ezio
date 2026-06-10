@@ -112,6 +112,13 @@ export class SessionRecorder {
 			case "idle":
 				this.finalizeTurn();
 				break;
+			case "compacted":
+				// Compaction is a continuation, not a boundary (M11 spec §6):
+				// flush what is already captured (the lossless record keeps what
+				// the model's context just lost), keep conversationId and turn
+				// indexing as-is.
+				this.triggerFlush("compact");
+				break;
 			default:
 				break;
 		}
