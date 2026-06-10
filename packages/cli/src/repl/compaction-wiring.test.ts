@@ -93,9 +93,7 @@ describe("digestFromRecorder", () => {
 	});
 
 	it("only summarize attempts recorded -> null (digest unavailable, abort path)", () => {
-		expect(
-			digestFromRecorder({ recentTurns: () => [turn(SUMMARIZE_INSTRUCTION)] }),
-		).toBeNull();
+		expect(digestFromRecorder({ recentTurns: () => [turn(SUMMARIZE_INSTRUCTION)] })).toBeNull();
 	});
 });
 
