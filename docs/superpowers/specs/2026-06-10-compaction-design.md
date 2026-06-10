@@ -120,6 +120,34 @@ ordering rule in `docs/protocol.md` instead: the engine processes controls
 strictly in arrival order at idle boundaries, so a host driving `compact`
 directly must not interleave its own `submit` between its cycle's steps.
 
+**Caller-visible gate contract.** Internal ordering alone is not enough,
+because the existing public API is fire-and-forget: today
+`submit()` writes the control immediately, and the standalone REPL sequences
+turns as `session.submit(text); await session.waitForEvent("idle")`
+(`packages/cli/src/repl/standalone.ts`). Under a gate, a queued `submit()`
+returns before its control is written, and that bare idle-waiter would
+resolve on a compaction cycle's idle — the REPL would prompt mid-cycle. The
+gate therefore ships with three API guarantees:
+
+1. **`submit(text)` returns a promise** that resolves only after the gate has
+   been acquired and the control actually written. It stays fire-and-forget
+   with respect to the *turn*, but is strictly ordered with respect to
+   cycles.
+2. **`submitAndWait` is the gated full-turn primitive**: it holds the gate
+   from control write until its own turn's `idle`, then releases. Because
+   the gate excludes all other turn initiators, "the next idle after my
+   submit" is provably *mine*. The standalone REPL migrates from the bare
+   pattern to this primitive (the surface keeps rendering from `onEvent`;
+   only sequencing changes), and the ai-whisper adapter's submit-strategy
+   does the same as part of its Compactor wiring.
+3. **Cycle-internal idle suppression**: while the Compactor holds the gate,
+   the idles produced inside the cycle (the summarize turn's idle and the
+   post-`compacted` idle) do not resolve `waitForEvent("idle")` waits created
+   outside the critical section — the gate-holder's own waits are exempt,
+   and `onEvent` subscribers (renderer, recorder) still see every event
+   unchanged. This makes even a legacy/external `submit` + `waitForEvent`
+   caller safe rather than merely deprecated.
+
 ## 3. Compactor — TS policy owner, shared by both modes
 
 New module `compactor.ts` in `@ai-ezio/harness`, constructed with:
@@ -260,10 +288,17 @@ rules worth carrying forward.**
   in-progress guard, digest fallback (including that it sends
   `dropLastTurns: 1`), abort + re-arm rule, unknown-limit disarm, config
   clamping with the doctor-visible note emitted.
-- **Turn gate:** harness tests proving cross-caller serialization — a
-  `submit` issued while a compaction cycle holds the gate is deferred until
-  after `compact` lands (ordering asserted via the event stream), and the
-  auto-trigger re-checks fullness after acquiring the gate.
+- **Turn gate:** harness tests proving the caller-visible contract, not just
+  event ordering — (a) a `submit` issued while a compaction cycle holds the
+  gate is deferred until after `compact` lands, and its returned promise
+  resolves only once the control is actually written; (b) the **legacy
+  pattern regression test**: fire `submit(text)` *unawaited* and immediately
+  `waitForEvent("idle")` while a cycle is in flight, and assert the waiter
+  resolves on the queued user turn's idle — never on the cycle's summarize
+  or post-`compacted` idles; (c) `onEvent` subscribers receive all
+  cycle-internal events unchanged during suppression; (d) the auto-trigger
+  re-checks fullness after acquiring the gate; (e) `submitAndWait` resolves
+  with its own turn's content when a cycle was queued behind it.
 - **Full-cycle integration:** drive a complete Compactor cycle against real
   hax + mock provider and assert via the `HAX_TRANSCRIPT` mirror that the
   next provider request contains the summary + the last K real turns and
