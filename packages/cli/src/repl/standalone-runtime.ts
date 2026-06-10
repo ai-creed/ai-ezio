@@ -91,8 +91,14 @@ async function* readKeys(stdin: NodeJS.ReadStream): AsyncGenerator<string> {
 	}
 }
 
+export interface StandaloneOptions {
+	/** Forwarded to the headless hax spawn (e.g. ["--continue"] or ["--resume=ID"])
+	 * to resume a prior session. Absent/empty → a fresh session. */
+	resumeArgs?: string[];
+}
+
 /** Run the interactive standalone REPL. Returns the process exit code. */
-export async function runStandalone(): Promise<number> {
+export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
 	const cwd = process.cwd();
 	const host = loadMcpHost({ mode: "standalone", cwd });
 	const stateDir = ezioStateDir();
@@ -132,7 +138,9 @@ export async function runStandalone(): Promise<number> {
 	});
 
 	try {
-		await session.start();
+		// resumeArgs (e.g. ["--continue"]/["--resume=ID"]) make the headless hax
+		// load + replay prior history before the first prompt; absent → fresh.
+		await session.start(opts.resumeArgs?.length ? { args: opts.resumeArgs } : {});
 	} catch (error) {
 		process.stderr.write(`ai-ezio: ${(error as Error).message}\n`);
 		return 1;

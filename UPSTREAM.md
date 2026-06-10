@@ -56,6 +56,13 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
 - **`HAX_EXTRA_SKILLS_DIR`** (M4): `agent_env.c` enumerates one additional skills
   directory (from the env var) into the model prompt — a general "extra skills
   dir" knob.
+- **`--list-sessions`** (ezio REPL resume): a non-interactive subcommand that
+  prints the cwd's saved sessions as a JSON array — `session_list_json()` in
+  `session.c` (a self-contained, append-only function reusing the existing
+  `session_list` / `session_first_prompt`), printed and exited early in `main.c`
+  before any provider work. A generic host-facing seam so an embedder (ai-ezio)
+  can render its own resume picker without re-deriving hax's private on-disk
+  session layout.
 
 **Downstream (ai-ezio's, kept here):**
 - `src/protocol/emit.c` (+ header) implementing `agent_observer`, serializing
@@ -119,10 +126,13 @@ with upstream MUST follow these rules.
 The downstream footprint is exactly the documented change surface above:
 wholly-owned files (`src/agent_observer.h`, `src/protocol/`, `tests/protocol/`)
 plus thin seam lines in shared files (`agent.c`, `agent_core.{c,h}`,
-`agent_dispatch.{c,h}`, `agent_env.c`, `slash.{c,h}`, `main.c`, the two meson
-files, `tests/test_slash.c`, `tests/test_agent_dispatch.c`). In the meson files
-we own only list entries (`sources`, `test_sources`, `e2e_sources`) and the
-small e2e foreach — never structural build logic.
+`agent_dispatch.{c,h}`, `agent_env.c`, `session.{c,h}`, `slash.{c,h}`, `main.c`,
+the two meson files, `tests/test_slash.c`, `tests/test_agent_dispatch.c`,
+`tests/test_session.c`). The `session.{c,h}` footprint is one append-only
+function (`session_list_json`) plus its declaration — additive, so a rebase sees
+no overlap with existing session logic. In the meson files we own only list
+entries (`sources`, `test_sources`, `e2e_sources`) and the small e2e foreach —
+never structural build logic.
 
 During a sync, a conflict in any file outside this list is a red flag: stop and
 redesign the downstream change toward the TS harness instead of widening the

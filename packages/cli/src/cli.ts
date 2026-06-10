@@ -19,6 +19,7 @@ import { chmodSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { aiEzioGlobalSkillsDir, describeHaxBinary, resolveHaxBinary } from "@ai-ezio/harness";
 import { buildDoctorReport, formatDoctorReport } from "./doctor.js";
+import { runResumePicker, spawnListSessions } from "./repl/resume-picker.js";
 import { discoverSkills, nodeSkillFs, skillDirs, type SkillEnv } from "./skills.js";
 import { readVersionInfo } from "./version.js";
 
@@ -112,6 +113,47 @@ export function isNativeSubcommand(argv: readonly string[]): boolean {
 	return argv[0] === "skill" || argv[0] === "doctor";
 }
 
+/** What a resume invocation asks for. */
+export type ResumeIntent =
+	| { kind: "continue" } // -c / --continue: newest session in this cwd
+	| { kind: "id"; id: string } // --resume=ID: a specific session
+	| { kind: "picker" }; // bare --resume / --resume= : choose interactively
+
+/** Parse a resume intent from argv, or undefined when none is present. Recognizes
+ * `-c`, `--continue`, `--resume`, and `--resume=ID`; bare `--resume` and an empty
+ * `--resume=` both mean "let me choose" (the picker). Pure. */
+export function parseResumeIntent(argv: readonly string[]): ResumeIntent | undefined {
+	for (const a of argv) {
+		if (a === "-c" || a === "--continue") return { kind: "continue" };
+		if (a === "--resume") return { kind: "picker" };
+		const m = a.match(/^--resume=(.*)$/);
+		if (m) return m[1] ? { kind: "id", id: m[1] } : { kind: "picker" };
+	}
+	return undefined;
+}
+
+/** A *bare* resume invocation (argv is exactly one resume token) eligible for the
+ * ezio self-mount. Combined invocations (`-p … --continue`, `--mount-mode …`,
+ * extra hax flags) return undefined and keep their existing routing. Pure. */
+export function resumeSelfMount(argv: readonly string[]): ResumeIntent | undefined {
+	if (argv.length !== 1) return undefined;
+	return parseResumeIntent(argv);
+}
+
+/** The hax args for a resolved resume intent: `continue`/`id` map to a flag the
+ * headless spawn forwards; `picker` has none (resolved in TS). Pure. */
+export function resumeHaxArgs(intent: ResumeIntent): string[] {
+	if (intent.kind === "continue") return ["--continue"];
+	if (intent.kind === "id") return [`--resume=${intent.id}`];
+	return [];
+}
+
+/** Purely informational hax flags whose passthrough should stay quiet (a
+ * "running outside the unified stack" note would just be noise on `--help`). */
+export function isInformationalPassthrough(argv: readonly string[]): boolean {
+	return argv.includes("--help") || argv.includes("-h") || argv.includes("--version");
+}
+
 /** A mounted invocation (`--mount-mode` or protocol fds) — forward the fds. */
 export function isMountInvocation(argv: readonly string[]): boolean {
 	return (
@@ -184,6 +226,51 @@ export function oneShotExtraArgs(argv: readonly string[]): string[] {
 	return argv.filter((_, idx) => idx !== i && idx !== i + 1);
 }
 
+/** Read raw stdin as one string chunk per keypress (escape sequences arrive
+ * whole), feeding the resume picker. Iterates with `destroyOnReturn: false` so
+ * that when the picker stops consuming (the user selects/cancels) stdin is left
+ * ALIVE — the very next consumer is the mounted REPL (`runStandalone`), and a
+ * default `for await` would destroy the stream on break and EOF the REPL. */
+export async function* stdinChunks(stdin: NodeJS.ReadStream): AsyncGenerator<string> {
+	stdin.resume();
+	for await (const chunk of stdin.iterator({ destroyOnReturn: false })) {
+		yield typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf8");
+	}
+}
+
+/** Hand off to the standalone self-mount with resume args forwarded to hax. */
+async function runStandaloneResume(resumeArgs: string[]): Promise<number> {
+	const { runStandalone } = await import("./repl/standalone-runtime.js");
+	return runStandalone({ resumeArgs });
+}
+
+/** Resolve the hax binary, run ezio's session picker (`hax --list-sessions` +
+ * a TS-rendered list), and resume the chosen session through the self-mount.
+ * A cancel or an empty list exits cleanly without mounting. */
+async function resumeViaPicker(): Promise<number> {
+	let binary: string;
+	try {
+		binary = resolveHaxBinary();
+	} catch (error) {
+		process.stderr.write(`ai-ezio: ${(error as Error).message}\n`);
+		return 127;
+	}
+	ensureExecutable(binary);
+	const cwd = process.cwd();
+	const id = await runResumePicker({
+		listSessions: () => spawnListSessions(binary, cwd),
+		keys: stdinChunks(process.stdin),
+		write: (s) => void process.stdout.write(s),
+		now: () => Date.now(),
+		setRawMode: (on) => void process.stdin.setRawMode?.(on),
+	});
+	if (id === undefined) {
+		process.stdout.write("ai-ezio: no session selected.\n");
+		return 0;
+	}
+	return runStandaloneResume([`--resume=${id}`]);
+}
+
 /** Run the CLI, returning the process exit code. */
 export async function main(argv: string[]): Promise<number> {
 	if (wantsVersionJson(argv)) {
@@ -226,6 +313,20 @@ export async function main(argv: string[]): Promise<number> {
 		return runStandalone();
 	}
 
+	// `ai-ezio --continue` / `--resume=ID` resumes a prior session through the
+	// unified self-mount (MCP host + compactor + surface stay active), instead of
+	// silently falling through to the raw-hax TUI passthrough below. Only a bare
+	// resume token on a TTY qualifies; combined invocations keep their routing.
+	const resume = resumeSelfMount(argv);
+	if (resume && process.stdin.isTTY && process.stdout.isTTY) {
+		// Bare `--resume` opens ezio's own session picker (hax's picker is a
+		// full-screen TUI that cannot run under the headless mount); a resolved
+		// `-c`/`--resume=ID` goes straight to the self-mount.
+		return resume.kind === "picker"
+			? await resumeViaPicker()
+			: await runStandaloneResume(resumeHaxArgs(resume));
+	}
+
 	// `-p <prompt>` one-shot runs through the unified Session + MCP host
 	// (submitAndWait), so a one-shot can use registered MCP tools too.
 	const oneShot = oneShotPrompt(argv);
@@ -242,6 +343,17 @@ export async function main(argv: string[]): Promise<number> {
 		return 127;
 	}
 	ensureExecutable(bin);
+
+	// Anything reaching here is raw-hax passthrough — outside the unified
+	// architecture (no MCP host, compactor, or ezio surface). Say so loudly rather
+	// than silently masquerading as an ezio feature, except for purely
+	// informational flags where the note would just be noise.
+	if (!isMountInvocation(argv) && !isInformationalPassthrough(argv)) {
+		process.stderr.write(
+			"ai-ezio: raw hax passthrough — the MCP host, compaction, and ezio surface " +
+				"are inactive on this path.\n",
+		);
+	}
 
 	// Human REPL inherits the terminal; a mounted launch forwards the protocol
 	// fds (and --mount-mode) to hax. Both set HAX_EXTRA_SKILLS_DIR.

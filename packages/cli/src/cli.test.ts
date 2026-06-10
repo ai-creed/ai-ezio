@@ -1,9 +1,14 @@
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
 	isMountInvocation,
 	isNativeSubcommand,
 	launchEnv,
 	mountStdio,
+	parseResumeIntent,
+	resumeHaxArgs,
+	resumeSelfMount,
+	stdinChunks,
 	wantsVersionJson,
 } from "./cli.js";
 import { readVersionInfo } from "./version.js";
@@ -33,6 +38,72 @@ describe("isMountInvocation", () => {
 		expect(isMountInvocation(["--protocol-fd=3", "--control-fd=4"])).toBe(true);
 		expect(isMountInvocation(["-p", "hi"])).toBe(false);
 		expect(isMountInvocation([])).toBe(false);
+	});
+});
+
+describe("parseResumeIntent", () => {
+	it("recognizes -c / --continue as continue", () => {
+		expect(parseResumeIntent(["-c"])).toEqual({ kind: "continue" });
+		expect(parseResumeIntent(["--continue"])).toEqual({ kind: "continue" });
+	});
+	it("recognizes --resume=ID as a specific id", () => {
+		expect(parseResumeIntent(["--resume=abc123"])).toEqual({ kind: "id", id: "abc123" });
+	});
+	it("treats bare --resume and empty --resume= as the picker", () => {
+		expect(parseResumeIntent(["--resume"])).toEqual({ kind: "picker" });
+		expect(parseResumeIntent(["--resume="])).toEqual({ kind: "picker" });
+	});
+	it("returns undefined when no resume token is present", () => {
+		expect(parseResumeIntent([])).toBeUndefined();
+		expect(parseResumeIntent(["-p", "hi"])).toBeUndefined();
+		expect(parseResumeIntent(["--help"])).toBeUndefined();
+	});
+});
+
+describe("resumeSelfMount", () => {
+	it("fires only for a single bare resume token", () => {
+		expect(resumeSelfMount(["--continue"])).toEqual({ kind: "continue" });
+		expect(resumeSelfMount(["-c"])).toEqual({ kind: "continue" });
+		expect(resumeSelfMount(["--resume=abc"])).toEqual({ kind: "id", id: "abc" });
+		expect(resumeSelfMount(["--resume"])).toEqual({ kind: "picker" });
+	});
+	it("does not hijack combined invocations (one-shot / mount / extra flags)", () => {
+		expect(resumeSelfMount(["-p", "x", "--continue"])).toBeUndefined();
+		expect(resumeSelfMount(["--mount-mode", "--continue"])).toBeUndefined();
+		expect(resumeSelfMount(["--continue", "--raw"])).toBeUndefined();
+		expect(resumeSelfMount([])).toBeUndefined();
+	});
+});
+
+describe("resumeHaxArgs", () => {
+	it("maps continue/id to a hax flag and picker to none", () => {
+		expect(resumeHaxArgs({ kind: "continue" })).toEqual(["--continue"]);
+		expect(resumeHaxArgs({ kind: "id", id: "abc" })).toEqual(["--resume=abc"]);
+		expect(resumeHaxArgs({ kind: "picker" })).toEqual([]);
+	});
+});
+
+describe("stdinChunks (resume picker → REPL stdin handoff)", () => {
+	it("leaves stdin alive when the picker stops consuming, so the mounted REPL still gets input", async () => {
+		const s = new PassThrough();
+		const gen = stdinChunks(s as unknown as NodeJS.ReadStream);
+
+		s.write("a");
+		expect((await gen.next()).value).toBe("a");
+
+		// Picker selects/cancels → stop consuming. A default `for await` would
+		// destroy the stream here and EOF the REPL that mounts next.
+		await gen.return(undefined as never);
+		expect(s.destroyed).toBe(false);
+
+		// The next consumer (the REPL) still receives keystrokes.
+		s.write("b");
+		const got: string[] = [];
+		for await (const c of s) {
+			got.push(c.toString("utf8"));
+			break;
+		}
+		expect(got).toEqual(["b"]);
 	});
 });
 

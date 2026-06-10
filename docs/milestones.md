@@ -209,12 +209,11 @@ the protocol; native behavior unchanged when no tools are registered. **Met.**
 
 ## Backlog
 
-- **ezio REPL resume.** `ai-ezio --continue` is not an ezio flag: unrecognized
-  argv falls through to the raw-hax TUI passthrough (`packages/cli/src/cli.ts`),
-  which resumes *outside* the unified architecture — no MCP host, no compactor,
-  no M7/M8 surface — and silently masquerades as an ezio feature. Found during
-  the M11 manual smoke (2026-06-10). Wire a first-class `--continue` /
-  `--resume[=id]` into the standalone self-mount by forwarding the flag to the
-  headless hax spawn — the engine already restores and re-mirrors history, and
-  the M11 engine e2e proves post-compact resume — and make the remaining
-  passthrough path degrade loudly instead of silently.
+- ~~**ezio REPL resume.**~~ ✅ **Done (2026-06-10).** `ai-ezio --continue` /
+  `--resume=ID` are now first-class ezio flags routed into the standalone
+  self-mount (resume flag forwarded to the headless hax spawn, so the MCP host,
+  compactor, and M7/M8 surface stay active); bare `--resume` opens an
+  interactive ezio-rendered session picker fed by a new generic
+  `hax --list-sessions` JSON seam (no re-deriving hax's private session layout);
+  the remaining raw-hax passthrough now degrades loudly. Spec:
+  `docs/superpowers/specs/2026-06-10-ezio-repl-resume-design.md`.

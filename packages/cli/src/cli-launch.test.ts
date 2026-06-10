@@ -8,6 +8,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
 vi.mock("node:child_process", () => ({ spawn: spawnMock }));
 
+// Mock the self-mount runtime so resume-routing tests assert what main() forwards
+// without spinning up the real Session / MCP host.
+const { runStandaloneMock } = vi.hoisted(() => ({ runStandaloneMock: vi.fn() }));
+vi.mock("./repl/standalone-runtime.js", () => ({
+	runStandalone: runStandaloneMock,
+	runOneShot: vi.fn(),
+}));
+
+// Mock the resume picker so bare-`--resume` routing is asserted without real
+// stdin / a hax --list-sessions spawn.
+const { runResumePickerMock } = vi.hoisted(() => ({ runResumePickerMock: vi.fn() }));
+vi.mock("./repl/resume-picker.js", () => ({
+	runResumePicker: runResumePickerMock,
+	spawnListSessions: vi.fn(() => Promise.resolve("[]")),
+}));
+
 import { type InitDeps, parseInitArgs, runInit } from "./bootstrap/init.js";
 import type { Environment } from "./bootstrap/detect.js";
 import { isBootstrapped, writeMarker } from "./bootstrap/marker.js";
@@ -60,6 +76,82 @@ describe("ai-ezio --mount-mode launch layer", () => {
 		expect(spawnMock).toHaveBeenCalledTimes(1);
 		const call = spawnMock.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }];
 		expect(call[2].env.HAX_EXTRA_SKILLS_DIR).toContain("ai-ezio");
+	});
+});
+
+describe("ai-ezio resume routing", () => {
+	const savedBin = process.env.AI_EZIO_HAX_BIN;
+	let restoreTTY: () => void;
+
+	function setTTY(stdin: boolean, stdout: boolean): void {
+		const sIn = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+		const sOut = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+		Object.defineProperty(process.stdin, "isTTY", { value: stdin, configurable: true });
+		Object.defineProperty(process.stdout, "isTTY", { value: stdout, configurable: true });
+		restoreTTY = () => {
+			if (sIn) Object.defineProperty(process.stdin, "isTTY", sIn);
+			if (sOut) Object.defineProperty(process.stdout, "isTTY", sOut);
+		};
+	}
+
+	beforeEach(() => {
+		process.env.AI_EZIO_HAX_BIN = process.execPath;
+		spawnMock.mockReset();
+		runStandaloneMock.mockReset();
+		runStandaloneMock.mockResolvedValue(0);
+		runResumePickerMock.mockReset();
+		restoreTTY = () => {};
+	});
+
+	afterEach(() => {
+		restoreTTY();
+		if (savedBin === undefined) delete process.env.AI_EZIO_HAX_BIN;
+		else process.env.AI_EZIO_HAX_BIN = savedBin;
+	});
+
+	it("routes --continue to the self-mount with resumeArgs, not the passthrough", async () => {
+		setTTY(true, true);
+		const code = await main(["--continue"]);
+		expect(code).toBe(0);
+		expect(runStandaloneMock).toHaveBeenCalledWith({ resumeArgs: ["--continue"] });
+		expect(spawnMock).not.toHaveBeenCalled();
+	});
+
+	it("routes --resume=ID to the self-mount with the id flag", async () => {
+		setTTY(true, true);
+		await main(["--resume=abc123"]);
+		expect(runStandaloneMock).toHaveBeenCalledWith({ resumeArgs: ["--resume=abc123"] });
+		expect(spawnMock).not.toHaveBeenCalled();
+	});
+
+	it("opens the picker on bare --resume and resumes the chosen id", async () => {
+		setTTY(true, true);
+		runResumePickerMock.mockResolvedValue("chosen-id");
+		await main(["--resume"]);
+		expect(runResumePickerMock).toHaveBeenCalledTimes(1);
+		expect(runStandaloneMock).toHaveBeenCalledWith({ resumeArgs: ["--resume=chosen-id"] });
+	});
+
+	it("exits cleanly (0) when the picker is cancelled / empty", async () => {
+		setTTY(true, true);
+		runResumePickerMock.mockResolvedValue(undefined);
+		const code = await main(["--resume"]);
+		expect(code).toBe(0);
+		expect(runStandaloneMock).not.toHaveBeenCalled();
+	});
+
+	it("does not intercept resume when not a TTY (falls through to passthrough)", async () => {
+		setTTY(false, false);
+		const child = {
+			on: vi.fn((event: string, cb: (code: number | null, sig: null) => void) => {
+				if (event === "exit") setImmediate(() => cb(0, null));
+				return child;
+			}),
+		};
+		spawnMock.mockReturnValue(child);
+		await main(["--continue"]);
+		expect(runStandaloneMock).not.toHaveBeenCalled();
+		expect(spawnMock).toHaveBeenCalledTimes(1); // raw hax passthrough
 	});
 });
 
