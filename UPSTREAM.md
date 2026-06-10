@@ -94,29 +94,73 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
 > beyond these documented seams is a smell — push it into the TypeScript harness
 > instead.
 
-## Keeping up with hax updates
+## Sync strategy (hard constraint)
 
-hax is actively developed. Pull upstream periodically; rebase the small emitter
-branch onto new upstream `main` (the patch surface is tiny, so conflicts are
-confined to the emitter seam).
+Defined 2026-06-10 after the first full sync exercise. Every future alignment
+with upstream MUST follow these rules.
+
+### Cadence
+
+- **Weekly:** rebase `emitter` onto the latest upstream `master` once a week.
+  Drift never exceeds a handful of upstream commits, so each sync stays a
+  minutes-sized, mechanical job.
+- **Exceptionally, before major fork-touching work:** any ezio feature expected
+  to change the hax fork at a notable level (touching multiple files) starts
+  from a fresh sync, so new downstream commits are never authored against a
+  stale base.
+
+### Patch-surface budget (the conflict firewall)
+
+The downstream footprint is exactly the documented change surface above:
+wholly-owned files (`src/agent_observer.h`, `src/protocol/`, `tests/protocol/`)
+plus thin seam lines in shared files (`agent.c`, `agent_core.{c,h}`,
+`agent_dispatch.{c,h}`, `agent_env.c`, `slash.{c,h}`, `main.c`, the two meson
+files, `tests/test_slash.c`, `tests/test_agent_dispatch.c`). In the meson files
+we own only list entries (`sources`, `test_sources`, `e2e_sources`) and the
+small e2e foreach — never structural build logic.
+
+During a sync, a conflict in any file outside this list is a red flag: stop and
+redesign the downstream change toward the TS harness instead of widening the
+fork. The 2026-06-10 sync confirmed the model: all conflicts fell inside this
+list, and the only C-source conflicts were single seam lines.
+
+### Mechanics
 
 ```sh
-# inside the submodule
+# 1. Trial the rebase in a scratch worktree — the checked-out submodule stays
+#    untouched until the result is validated.
 git -C vendor/hax fetch hax-upstream
-git -C vendor/hax switch -c sync/hax-YYYY-MM-DD emitter
-git -C vendor/hax rebase hax-upstream/master    # resolve only the emitter seam
-git -C vendor/hax switch emitter
-git -C vendor/hax merge --ff-only sync/hax-YYYY-MM-DD
-git -C vendor/hax push origin emitter           # publish to our fork
+git -C vendor/hax worktree add /tmp/hax-sync -b sync/hax-YYYY-MM-DD emitter
+git -C /tmp/hax-sync rebase hax-upstream/master   # resolve only the seam files
 
-# build + test the patched hax, then bump the submodule pointer in ai-ezio
-meson setup vendor/hax/build && meson compile -C vendor/hax/build
-meson test  -C vendor/hax/build --print-errorlogs
-git add vendor/hax && git commit -m "chore: bump hax to <rev> (sync YYYY-MM-DD)"
+# 2. Validate (see the gate below), then publish. A rebase rewrites history:
+#    `merge --ff-only` can never fast-forward onto it — move the branch and
+#    force-push instead. Park the old tip on an archive branch FIRST: released
+#    ai-ezio tags pin old emitter commits, and the archive ref keeps
+#    `git submodule update --init` working for every published release.
+git -C vendor/hax branch archive/emitter-pre-sync-YYYY-MM-DD emitter
+git -C vendor/hax push origin archive/emitter-pre-sync-YYYY-MM-DD
+git -C vendor/hax worktree remove /tmp/hax-sync
+git -C vendor/hax branch -f emitter sync/hax-YYYY-MM-DD
+git -C vendor/hax switch emitter
+git -C vendor/hax push --force-with-lease origin emitter
+
+# 3. Bump the submodule pointer in ai-ezio (update the base-commit row in this
+#    file in the same commit).
+git add vendor/hax UPSTREAM.md
+git commit -m "chore: bump hax to <rev> (sync YYYY-MM-DD)"
 ```
 
 The submodule pointer must always reference a commit pushed to `origin`
 (`ai-creed/hax`); otherwise a fresh `git submodule update --init` cannot fetch it.
+
+### Validation gate (all green before the pointer bump)
+
+1. `meson test -C build --print-errorlogs` — full engine suite, including the
+   downstream `protocol/` tests.
+2. `pnpm -r build && pnpm -r test` — the TS harness against the new engine.
+3. `pnpm run smoke:cli-mount` — one real mounted turn end to end.
+4. `clang-format --dry-run --Werror` on every C file touched during resolution.
 
 If a major upstream change redesigns the event model itself (the seam the
 emitter rides), expect a real, but localized, port — re-anchor `emit.c` to the
@@ -128,9 +172,10 @@ new callback shape.
   not depend on the original author accepting them. Upstreaming the generic
   `agent_observer` seam is welcome if there's ever interest, but it is optional;
   the fork stands on its own.
-- **Periodically rebase the `emitter` branch onto the original repo's `master`**
-  (read-only sync source) so we keep getting upstream fixes — the patch surface
-  is tiny, so conflicts are confined to the emitter seam.
+- **Rebase the `emitter` branch onto the original repo's `master`** (read-only
+  sync source) on the cadence above — weekly, plus exceptionally before major
+  fork-touching work — so we keep getting upstream fixes. The patch surface is
+  tiny, so conflicts stay confined to the documented seams.
 - **ai-creed / ai-whisper-specific behavior** (protocol semantics, mount mode,
   adapter, skills UX): stays downstream in the TypeScript harness, never in hax.
 - Prefer small extension seams in hax over rewriting hax core files, so rebases
