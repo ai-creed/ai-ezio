@@ -23,9 +23,9 @@ jobs:
     name: build & test gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -47,13 +47,13 @@ jobs:
           - { os: ubuntu-24.04, target: linux-x64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
           token: ${{ secrets.SUBMODULE_TOKEN }} # read access to the private vendor/hax submodule (ai-creed/hax)
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
       - name: Install hax build deps (libcurl, jansson, meson, ninja, pkg-config)
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -71,7 +71,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter ai-ezio build
           node scripts/smoke-install.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hax-${{ matrix.target }}
           path: packaging/hax-${{ matrix.target }}/bin/hax
@@ -81,16 +81,16 @@ jobs:
     needs: build-binaries
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
           token: ${{ secrets.SUBMODULE_TOKEN }} # read access to the private vendor/hax submodule (ai-creed/hax)
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           registry-url: "https://registry.npmjs.org"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { path: /tmp/bins }
       - name: Stage all four binaries + completeness gate
         run: |

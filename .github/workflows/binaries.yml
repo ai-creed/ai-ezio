@@ -16,13 +16,13 @@ jobs:
           - { os: ubuntu-24.04, target: linux-x64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
           token: ${{ secrets.SUBMODULE_TOKEN }} # read access to the private vendor/hax submodule (ai-creed/hax)
-      - uses: pnpm/action-setup@v4   # NO `version:` — reads the root `packageManager: pnpm@9.12.0`; the v4 action errors ("Multiple versions of pnpm specified") if both are set and differ
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+      - uses: pnpm/action-setup@v6   # NO `version:` — reads the root `packageManager: pnpm@9.12.0`; the action errors ("Multiple versions of pnpm specified") if both are set and differ
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
       - name: Install hax build deps (libcurl, jansson, meson, ninja, pkg-config)
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
@@ -38,7 +38,7 @@ jobs:
       - run: pnpm install && pnpm --filter ai-ezio build
       - name: Single-package install smoke on this target
         run: node scripts/smoke-install.mjs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: hax-${{ matrix.target }}
           path: packaging/hax-${{ matrix.target }}/bin/hax
@@ -46,8 +46,8 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with: { path: /tmp/bins }
       - name: Place all four binaries, then assert completeness
         run: |
