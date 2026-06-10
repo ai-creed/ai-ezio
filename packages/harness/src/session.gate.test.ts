@@ -145,6 +145,44 @@ describe("Session turn gate (M11)", () => {
 		session.close();
 	}, 10000);
 
+	it("a cycle cannot start while a bare submit's turn is in flight (inverse race)", async () => {
+		// The review-found defect: submit() releasing at control-write let a
+		// cycle flip cycleInternal mid-turn and consume the REAL turn's reply
+		// as its summarize result. The gate must stay held until the turn's
+		// idle, so the cycle's first facet turn sees ITS OWN reply.
+		const tee: ProtocolEvent[] = [];
+		const session = await startSession({ tee });
+		await session.submit("REAL-USER"); // resolves at write; gate stays held
+		const legacyIdle = session.waitForEvent("idle"); // the bare caller's wait
+		const got = await session.runExclusive(async (s) => {
+			const sum = await s.submitAndWait("summarize");
+			const res = await s.compact(`SUMMARY:${sum.content}`, 2, 1);
+			return { sum, res };
+		});
+		expect(got.sum.content).toBe("ok summarize"); // NOT "ok REAL-USER"
+		await legacyIdle; // REAL's idle stayed public and fed the legacy waiter
+		const types = tee.map((e) => e.type);
+		// REAL's full turn settled before any cycle event
+		const firstIdle = types.indexOf("idle");
+		const cycleTurnAt = types.indexOf("user_turn_started", firstIdle);
+		expect(firstIdle).toBeGreaterThan(-1);
+		expect(cycleTurnAt).toBeGreaterThan(firstIdle);
+		session.close();
+	}, 10000);
+
+	it("an engine death mid-bare-turn releases the parked gate (no deadlock)", async () => {
+		const session = new Session();
+		await session.start({
+			binary: FAKE,
+			env: { ...process.env, FAKE_ENGINE_MODE: "fatal-on-submit" },
+		});
+		await session.submit("x"); // engine emits user_turn_started then exits — no idle
+		// the EOF flush released the parked gate: the next initiator must
+		// reject (engine gone), not hang on acquisition
+		await expect(session.submitAndWait("y")).rejects.toThrow(/engine exited/);
+		session.close();
+	}, 10000);
+
 	it("two runExclusive calls serialize", async () => {
 		const session = await startSession();
 		const log: string[] = [];

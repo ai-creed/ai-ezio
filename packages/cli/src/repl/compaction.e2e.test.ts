@@ -97,4 +97,34 @@ describe.runIf(Boolean(HAX))("compaction full cycle over the real engine", () =>
 		expect(chrome.some((c) => c.includes("✦ compacted"))).toBe(true);
 		session.close();
 	}, 20000);
+
+	it("a cycle started right after a bare submit never steals that turn (review repro)", async () => {
+		// The review-found race against the real engine: submit() releasing at
+		// control-write let runExclusive flip cycleInternal while the REAL
+		// turn streamed, so the facet consumed "You said: REAL-USER" as its
+		// summarize result. The gate now holds until the turn's idle.
+		const session = new Session({ compactTimeoutMs: 5000 });
+		await session.start({
+			binary: HAX,
+			env: { ...process.env, HAX_PROVIDER: "mock", HAX_NO_SESSION: "1" },
+		});
+		await session.submit("REAL-USER");
+		// the faithful legacy pairing: the bare submitter's own idle-waiter
+		// consumes its turn's events as they arrive (a consumer-less bare
+		// submit would leave them queued — pre-existing single-consumer
+		// semantics, unrelated to the gate)
+		const legacyIdle = session.waitForEvent("idle");
+		const got = await session.runExclusive(async (x) => {
+			const sum = await x.submitAndWait("SUMMARIZE-INSTRUCTION");
+			const res = await x.compact(`SUMMARY:${sum.content}`, 2, 1);
+			return { sum, res };
+		});
+		expect(got.sum.content).toContain("SUMMARIZE-INSTRUCTION");
+		expect(got.sum.content).not.toContain("REAL-USER");
+		await legacyIdle; // resolved on REAL's own idle, pre-cycle
+		// post-cycle the session is healthy and the REAL turn survived history
+		const after = await session.submitAndWait("MARKER-AFTER");
+		expect(after.content).toContain("MARKER-AFTER");
+		session.close();
+	}, 20000);
 });

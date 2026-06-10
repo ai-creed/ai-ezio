@@ -118,11 +118,21 @@ export class Session {
 	 * wire belong to abandoned controls, never to a newer one. */
 	private staleCompactsPending = 0;
 	private swallowNextIdle = false;
+	/** Gate releases parked until the next REAL idle (non-consuming, fired at
+	 * the delivery layer). A bare submit() must hold the gate until its turn
+	 * settles — releasing at control-write would let a compaction cycle start
+	 * mid-turn, flip cycleInternal, and steal the in-flight turn's events as
+	 * the cycle's own (the facet would consume the user's reply as the
+	 * "summary" and the user's bare idle-waiter would starve). */
+	private readonly idleHooks: Array<() => void> = [];
 
 	private deliver(event: ProtocolEvent | null): void {
 		if (event && this.options.onEvent) this.options.onEvent(event);
 		if (event === null) {
-			// fatal EOF: flush BOTH waiter sets
+			// fatal EOF: release parked gate holds (a dead engine emits no
+			// idle — without this, every later turn initiator would deadlock),
+			// then flush BOTH waiter sets.
+			while (this.idleHooks.length) this.idleHooks.shift()!();
 			while (this.exclusiveWaiters.length) this.exclusiveWaiters.shift()!(null);
 			const w = this.waiters.shift();
 			if (w) w(null);
@@ -142,6 +152,12 @@ export class Session {
 		if (event.type === "idle" && this.swallowNextIdle) {
 			this.swallowNextIdle = false;
 			return;
+		}
+		// A REAL idle (post-swallow) settles any bare submit holding the gate.
+		// Non-consuming: the event still routes below; hooks can never be
+		// pending during a cycle (the held gate is what excludes cycles).
+		if (event.type === "idle" && this.idleHooks.length) {
+			for (const h of this.idleHooks.splice(0)) h();
 		}
 		if (this.cycleInternal) {
 			const w = this.exclusiveWaiters.shift();
@@ -219,6 +235,10 @@ export class Session {
 				for await (const event of transport.events()) this.deliver(event);
 			} finally {
 				this.ended = true;
+				// Release parked gate holds FIRST — they are not waiters, so the
+				// drain loop below would never reach them (a dead engine emits
+				// no idle; without this, later turn initiators deadlock).
+				while (this.idleHooks.length) this.idleHooks.shift()!();
 				while (this.waiters.length || this.exclusiveWaiters.length) this.deliver(null);
 			}
 		})();
@@ -239,15 +259,22 @@ export class Session {
 
 	/** Send a user turn; resolves once the control is actually written —
 	 * strictly ordered after any in-flight compaction cycle or queued turn
-	 * initiator (M11 turn gate). Still fire-and-forget for the *turn*: pair
-	 * with waitForEvent/interrupt, or prefer submitAndWait. */
+	 * initiator (M11 turn gate). Still fire-and-forget for the *turn* (pair
+	 * with waitForEvent/interrupt, or prefer submitAndWait) — but the GATE
+	 * stays held until the turn's idle (or engine EOF), so a compaction
+	 * cycle can never start mid-turn and steal this turn's events into its
+	 * exclusive stream. */
 	async submit(text: string): Promise<void> {
 		const release = await this.gate.acquire();
 		try {
 			this.control({ type: "submit", text });
-		} finally {
+		} catch (e) {
 			release();
+			throw e;
 		}
+		// Park the release on the turn's settling idle (fired by deliver(),
+		// non-consuming; EOF flushes it). The caller resolves now.
+		this.idleHooks.push(release);
 	}
 
 	/**
