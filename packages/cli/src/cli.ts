@@ -1,10 +1,18 @@
 /**
- * `ai-ezio` CLI launcher.
+ * `ai-ezio` CLI launcher — the unified entry point.
  *
- * M1 scope: a passthrough launcher. Interactive REPL and `-p` one-shot delegate
- * straight to the embedded hax engine (no protocol yet — that is M3/M4). The one
- * ai-ezio-native command is `--version --json`, which reports the ezio version
- * and the pinned hax base commit.
+ * Routes each invocation to the right runtime:
+ * - native subcommands `doctor`, `skill list`/`skill dirs`, and `init` (first-run
+ *   setup), handled in TS before any hax spawn;
+ * - `--version --json` → ezio version + pinned hax base commit;
+ * - a bare interactive launch self-mounts (`runStandalone`): hax runs headless and
+ *   ezio owns the terminal, with the protocol surface and the generic MCP host;
+ * - `-p` one-shot (`runOneShot`) runs a single prompt through the same unified
+ *   Session + MCP host;
+ * - `--mount-mode` (or inherited protocol fds) forwards the fds for machine-driven
+ *   mounted use.
+ * Unrecognized argv falls through to raw-hax TUI passthrough (see backlog note in
+ * `docs/milestones.md`).
  */
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, statSync } from "node:fs";

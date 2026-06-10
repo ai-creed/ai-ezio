@@ -10,7 +10,9 @@ ai-ezio is a **hax-derived, workflow-native coding agent**. It is a **hybrid**:
   submodule under `vendor/hax`. This is the streaming / provider / tool core.
   **Do not reimplement it in TypeScript.**
 - a **TypeScript harness** — everything in `packages/`. The protocol client,
-  mount mode, ai-whisper adapter, skills UX, and the `ai-ezio` CLI.
+  mount mode, generic MCP host, mounted-REPL surface, session recorder, skills
+  UX, and the `ai-ezio` CLI. (The ai-whisper adapter is **not** here — it was
+  retired at M5 and lives downstream in the ai-whisper repo.)
 
 The dividing rule: **engine work is C and lives in hax; product work is TS and
 lives in `packages/`.** When in doubt, push behavior into the TS harness; keep
@@ -28,18 +30,27 @@ ai-ezio/
   docs/
     architecture.md    the hybrid design (read this first)
     protocol.md        JSONL event/control schema + fd transport
-    milestones.md      build plan (M1..M6)
+    milestones.md      build plan (M1..M11)
     superpowers/specs/ canonical design specs
   vendor/hax/          C engine (git submodule; emitter patch on `emitter` branch)
-  packages/            TypeScript harness (added at Milestone 1)
+  packages/            TypeScript harness
     protocol/          JSONL schema + codec + transport seam
-    harness/           spawn hax, own session/turn lifecycle, expose protocol
-    adapter/           ai-whisper adapter (handoff / handback)
+    harness/           spawn hax, own session/turn lifecycle, compaction, expose protocol
+    mcp-host/          generic stdio MCP host (spawn/connect servers, policy, namespacing)
+    surface/           mounted-REPL rendering (banner, markdown, tool calls, usage)
+    session-recorder/  transcript capture
     cli/               `ai-ezio` binary
 ```
 
-> Current state: high-level docs only. `packages/` and the submodule are wired
-> up starting at Milestone 1 — see `docs/milestones.md`.
+> The ai-whisper adapter is **not** a package here. It was retired at M5 and now
+> lives in the ai-whisper repo as `packages/adapter-ai-ezio` (it imports
+> `@ai-ezio/harness`). Workflow glue lives downstream; the harness stays
+> workflow-agnostic.
+
+> Current state: shipped and published. `packages/` and the `vendor/hax`
+> submodule are fully wired; ai-ezio is on npm as `ai-ezio` /
+> `@ai-creed/ai-ezio` (`0.2.0-beta.0`), built through M11 (context compaction;
+> generic MCP host + unified terminal at M9) — see `docs/milestones.md`.
 
 ## Working agreements for agents
 
