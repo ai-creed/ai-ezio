@@ -35,8 +35,9 @@ export interface KeyResult {
 	buffer: LineBuffer;
 	/** Set when Enter completed a line (the submitted text, possibly empty). */
 	submit?: string;
-	/** Out-of-band signals: Ctrl-C interrupts, Ctrl-D exits. */
-	signal?: "interrupt" | "eof";
+	/** Out-of-band signals: Ctrl-C interrupts, Ctrl-D exits, Ctrl-T opens the
+	 * transcript view. */
+	signal?: "interrupt" | "eof" | "transcript";
 	/** Bytes to echo to the terminal (printable char or erase sequence). */
 	echo?: string;
 }
@@ -44,6 +45,7 @@ export interface KeyResult {
 const ESC = "\x1b";
 const CTRL_C = "\x03";
 const CTRL_D = "\x04";
+const CTRL_T = "\x14";
 const BACKSPACE = "\x7f";
 const BACKSPACE_ALT = "\x08";
 
@@ -132,6 +134,7 @@ export function feedKey(buffer: LineBuffer, ch: string): KeyResult {
 	// 3) Ordinary line editing.
 	if (ch === CTRL_C) return { buffer, signal: "interrupt" };
 	if (ch === CTRL_D) return { buffer, signal: "eof" };
+	if (ch === CTRL_T) return { buffer, signal: "transcript" };
 	if (ch === "\r" || ch === "\n") {
 		return { buffer: newLineBuffer(), submit: buffer.text, echo: "\r\n" };
 	}

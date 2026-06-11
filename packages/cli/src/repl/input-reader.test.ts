@@ -21,6 +21,29 @@ describe("line buffer", () => {
 	});
 });
 
+describe("Ctrl+T transcript signal", () => {
+	it("Ctrl+T (0x14) signals transcript", () => {
+		expect(feedKey(newLineBuffer(), "\x14").signal).toBe("transcript");
+	});
+
+	it("Ctrl+T does not submit and preserves the in-progress buffer", () => {
+		let b = newLineBuffer();
+		for (const ch of "draft") b = feedKey(b, ch).buffer;
+		const r = feedKey(b, "\x14");
+		expect(r.signal).toBe("transcript");
+		expect(r.submit).toBeUndefined();
+		expect(r.buffer.text).toBe("draft");
+	});
+
+	it("Ctrl+T inside a bracketed paste is dropped, not a signal", () => {
+		let b = newLineBuffer();
+		for (const ch of "\x1b[200~") b = feedKey(b, ch).buffer; // paste-start
+		const r = feedKey(b, "\x14");
+		expect(r.signal).toBeUndefined();
+		expect(r.buffer.text).toBe("");
+	});
+});
+
 /** Feed every code point of `s` through feedKey, returning the final buffer. */
 function feedAll(b: ReturnType<typeof newLineBuffer>, s: string) {
 	for (const ch of s) b = feedKey(b, ch).buffer;
