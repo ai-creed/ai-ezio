@@ -148,6 +148,35 @@ or paints the screen. ezio (TS) **always owns the terminal** in both run modes:
 "Headless" means terminal-less and persistent/interactive (`--mount-mode`), **not**
 one-shot — the session stays alive across turns and keeps conversation context.
 
+### Transcript view (Ctrl+T parity)
+
+ezio's standalone REPL reproduces hax's interactive Ctrl+T transcript view without
+owning the engine's TTY. Because hax is headless, its own raw-mode Ctrl+T binding
+is unreachable; instead the harness sets `HAX_TRANSCRIPT` at spawn to a
+caller-minted, pre-spawn path (`<ezioStateDir>/transcripts/<repoKey>/<uuid>.txt`)
+and re-exposes it as `Session.transcriptPath`. hax mirrors its live
+model-perspective transcript there — system prompt, advertised tools, and every
+item (user / assistant / tool-call args / tool-result / reasoning / turn
+boundaries), plain text, no ANSI. Ctrl+T (intercepted in the line reader) and the
+`/transcript` slash command page that file via `$PAGER` (falling back to an inline
+dump when there is no TTY or pager).
+
+- **No hax C change.** The mirror is a pure env opt-in; hax owns the rendering, so
+  ezio never re-implements the view (Option B1 of the design spec).
+- **Pre-spawn filename.** The id is minted before spawn because hax opens the
+  mirror (`agent.c` `transcript_log_open`) *before* it emits `ready`, so the
+  protocol `ready.sessionId` is not available in time.
+- **Lifecycle fidelity (verified against `vendor/hax`).** `/new` truncates the
+  mirror (`transcript_log_reset`); `--continue`/`--resume` rebuild it with the
+  replayed history (`agent.c` reset + `transcript_log_append(items, n_items)`); and
+  `/compact` resets **and re-seeds** it with the full post-compact history
+  (`agent_compact` → `transcript_log_reset` + `flush_logs`), so the file reflects
+  the compacted state rather than retaining a stale tail.
+
+The same `Session.transcriptPath` seam lets ai-whisper's mounted mode add its own
+Ctrl+T binding (a downstream follow-up); the harness is the single source for the
+path in both run modes.
+
 ## Data flow (mounted turn)
 
 ```text
