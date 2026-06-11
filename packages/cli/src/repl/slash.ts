@@ -33,6 +33,9 @@ export interface SlashContext {
 	skills(): { name: string; source: string; description: string | null }[];
 	/** Copy text to the OS clipboard; rejects when no clipboard tool exists. */
 	clipboard(text: string): Promise<void>;
+	/** Optional transcript view (Ctrl+T equivalent): pages hax's HAX_TRANSCRIPT
+	 * mirror. Wired by the standalone runtime; undefined when unavailable. */
+	showTranscript?: () => Promise<void>;
 	/** Optional compaction trigger (M11; wired by the standalone runtime).
 	 * Success/failure chrome comes from the Compactor's own onNote line. */
 	compactor?: {
@@ -155,6 +158,17 @@ function builtinCommands(listCommands: () => { name: string; summary: string }[]
 			run: (ctx) => {
 				const formatted = formatUsage(ctx.lastUsage());
 				ctx.write(formatted ? `${formatted}\n` : "no usage yet\n");
+			},
+		},
+		{
+			name: "transcript",
+			summary: "view the model-perspective transcript (same as Ctrl+T)",
+			run: async (ctx) => {
+				if (!ctx.showTranscript) {
+					ctx.write("transcript unavailable\n");
+					return;
+				}
+				await ctx.showTranscript();
 			},
 		},
 		{

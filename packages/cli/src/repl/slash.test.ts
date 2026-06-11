@@ -286,6 +286,23 @@ describe("SlashController.handle", () => {
 	});
 });
 
+describe("/transcript", () => {
+	it("invokes the injected transcript view and returns handled", async () => {
+		let shown = 0;
+		const { ctx } = fakeCtx({ showTranscript: async () => void shown++ });
+		const c = new SlashController(ctx);
+		expect(await c.handle("/transcript")).toEqual({ action: "handled" });
+		expect(shown).toBe(1);
+	});
+
+	it("reports unavailable when no view is wired (handled, never throws)", async () => {
+		const { ctx, out } = fakeCtx();
+		const c = new SlashController(ctx);
+		expect(await c.handle("/transcript")).toEqual({ action: "handled" });
+		expect(out()).toContain("transcript unavailable");
+	});
+});
+
 describe("/compact (M11)", () => {
 	it("runs the injected compactor", async () => {
 		const calls: string[] = [];
