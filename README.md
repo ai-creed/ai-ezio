@@ -16,7 +16,7 @@ ai-ezio  = hax-derived workflow-native coding agent + MCP host (C engine + TypeS
 ```
 
 > **Status:** public beta — published to npm as `ai-ezio` (`@ai-creed/ai-ezio`,
-> `0.2.0-beta.0`). Shipped through M11 (context compaction; generic MCP host +
+> `0.2.0-beta.1`). Shipped through M11 (context compaction; generic MCP host +
 > unified terminal landed at M9). See `docs/milestones.md` for the build plan.
 
 ## Lineage

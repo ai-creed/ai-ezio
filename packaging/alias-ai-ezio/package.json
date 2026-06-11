@@ -1,6 +1,6 @@
 {
 	"name": "ai-ezio",
-	"version": "0.2.0-beta.0",
+	"version": "0.2.0-beta.1",
 	"description": "Unscoped convenience alias for @ai-creed/ai-ezio — forwards to the scoped CLI.",
 	"license": "MIT",
 	"type": "module",
@@ -12,6 +12,6 @@
 		"bin.mjs"
 	],
 	"dependencies": {
-		"@ai-creed/ai-ezio": "0.2.0-beta.0"
+		"@ai-creed/ai-ezio": "0.2.0-beta.1"
 	}
 }
