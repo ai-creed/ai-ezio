@@ -15,6 +15,10 @@ export interface SpawnHaxOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Extra args appended after the protocol flags. */
 	args?: string[];
+	/** When set, exported to the child as `HAX_TRANSCRIPT` so hax mirrors the
+	 * live transcript (the Ctrl+T content, color off) to this file. The caller
+	 * owns the path; the harness only wires the env contract. */
+	transcriptPath?: string;
 }
 
 export interface SpawnedHax {
@@ -32,10 +36,15 @@ export function haxSpawnArgs(extra: string[] = []): string[] {
 }
 
 /** The child env for a mounted hax spawn: the base env plus
- * `HAX_EXTRA_SKILLS_DIR` set to the ai-ezio-global skills dir (engine-visibility
- * bridge). Pure, for testability. */
-export function haxSpawnEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-	return { ...base, HAX_EXTRA_SKILLS_DIR: aiEzioGlobalSkillsDir(base) };
+ * `HAX_EXTRA_SKILLS_DIR` (engine-visibility bridge) and, when a `transcriptPath`
+ * is given, `HAX_TRANSCRIPT` (the transcript-mirror seam). Pure, for testability. */
+export function haxSpawnEnv(
+	base: NodeJS.ProcessEnv = process.env,
+	transcriptPath?: string,
+): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = { ...base, HAX_EXTRA_SKILLS_DIR: aiEzioGlobalSkillsDir(base) };
+	if (transcriptPath) env.HAX_TRANSCRIPT = transcriptPath;
+	return env;
 }
 
 export function spawnHax(options: SpawnHaxOptions = {}): SpawnedHax {
@@ -43,7 +52,7 @@ export function spawnHax(options: SpawnHaxOptions = {}): SpawnedHax {
 	const child = spawn(binary, haxSpawnArgs(options.args), {
 		// 0,1,2 ignored; 3 = events (hax writes), 4 = controls (hax reads).
 		stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
-		env: haxSpawnEnv(options.env ?? process.env),
+		env: haxSpawnEnv(options.env ?? process.env, options.transcriptPath),
 	});
 	const eventStream = child.stdio[3] as Readable;
 	const controlStream = child.stdio[4] as Writable;
