@@ -26,6 +26,9 @@ export interface StandaloneReplDeps {
 	/** Draw a fresh input prompt. Used after a locally-handled command, where no
 	 * `idle` event follows to draw one. */
 	renderPrompt: () => void;
+	/** Optional transcript view (Ctrl+T): pages hax's HAX_TRANSCRIPT mirror.
+	 * Local-only — no engine round-trip. */
+	showTranscript?: () => Promise<void>;
 	/** Optional session recorder — told the authoritative submit text before each
 	 * turn and closed on REPL exit so the final turn is captured. */
 	recorder?: Pick<SessionRecorder, "noteSubmit" | "close">;
@@ -47,6 +50,14 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 		if (r.signal === "eof") break;
 		if (r.signal === "interrupt") {
 			deps.session.interrupt();
+			continue;
+		}
+		if (r.signal === "transcript") {
+			await deps.showTranscript?.();
+			// The view cleared/scrolled the screen; redraw the input line. Re-echo
+			// any in-progress text so a draft typed before Ctrl+T is not lost.
+			deps.renderPrompt();
+			if (buffer.text) deps.write(buffer.text);
 			continue;
 		}
 		if (r.submit !== undefined) {

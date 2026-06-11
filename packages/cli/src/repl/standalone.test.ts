@@ -169,6 +169,35 @@ describe("runStandaloneRepl", () => {
 		expect(surface.echoed).toEqual([]);
 	});
 
+	it("Ctrl+T shows the transcript, never submits, and redraws the prompt", async () => {
+		const calls: string[] = [];
+		async function* keys() {
+			for (const k of ["\x14", "\x04"]) yield k; // Ctrl+T, then Ctrl-D
+		}
+		const session = {
+			submitAndWait: async () => {
+				calls.push("submit");
+				return { turnId: "t", content: "" };
+			},
+			interrupt: () => calls.push("interrupt"),
+			close: () => {},
+		};
+		let shown = 0;
+		const surface = fakeSurface();
+		await runStandaloneRepl({
+			keys: keys(),
+			session: session as never,
+			host: { handleEvent: async () => {}, stop: async () => {} } as never,
+			write: () => {},
+			slash: fakeSlash(),
+			showTranscript: async () => void shown++,
+			...surface,
+		});
+		expect(shown).toBe(1);
+		expect(calls).toEqual([]); // no submit, no interrupt
+		expect(surface.prompts()).toBe(1); // prompt redrawn after the view closes
+	});
+
 	it("runs the auto-compact check once after each settled turn (M11)", async () => {
 		const order: string[] = [];
 		async function* keys() {
