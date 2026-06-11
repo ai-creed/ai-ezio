@@ -5,7 +5,10 @@
  * always headless; ezio (TS) owns the terminal — applied to the human REPL.
  */
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { loadConfig, Session } from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
@@ -21,6 +24,11 @@ import { discoverSkills, nodeSkillFs, type SkillEnv } from "../skills.js";
 import { makeClipboard } from "./clipboard.js";
 import { SlashController, type SlashContext } from "./slash.js";
 import { runStandaloneRepl } from "./standalone.js";
+import {
+	resolvePager,
+	showTranscript as renderTranscript,
+	transcriptFilePath,
+} from "./transcript-view.js";
 
 export interface OneShotOptions {
 	/** Overrides for Session.start (binary/env/args) — for tests. */
@@ -112,6 +120,35 @@ export function resumeNotice(resumeArgs?: string[]): string | undefined {
 	return `\x1b[2m─ resumed ${what} · history loaded as context ─\x1b[0m\n`;
 }
 
+/**
+ * Mint the pre-spawn transcript path, ensure its directory exists, and start the
+ * session with it — all BEFORE any `ready`-dependent work. The filename is a
+ * caller-minted id, NOT the protocol `ready.sessionId` (which does not exist
+ * until after spawn, while hax opens `HAX_TRANSCRIPT` before emitting `ready`).
+ * Returns the finalized path. The `mintId`/`ensureDir` seams keep the ordering
+ * unit-testable; production defaults are `randomUUID` + `mkdirSync`.
+ */
+export async function startWithTranscript(
+	session: Pick<Session, "start">,
+	opts: {
+		stateDir: string;
+		repoKey: string;
+		resumeArgs?: string[];
+		mintId?: () => string;
+		ensureDir?: (dir: string) => void;
+	},
+): Promise<string> {
+	const id = (opts.mintId ?? randomUUID)();
+	const transcriptPath = transcriptFilePath(opts.stateDir, opts.repoKey, id);
+	const ensureDir = opts.ensureDir ?? ((dir: string) => void mkdirSync(dir, { recursive: true }));
+	ensureDir(dirname(transcriptPath));
+	await session.start({
+		...(opts.resumeArgs?.length ? { args: opts.resumeArgs } : {}),
+		transcriptPath,
+	});
+	return transcriptPath;
+}
+
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
 	const cwd = process.cwd();
@@ -155,7 +192,10 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	try {
 		// resumeArgs (e.g. ["--continue"]/["--resume=ID"]) make the headless hax
 		// load + replay prior history before the first prompt; absent → fresh.
-		await session.start(opts.resumeArgs?.length ? { args: opts.resumeArgs } : {});
+		// Pre-spawn: mint the HAX_TRANSCRIPT path + create its dir BEFORE start, as
+		// hax opens the mirror before emitting `ready` (no protocol session id yet).
+		// The path is re-exposed as session.transcriptPath for the view closure.
+		await startWithTranscript(session, { stateDir, repoKey, resumeArgs: opts.resumeArgs });
 	} catch (error) {
 		process.stderr.write(`ai-ezio: ${(error as Error).message}\n`);
 		return 1;
@@ -174,6 +214,26 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		xdgConfigHome: process.env.XDG_CONFIG_HOME,
 	};
 	const skillFs = nodeSkillFs();
+	// The Ctrl+T / `/transcript` view: page the HAX_TRANSCRIPT mirror, suspending
+	// raw mode around the pager. session.transcriptPath is the harness-owned path.
+	const showTranscript = () =>
+		renderTranscript({
+			path: session.transcriptPath,
+			readText: (p) => (existsSync(p) ? readFileSync(p, "utf8") : undefined),
+			interactive: Boolean(process.stdout.isTTY),
+			spawnPager: (file) =>
+				new Promise<void>((resolve, reject) => {
+					// Default keeps `cmd` a definite string under noUncheckedIndexedAccess;
+					// resolvePager never returns empty, so the fallback is unreachable.
+					const [cmd = "less", ...rest] = resolvePager(process.env).split(/\s+/);
+					const child = spawn(cmd, [...rest, file], { stdio: "inherit" });
+					child.on("error", reject);
+					child.on("exit", () => resolve());
+				}),
+			suspendRaw: () => void process.stdin.setRawMode?.(false),
+			restoreRaw: () => void process.stdin.setRawMode?.(true),
+			write: (s) => void process.stdout.write(s),
+		});
 	const slashCtx: SlashContext = {
 		write: (s) => void process.stdout.write(s),
 		session,
@@ -188,6 +248,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 				description: s.description,
 			})),
 		clipboard: makeClipboard(process.platform, spawn),
+		showTranscript,
 	};
 	const slash = new SlashController(slashCtx);
 
@@ -217,6 +278,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 			recorder,
 			echoSubmittedInput: renderer.echoSubmittedInput,
 			renderPrompt: renderer.renderPrompt,
+			showTranscript,
 		});
 	} finally {
 		// Pop the kitty flags and restore the terminal's paste mode.
