@@ -97,6 +97,21 @@ export interface StandaloneOptions {
 	resumeArgs?: string[];
 }
 
+/**
+ * The one-line "resumed" notice ezio prints on a resume launch. The engine's own
+ * startup replay is a TTY-only no-op under the self-mount (hax's stdout is
+ * ignored), so without this the user gets no signal that history was loaded.
+ * Count-free: the "N earlier messages" count lives only inside hax and surfacing
+ * it would need a new engine seam we deliberately avoid. Returns undefined for a
+ * fresh (non-resume) launch. Pure.
+ */
+export function resumeNotice(resumeArgs?: string[]): string | undefined {
+	if (!resumeArgs?.length) return undefined;
+	const id = resumeArgs.map((a) => /^--resume=(.+)$/.exec(a)?.[1]).find(Boolean);
+	const what = id ? `session ${id.slice(0, 8)}` : "most recent session";
+	return `\x1b[2m─ resumed ${what} · history loaded as context ─\x1b[0m\n`;
+}
+
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
 	const cwd = process.cwd();
@@ -175,6 +190,11 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		clipboard: makeClipboard(process.platform, spawn),
 	};
 	const slash = new SlashController(slashCtx);
+
+	// On a resume launch, the engine replay is a TTY-only no-op under the
+	// self-mount, so surface a one-line notice (after the banner has rendered).
+	const notice = resumeNotice(opts.resumeArgs);
+	if (notice) process.stdout.write(notice);
 
 	const stdin = process.stdin;
 	stdin.setRawMode?.(true);

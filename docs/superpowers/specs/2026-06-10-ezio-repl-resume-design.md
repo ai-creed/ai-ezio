@@ -29,16 +29,26 @@ Read of `vendor/hax/src/main.c`, `agent.c`, `session.c`:
    `main.c` resolves the session file *before* provider construction
    (`--continue` = newest in this cwd; `--resume=ID` = id/path match;
    bare `--resume` = interactive picker). `agent.c:878-890` loads that history
-   into the conversation before anything else touches it, and `agent.c:909`
-   `replay_user_turn()` replays the last user turn through the live pipeline.
+   into the conversation before anything else touches it (the model gets the full
+   prior context on the next turn).
 
-2. **`--mount-mode` does NOT suppress resume.** It only gates *human chrome*: the
-   startup banner (`agent.c:893`) and the "resume with: hax --resume=ID" hint line
-   (`agent.c:1401`). The history load + replay run regardless of mount mode. So a
-   headless/mounted hax spawned with `--continue` or `--resume=ID` **already
-   loads + replays prior history over the protocol** — exactly what ezio needs.
+2. **`--mount-mode` does NOT suppress the history load.** It only gates *human
+   chrome*: the startup banner (`agent.c:893`) and the "resume with:
+   hax --resume=ID" hint line (`agent.c:1401`). The history **load** runs
+   regardless of mount mode, so a headless/mounted hax spawned with `--continue`
+   or `--resume=ID` resumes the conversation as context — exactly what ezio needs.
    (The `main.c:242` comment "suppresses banner/usage/resume" means the resume
-   *hint line*, not resume functionality.)
+   *hint line*, not the load.)
+
+   **Caveat — the startup *replay* is TTY-only.** `agent.c:909`
+   `replay_user_turn()` only *renders* the loaded items (no model call, no history
+   mutation) and is guarded by `if (!isatty(STDIN) || !isatty(STDOUT)) return;`
+   (`agent.c:737`). Under the self-mount, hax's stdout is `ignore` (not a tty), so
+   the replay is a **no-op** — it emits no protocol events (the emitter isn't even
+   wired until `agent.c:962`, after the call). So ezio's surface/recorder never see
+   the resumed turn: history loads silently. ezio prints its own one-line "resumed"
+   notice for feedback (P1). Upside: zero replay events means **no double-capture**
+   of resumed history into the recorder/compactor.
 
 3. **The `/resume` slash command is the wrong lever.** It is a full-screen
    interactive TUI picker (`session_picker_run`, raw mode). Under the unified
@@ -144,8 +154,22 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 
 `Session.start({ args })` already appends extra args after the protocol flags
 (`spawnHax` → `haxSpawnArgs`), so this is a one-line wiring change. The recorder
-and compactor attach via the existing `onEvent`; resume's replay events flow
-through unchanged.
+and compactor attach via the existing `onEvent`. (Resume emits **no** replay
+events — see the Findings caveat — so nothing extra flows through `onEvent` on
+resume; the loaded history is silent context for the next turn.)
+
+**Resumed notice (P1).** Because the engine replay is a TTY-only no-op under the
+self-mount, ezio prints its own one-line notice when `resumeArgs` is present, so
+the user gets feedback that history was loaded:
+
+- `--continue` → `─ resumed most recent session · history loaded as context ─`
+- `--resume=ID` → `─ resumed session <id-prefix> · history loaded as context ─`
+
+It is count-free: the precise "N earlier messages" count lives only inside hax and
+surfacing it would need a new engine seam, which this design deliberately avoids
+(no hax change for P1). `runStandalone` writes the notice (a pure
+`resumeNotice(resumeArgs)` helper formats it) after `start()`/`host.start` and
+before the REPL loop, so it lands just under the banner.
 
 ### Loud passthrough (backlog ask)
 
@@ -161,10 +185,11 @@ informational flags (`--help`, `-h`, `--version`) so common usage stays clean.
   ezio surfaces the engine's stderr/exit. The self-mount start rejects cleanly.
 - **Non-TTY `--continue`/`--resume=ID`** (piped/CI): falls through to existing
   routing (unchanged); the ezio self-mount requires a terminal.
-- **Resume replay rendering:** hax replays the last user turn at startup; in mount
-  mode those events reach ezio's renderer (good UX — you see where you left off)
-  *and* the recorder. Verify the replayed turn is not double-captured to cortex;
-  if it is, add a replay-suppression note (follow-up, not a Phase A blocker).
+- **Resume replay:** the engine replay is a TTY-only no-op under the self-mount
+  (Findings caveat), so the resumed turn is **not** re-displayed by hax and emits
+  no protocol events. ezio shows its own count-free "resumed" notice instead. A
+  bonus: with no replay events, resumed history is **not** double-captured into
+  the recorder/compactor.
 - **Combined flags** (`-p … --continue`, `--mount-mode … --continue`): untouched;
   `resumeSelfMount` returns undefined for multi-token argv.
 
@@ -203,10 +228,10 @@ ezio must learn the cwd's session list. Two options:
   hacks; prefer the mechanism the product keeps" decision warns against
   (`mem-2026-06-04-…`).
 
-- **B2 — a minimal `hax --list-sessions --json` seam (recommended).** A tiny,
+- **B2 — a minimal `hax --list-sessions` seam (recommended).** A tiny,
   generic, non-interactive subcommand that reuses the existing `session_list()` +
-  `session_first_prompt()`, prints `[{id, path, mtime, provider, model,
-  firstPrompt}]` to stdout, and exits 0. No protocol fds, no TUI. ezio shells out,
+  `session_first_prompt()`, prints `[{id, mtime, mtimeNsec, firstPrompt}]` to
+  stdout as JSON, and exits 0. No protocol fds, no TUI. ezio shells out,
   parses the JSON, renders **its own** picker, then self-mounts with
   `--resume=ID`. hax stays the single source of truth for its own storage format;
   ezio never replicates the hash or parses JSONL. This honors both standing
@@ -219,8 +244,8 @@ ezio must learn the cwd's session list. Two options:
 
 ### Picker UX (sketch, assuming B2)
 
-- `ai-ezio --resume` (bare, TTY) → `hax --list-sessions --json` → render a
-  numbered/arrow-selectable list: `#  age · model · "first prompt…"`.
+- `ai-ezio --resume` (bare, TTY) → `hax --list-sessions` → render a
+  numbered/arrow-selectable list: `#  age · "first prompt…"`.
 - Reuse ezio's existing raw-mode input plumbing for selection (arrow keys + Enter,
   or a typed number); Esc/Ctrl-C cancels with exit 0.
 - On select → `runStandalone({ resumeArgs: ["--resume=<id>"] })` (Phase A path).
@@ -242,14 +267,17 @@ a pick, behaviorally identical to the no-picker `--resume=ID` path).
 ### hax seam (B2) — minimal change
 
 `--list-sessions` is a new `getopt_long` option in `main.c` that: gets cwd, calls
-`session_list()`, fills `first_prompt` per row, prints a JSON array (jansson), and
-returns — before any provider/curl init. `--json` toggles machine output (a plain
-human table is the default, useful standalone). Kept under the UPSTREAM.md
-discipline (localized, rebaseable). No change to the agent loop or the protocol.
+the `session_list_json()` helper (a self-contained, append-only function in
+`session.c` reusing `session_list()` + `session_first_prompt()`), prints the JSON
+array (jansson), and exits — before any provider/curl init. **JSON is the only
+output** — there is no `--json` sub-flag and no human-table mode, since ezio is
+the consumer and machine output is all that's needed (keeps the seam minimal). A
+human running it gets jq-able JSON. Kept under the UPSTREAM.md discipline
+(localized, rebaseable). No change to the agent loop or the protocol.
 
 ### Testing (Phase B, when built)
 
-- hax: a unit/e2e asserting `--list-sessions --json` emits well-formed JSON for a
+- hax: a unit/e2e asserting `--list-sessions` emits well-formed JSON for a
   seeded session dir and `[]` for an empty cwd.
 - ezio: pure render/selection tests for the picker (list formatting, number/arrow
   selection, cancel), with the `--list-sessions` call injected; a launch test that
@@ -271,13 +299,19 @@ Phase A (harness-only):
 
 Phase B (adds a hax seam):
 
-- `vendor/hax/src/main.c` — `--list-sessions[ --json]` (reuses `session_list` /
-  `session_first_prompt`).
+- `vendor/hax/src/{main.c,session.c,session.h}` — `--list-sessions` (JSON only)
+  via the `session_list_json()` helper.
 - `packages/cli/src/repl/resume-picker.ts` (+ test) — list parse, render, select.
 - `packages/cli/src/cli.ts` — wire the bare-`--resume` branch to the picker.
 
-## Open decisions
+## Resolved decisions
 
-1. **Phase B enumeration approach (B1 vs B2).** Recommend B2 (the `--list-sessions`
-   hax seam). Confirm before Phase B.
-2. **Picker interaction model** (arrow-select vs typed number) — settle at Phase B.
+1. **Phase B enumeration approach.** B2 — the `hax --list-sessions` seam (confirmed
+   2026-06-10).
+2. **Picker interaction model.** Both: arrow keys (+ `j`/`k`) and 1-9 digit jump,
+   Enter to select, Esc/Ctrl-C/`q` to cancel.
+3. **`--list-sessions` output (P2, 2026-06-11).** JSON only — no `--json` sub-flag,
+   no human table. ezio is the consumer and wants JSON; keeps the seam minimal.
+4. **Resume display (P1, 2026-06-11).** The engine replay is a TTY-only no-op under
+   the self-mount, so ezio prints its own count-free "resumed" notice; no hax
+   change, no recorder double-capture.
