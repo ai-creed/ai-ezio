@@ -60,7 +60,13 @@ describe("startWithTranscript (pre-spawn ordering)", () => {
 					return {} as never;
 				},
 			} as never,
-			{ stateDir: "/s", repoKey: "r", resumeArgs: ["--continue"], mintId: () => "id", ensureDir: () => {} },
+			{
+				stateDir: "/s",
+				repoKey: "r",
+				resumeArgs: ["--continue"],
+				mintId: () => "id",
+				ensureDir: () => {},
+			},
 		);
 		expect(startedWith?.args).toEqual(["--continue"]);
 		expect(startedWith?.transcriptPath).toBe("/s/transcripts/r/id.txt");

@@ -31,14 +31,22 @@ describe("spawnHax launch layer", () => {
 		spawnMock.mockReturnValue({ stdio: [null, null, null, null, null] });
 		spawnHax({ binary: "/fake/hax", env: {} as NodeJS.ProcessEnv, transcriptPath: "/t/x.txt" });
 		// `.at(-1)`: the mock is not reset between tests, so read THIS test's call.
-		const [, , opts] = spawnMock.mock.calls.at(-1) as [string, string[], { env: NodeJS.ProcessEnv }];
+		const [, , opts] = spawnMock.mock.calls.at(-1) as [
+			string,
+			string[],
+			{ env: NodeJS.ProcessEnv },
+		];
 		expect(opts.env.HAX_TRANSCRIPT).toBe("/t/x.txt");
 	});
 
 	it("omits HAX_TRANSCRIPT when no transcriptPath is set", () => {
 		spawnMock.mockReturnValue({ stdio: [null, null, null, null, null] });
 		spawnHax({ binary: "/fake/hax", env: {} as NodeJS.ProcessEnv });
-		const [, , opts] = spawnMock.mock.calls.at(-1) as [string, string[], { env: NodeJS.ProcessEnv }];
+		const [, , opts] = spawnMock.mock.calls.at(-1) as [
+			string,
+			string[],
+			{ env: NodeJS.ProcessEnv },
+		];
 		expect(opts.env.HAX_TRANSCRIPT).toBeUndefined();
 	});
 });

@@ -62,7 +62,11 @@ describe.runIf(Boolean(HAX))("Session e2e over inherited fds (mock provider)", (
 
 	it("exposes the transcriptPath it was started with", async () => {
 		const session = new Session();
-		await session.start({ binary: HAX, env: baseEnv, transcriptPath: "/tmp/ezio-test-transcript.txt" });
+		await session.start({
+			binary: HAX,
+			env: baseEnv,
+			transcriptPath: "/tmp/ezio-test-transcript.txt",
+		});
 		expect(session.transcriptPath).toBe("/tmp/ezio-test-transcript.txt");
 		session.close();
 	});
