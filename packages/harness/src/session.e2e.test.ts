@@ -60,6 +60,13 @@ describe.runIf(Boolean(HAX))("Session e2e over inherited fds (mock provider)", (
 		expect(joined.trim()).toBe(result.content.trim());
 	}, 20000);
 
+	it("exposes the transcriptPath it was started with", async () => {
+		const session = new Session();
+		await session.start({ binary: HAX, env: baseEnv, transcriptPath: "/tmp/ezio-test-transcript.txt" });
+		expect(session.transcriptPath).toBe("/tmp/ezio-test-transcript.txt");
+		session.close();
+	});
+
 	it("interrupt aborts a live turn and returns to idle", async () => {
 		// A slow mock turn (2.5s delay before any text); the stream tick polls the
 		// control fd every ~50ms during the delay, so `interrupt` aborts it.

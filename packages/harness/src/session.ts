@@ -97,6 +97,14 @@ export class Session {
 	> = [];
 	ready?: ReadyEvent;
 
+	private _transcriptPath?: string;
+	/** The `HAX_TRANSCRIPT` mirror path this session was started with, if any.
+	 * Consumers (ezio CLI, ai-whisper) read it here rather than re-deriving the
+	 * env contract. Set synchronously in start(), before the engine spawns. */
+	get transcriptPath(): string | undefined {
+		return this._transcriptPath;
+	}
+
 	constructor(private readonly options: SessionOptions = {}) {}
 
 	/** Subscribe to engine child-exit (workflow-agnostic lifecycle signal for
@@ -223,6 +231,7 @@ export class Session {
 
 	/** Spawn hax, pump events, and gate on the `ready` protocol version. */
 	async start(options: SpawnHaxOptions = {}): Promise<ReadyEvent> {
+		this._transcriptPath = options.transcriptPath;
 		const spawned = spawnHax(options);
 		this.spawned = spawned;
 		spawned.child.on("exit", (code, signal) => {
