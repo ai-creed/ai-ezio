@@ -71,6 +71,30 @@ describe("renderMarkdown", () => {
 		expect(indent(nestedLine)).toBeGreaterThan(indent(topLine));
 	});
 
+	it("parses inline code inside a list item (not raw backticks)", () => {
+		// marked-terminal@7 on marked@15 emits a tight list item's content as a raw
+		// block `text` token, dropping inline parsing — so `code` leaked as literal
+		// backticks instead of styled cyan. The text-renderer override fixes it.
+		const out = renderMarkdown("- run `npm test` now", { width: 80 });
+		expect(out).toContain("npm test");
+		expect(out).toContain("[36m"); // CYAN — codespan actually styled
+		expect(out).not.toContain("`"); // no literal backtick survives
+	});
+
+	it("parses bold inside a list item (not raw asterisks)", () => {
+		const out = renderMarkdown("- this is **important** here", { width: 80 });
+		expect(out).toContain("important");
+		expect(out).toContain("[1m"); // BOLD — strong actually styled
+		expect(out).not.toContain("**"); // no literal asterisks survive
+	});
+
+	it("parses inline code inside a nested list item", () => {
+		const out = renderMarkdown("- top\n  - nested `code` here", { width: 80 });
+		expect(out).toContain("code");
+		expect(out).toContain("[36m"); // CYAN reaches nested items too
+		expect(out).not.toContain("`");
+	});
+
 	it("preserves fenced code block content", () => {
 		const md = "```\nconst x = 1;\n```";
 		const out = renderMarkdown(md, { width: 80 });

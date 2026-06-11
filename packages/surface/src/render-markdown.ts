@@ -100,6 +100,21 @@ export function renderMarkdown(md: string, opts?: { width?: number }): string {
 	// `width` instead of running off-screen.
 	marked.use({
 		renderer: {
+			// marked@15 hands a tight list item's content to the `text` renderer as a
+			// block token whose inline children live in `.tokens`; marked-terminal@7
+			// emits the raw `.text`, so code/bold/links/em inside list items leaked as
+			// literal markdown (its `heading` parses inline correctly, but `text` was
+			// never updated for marked@15). Inline-parse when the token carries
+			// children; a leaf text token (no `.tokens`) passes through unchanged.
+			text(
+				this: { parser: { parseInline: (tokens: Token[]) => string } },
+				token: Tokens.Text | Tokens.Escape,
+			) {
+				// `escape` tokens (e.g. `\*`) carry no children — pass their text through.
+				return "tokens" in token && token.tokens
+					? this.parser.parseInline(token.tokens)
+					: token.text;
+			},
 			table(this: { parser: { parseInline: (tokens: Token[]) => string } }, token: Tokens.Table) {
 				const parse = (cell: Tokens.TableCell) => this.parser.parseInline(cell.tokens);
 				const headerCells = token.header.map((c) => `${BOLD}${parse(c)}${RESET}`);
