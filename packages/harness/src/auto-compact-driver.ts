@@ -36,6 +36,13 @@ export interface AutoCompactDriver {
 	compacting(): boolean;
 	/** Manual `/compact`: runs regardless of the threshold. */
 	compactNow(): Promise<CompactOutcome>;
+	/** Imperative arming signal, for consumers that drive an await-loop instead
+	 * of an event stream (the standalone CLI). `handleEvent` calls this on each
+	 * `assistant_turn_finished`. */
+	noteUsage(usage?: { contextTokens?: number; contextLimit?: number }): void;
+	/** Imperative auto-compact trigger, for the await-loop consumer. `handleEvent`
+	 * calls this on `idle`. Cycles only when armed; a no-op otherwise. */
+	maybeAutoCompact(): Promise<CompactOutcome>;
 	/** Resolves once the most recent `idle`-triggered cycle has settled (for
 	 * graceful shutdown and deterministic tests). */
 	whenSettled(): Promise<void>;
@@ -78,6 +85,8 @@ export function createAutoCompactDriver(opts: AutoCompactDriverOptions): AutoCom
 		},
 		compacting: () => active,
 		compactNow: () => compactor.compactNow(),
+		noteUsage: (usage) => compactor.noteUsage(usage),
+		maybeAutoCompact: () => compactor.maybeAutoCompact(),
 		whenSettled: async () => {
 			await pending;
 		},

@@ -8,8 +8,9 @@
  * the rehydration tool is ezio's opinion and lives HERE, in the wiring layer.
  */
 import {
-	Compactor,
+	createAutoCompactDriver,
 	SUMMARIZE_INSTRUCTION,
+	type AutoCompactDriver,
 	type CompactionConfig,
 	type Session,
 } from "@ai-ezio/harness";
@@ -43,12 +44,18 @@ export function digestFromRecorder(source: DigestSource): string | null {
 }
 
 export interface WiredCompactor {
-	compactor: Compactor;
+	compactor: AutoCompactDriver;
 	/** True while a cycle runs — the runtime suppresses normal renderer output
 	 * for the summarize turn and shows the compacting chrome instead. */
 	compacting: () => boolean;
 }
 
+/** Standalone-CLI wiring of the shared {@link createAutoCompactDriver}: supplies
+ * the cortex rehydration + recorder-digest callbacks and the pane chrome. The
+ * runtime drives it imperatively (noteUsage on each finished turn,
+ * maybeAutoCompact after each settled turn) — the SAME driver the mounted
+ * adapter attaches to its event stream, so the policy never drifts between the
+ * two surfaces. */
 export function buildCompactor(opts: {
 	session: Pick<Session, "runExclusive">;
 	config: CompactionConfig;
@@ -56,8 +63,7 @@ export function buildCompactor(opts: {
 	digest?: DigestSource;
 	write: (s: string) => void;
 }): WiredCompactor {
-	let active = false;
-	const compactor = new Compactor({
+	const compactor = createAutoCompactDriver({
 		session: opts.session,
 		config: opts.config,
 		rehydrate:
@@ -65,14 +71,8 @@ export function buildCompactor(opts: {
 		fallbackDigest: opts.digest
 			? () => Promise.resolve(digestFromRecorder(opts.digest!))
 			: undefined,
-		onCycleStart: () => {
-			active = true;
-			opts.write("compacting…\r\n");
-		},
-		onNote: (line) => {
-			active = false; // the outcome line ends the suppressed span
-			opts.write(`${line}\r\n`);
-		},
+		onCycleStart: () => opts.write("compacting…\r\n"),
+		onNote: (line) => opts.write(`${line}\r\n`),
 	});
-	return { compactor, compacting: () => active };
+	return { compactor, compacting: compactor.compacting };
 }

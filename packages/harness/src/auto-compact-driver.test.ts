@@ -102,4 +102,17 @@ describe("createAutoCompactDriver", () => {
 		expect((await driver.compactNow()).kind).toBe("compacted");
 		expect(calls.compacts).toHaveLength(1);
 	});
+
+	it("exposes noteUsage + maybeAutoCompact for imperative consumers (standalone)", async () => {
+		// The standalone CLI drives an await-loop, not an event stream: it feeds
+		// usage and triggers the check directly, sharing this one driver with the
+		// event-driven mounted adapter.
+		const { session, calls } = fakeSession();
+		const driver = createAutoCompactDriver({ session, config: cfg() });
+		driver.noteUsage({ contextTokens: 79, contextLimit: 100 });
+		expect((await driver.maybeAutoCompact()).kind).toBe("skipped"); // below threshold
+		driver.noteUsage({ contextTokens: 80, contextLimit: 100 });
+		expect((await driver.maybeAutoCompact()).kind).toBe("compacted");
+		expect(calls.compacts).toHaveLength(1);
+	});
 });
