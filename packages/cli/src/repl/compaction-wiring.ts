@@ -13,31 +13,17 @@ import {
 	type CompactionConfig,
 	type Session,
 } from "@ai-ezio/harness";
-import type { McpHost } from "@ai-ezio/mcp-host";
+import { callHostRehydration, type RehydrationHost } from "@ai-ezio/mcp-host";
 import type { RecordedTurn } from "@ai-ezio/session-recorder";
 
-/** The rehydration-capable host tool, by namespaced-name convention. */
-const REHYDRATE_TOOL_RE = /__(rehydrate_project|recall_memory)$/;
+// Re-exported so callers (and this module's tests) keep importing these from
+// here; the implementation moved to @ai-ezio/mcp-host once the ai-whisper
+// mounted adapter needed the same rehydration opinion (one shared helper).
+export { callHostRehydration };
+export type { RehydrationHost };
 
-/** The slices the helpers need (narrow for testability). */
-export type RehydrationHost = Pick<McpHost, "hostToolNames" | "callHostTool">;
 export interface DigestSource {
 	recentTurns(): readonly RecordedTurn[];
-}
-
-/** Best-effort cortex block via the generic MCP host. Resolves null on any
- * miss (no matching tool, error status, empty output) — rehydration never
- * blocks compaction. callHostTool returns { output, status } and the host
- * injects cwd-shaped args (worktreePath/path) itself. */
-export async function callHostRehydration(host: RehydrationHost): Promise<string | null> {
-	const name = host.hostToolNames().find((n) => REHYDRATE_TOOL_RE.test(n));
-	if (!name) return null;
-	try {
-		const res = await host.callHostTool(name, {});
-		return res.status === "ok" && res.output.trim() ? res.output : null;
-	} catch {
-		return null;
-	}
 }
 
 /** Deterministic digest from the recorder's captured turns (spec §3 fallback:

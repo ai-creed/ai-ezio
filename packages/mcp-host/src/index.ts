@@ -1,5 +1,7 @@
 export { McpHost } from "./host.js";
 export type { McpHostOptions, HostSession } from "./host.js";
+export { callHostRehydration } from "./rehydration.js";
+export type { RehydrationHost } from "./rehydration.js";
 export { createMcpHost, loadMcpHost } from "./attach.js";
 export type { CreateHostOptions } from "./attach.js";
 export { loadConfig, parseConfig, configPath } from "./config.js";
