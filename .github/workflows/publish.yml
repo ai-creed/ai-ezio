@@ -3,8 +3,11 @@ name: Publish
 # Publishes all six ai-ezio packages to npm on a `v*` tag: the `@ai-creed/ai-ezio`
 # CLI, the four `@ai-creed/hax-<os>-<cpu>` prebuilt-binary packages, and the thin
 # unscoped `ai-ezio` alias that forwards to the scoped CLI. A prerelease version
-# (the version contains "-", e.g. 0.1.0-beta.0) publishes under the `beta` dist-tag,
-# NOT `latest`, so `npm i -g ai-ezio` ignores it and only `ai-ezio@beta` installs it.
+# (the version contains "-", e.g. 0.1.0-beta.0) publishes under the `beta` dist-tag
+# AND re-points `latest` at that prerelease (dist-tag step below): the project is
+# beta-only, so a plain `npm i -g ai-ezio` should serve the newest beta, not a
+# stale pin. `ai-ezio@beta` still tracks the same version. Once a STABLE version
+# (no "-") ships, npm sets `latest` on publish and the extra step is a no-op.
 #
 # Release steps: bump the cli + four hax package versions, commit, then
 #   git tag v<version> && git push origin v<version>
@@ -137,5 +140,13 @@ jobs:
           (cd packaging/alias-ai-ezio \
             && V="$VERSION" node -e "const fs=require('fs'),p=require('./package.json');p.version=process.env.V;p.dependencies['@ai-creed/ai-ezio']=process.env.V;fs.writeFileSync('package.json',JSON.stringify(p,null,'\t')+'\n')" \
             && npm publish --access public $TAGFLAG)
+          # Beta phase: also re-point `latest` at the new prerelease so a plain
+          # `npm i -g ai-ezio` serves the current beta, not a stale pin. Prereleases
+          # only (a stable publish already sets `latest` on publish); the automation
+          # NPM_TOKEN bypasses 2FA, so these dist-tag writes succeed headlessly.
+          if [[ "$VERSION" == *-* ]]; then
+            npm dist-tag add "@ai-creed/ai-ezio@$VERSION" latest
+            npm dist-tag add "ai-ezio@$VERSION" latest
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
