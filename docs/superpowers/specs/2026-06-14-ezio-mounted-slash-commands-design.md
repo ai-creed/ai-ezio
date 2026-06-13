@@ -169,22 +169,53 @@ command exists to produce it.
 ### Host hook
 
 The operator-line boundary is in `@ai-whisper/cli`'s `live-session.ts`, inside the
-line-buffered input path (the `\r`/`\n` branch around lines 154-178). Today it
-echoes the line as the magenta `▌ ` stripe and calls
-`interactiveSession.writeUserInput(completed)`. Insert the consume check **before**
-both:
+line-buffered input path (the `\r`/`\n` branch around lines 154-178). Two existing
+behaviors there matter:
+
+1. As the operator **types**, each character is already echoed to the terminal
+   (the `inputLineBuffer += char; stdout.write(char)` tail of the loop). So by the
+   time Enter arrives, the typed line — prompt `❯ ` + text, soft-wrapped at the tty
+   width — is already painted on screen.
+2. On Enter, the **submit** path *erases* that plainly-echoed input (return to col
+   0, climb the wrapped rows, `ESC[J` clear-to-end-of-screen) and repaints it as
+   the magenta `▌ ` stripe, then calls `interactiveSession.writeUserInput(completed)`.
+
+A consumed command must therefore **reuse the same erase** before its local output
+renders. Otherwise the already-echoed `/help` stays on screen and the command
+output — which has no leading newline (`/help` writes its entries directly) —
+prints on the same line, e.g. `❯ /help  help  list commands …`. The hook erases the
+echoed input first, *then* asks the adapter to consume; on consume it skips the
+magenta stripe and `writeUserInput`:
 
 ```ts
 const completed = inputLineBuffer;
 inputLineBuffer = "";
-if (
-	completed.length > 0 &&
-	(await input.interactiveSession.tryConsumeLocalCommand?.(completed))
-) {
-	continue; // handled locally: no echo-stripe, no writeUserInput, no turn
+const session = input.interactiveSession;
+if (completed.length > 0) {
+	// Erase the plainly-echoed operator input (prompt + text, soft-wrapped) — the
+	// SAME clear the submit path already uses — so what follows starts clean.
+	const cols = ttyCols(input.stdout);
+	const rows = Math.max(1, Math.ceil((STRIPE_COLS + Array.from(completed).length) / cols));
+	let erase = "\r";
+	if (rows > 1) erase += `\u001b[${rows - 1}A`;
+	erase += "\u001b[J";
+	input.stdout.write(erase);
+	// Operator slash command: the adapter renders its output on the now-clean line.
+	// No magenta stripe, no writeUserInput, no turn.
+	if (await session.tryConsumeLocalCommand?.(completed)) continue;
+	// Ordinary line: repaint the magenta stripe and submit (existing behavior).
+	session.echoUserInput ? session.echoUserInput(completed, cols) : input.stdout.write("\n");
+	session.writeUserInput(completed);
+	continue;
 }
-// …existing echo-stripe + writeUserInput(completed)…
+input.stdout.write("\n"); // empty line — unchanged
+continue;
 ```
+
+The erase is written *before* `tryConsumeLocalCommand` is awaited, so the adapter's
+command output lands on the cleared line. The non-consumed branch repaints the
+stripe and submits exactly as today — the erase it now shares is the same sequence
+the old submit path already emitted, so submit-path rendering is unchanged.
 
 This site only ever receives **operator** input read from `process.stdin`
 (line-buffered because the ezio target sets `lineBufferedInput`). Relayed and
@@ -279,8 +310,14 @@ All inherited from `SlashController`, so behavior matches standalone:
   an unknown command (`true`) and never produces an exit. Assert
   `lastContent`/`lastUsage` track `assistant_turn_finished`.
 - **Host operator path (ai-whisper):** `live-session.test.ts` — a slash operator
-  line is consumed (no `writeUserInput`, no echo-stripe); an ordinary operator
-  line still submits.
+  line is consumed (no `writeUserInput`, no magenta echo-stripe) **and the
+  already-echoed operator input is erased before the command output renders**:
+  assert the hook emits the soft-wrap erase sequence (`\r`, optional
+  `\u001b[<rows-1>A`, `\u001b[J`) ahead of the consume, so the command output
+  starts on a clean line instead of trailing the echoed `/command` (e.g. a stubbed
+  `tryConsumeLocalCommand` writes a sentinel and the test asserts the erase bytes
+  precede that sentinel in the captured stdout). An ordinary operator line still
+  submits and repaints the stripe.
 - **Operator-only guard at the injected-input layer (ai-whisper):**
   `mount-session-main.test.ts` — drive an injected/relayed line through the
   injected path (`writeInjectedInput` → `interactiveSession.writeUserInput`, the
