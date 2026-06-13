@@ -49,7 +49,7 @@ ai-ezio/
 
 > Current state: shipped and published. `packages/` and the `vendor/hax`
 > submodule are fully wired; ai-ezio is on npm as `ai-ezio` /
-> `@ai-creed/ai-ezio` (`0.2.0-beta.2`), built through M11 (context compaction;
+> `@ai-creed/ai-ezio` (`0.2.0-beta.3`), built through M11 (context compaction;
 > generic MCP host + unified terminal at M9) — see `docs/milestones.md`.
 
 ## Working agreements for agents

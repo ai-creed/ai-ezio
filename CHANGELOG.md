@@ -7,6 +7,28 @@ All notable changes to ai-ezio are documented here. The format is based on
 Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
 `latest`: `npm i -g @ai-creed/ai-ezio@beta` (or the unscoped `ai-ezio@beta`).
 
+## [0.2.0-beta.3] — 2026-06-13
+
+### Added
+
+- **Shared auto-compaction driver** — `createAutoCompactDriver` in
+  `@ai-ezio/harness`, an event-driven seam over the existing `Compactor`:
+  `assistant_turn_finished.usage` feeds the arming signal, `idle` triggers an armed
+  cycle, and `compacting()` lets a host suppress its own output/relay so the
+  injected summarize turn never leaks. This is the seam mounted-mode hosts
+  (ai-whisper) consume to wire auto-compaction — without it, a mounted session grew
+  context unbounded until the provider rejected the request.
+- **`callHostRehydration`** promoted to `@ai-ezio/mcp-host` (from the CLI's
+  compaction wiring) so any surface can build the cortex project-memory rehydration
+  callback over the host's generic tool-discovery surface. The CLI re-exports it
+  for back-compat.
+
+### Changed
+
+- The standalone REPL routes its auto-compaction through the shared driver
+  (`buildCompactor` is now a thin wrapper over it) — behavior is unchanged; the two
+  surfaces no longer maintain separate compaction wiring.
+
 ## [0.2.0-beta.2] — 2026-06-11
 
 ### Added
@@ -76,6 +98,7 @@ Initial public beta bring-up (milestones M1–M10):
 - Single-bundle distribution with the hax binary embedded; tag-triggered publish
   pipeline (M10).
 
+[0.2.0-beta.3]: https://github.com/ai-creed/ai-ezio/releases/tag/v0.2.0-beta.3
 [0.2.0-beta.2]: https://github.com/ai-creed/ai-ezio/releases/tag/v0.2.0-beta.2
 [0.2.0-beta.1]: https://github.com/ai-creed/ai-ezio/releases/tag/v0.2.0-beta.1
 [0.2.0-beta.0]: https://github.com/ai-creed/ai-ezio/releases/tag/v0.2.0-beta.0
