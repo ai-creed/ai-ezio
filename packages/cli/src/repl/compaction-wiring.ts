@@ -8,36 +8,23 @@
  * the rehydration tool is ezio's opinion and lives HERE, in the wiring layer.
  */
 import {
-	Compactor,
+	createAutoCompactDriver,
 	SUMMARIZE_INSTRUCTION,
+	type AutoCompactDriver,
 	type CompactionConfig,
 	type Session,
 } from "@ai-ezio/harness";
-import type { McpHost } from "@ai-ezio/mcp-host";
+import { callHostRehydration, type RehydrationHost } from "@ai-ezio/mcp-host";
 import type { RecordedTurn } from "@ai-ezio/session-recorder";
 
-/** The rehydration-capable host tool, by namespaced-name convention. */
-const REHYDRATE_TOOL_RE = /__(rehydrate_project|recall_memory)$/;
+// Re-exported so callers (and this module's tests) keep importing these from
+// here; the implementation moved to @ai-ezio/mcp-host once the ai-whisper
+// mounted adapter needed the same rehydration opinion (one shared helper).
+export { callHostRehydration };
+export type { RehydrationHost };
 
-/** The slices the helpers need (narrow for testability). */
-export type RehydrationHost = Pick<McpHost, "hostToolNames" | "callHostTool">;
 export interface DigestSource {
 	recentTurns(): readonly RecordedTurn[];
-}
-
-/** Best-effort cortex block via the generic MCP host. Resolves null on any
- * miss (no matching tool, error status, empty output) — rehydration never
- * blocks compaction. callHostTool returns { output, status } and the host
- * injects cwd-shaped args (worktreePath/path) itself. */
-export async function callHostRehydration(host: RehydrationHost): Promise<string | null> {
-	const name = host.hostToolNames().find((n) => REHYDRATE_TOOL_RE.test(n));
-	if (!name) return null;
-	try {
-		const res = await host.callHostTool(name, {});
-		return res.status === "ok" && res.output.trim() ? res.output : null;
-	} catch {
-		return null;
-	}
 }
 
 /** Deterministic digest from the recorder's captured turns (spec §3 fallback:
@@ -57,12 +44,18 @@ export function digestFromRecorder(source: DigestSource): string | null {
 }
 
 export interface WiredCompactor {
-	compactor: Compactor;
+	compactor: AutoCompactDriver;
 	/** True while a cycle runs — the runtime suppresses normal renderer output
 	 * for the summarize turn and shows the compacting chrome instead. */
 	compacting: () => boolean;
 }
 
+/** Standalone-CLI wiring of the shared {@link createAutoCompactDriver}: supplies
+ * the cortex rehydration + recorder-digest callbacks and the pane chrome. The
+ * runtime drives it imperatively (noteUsage on each finished turn,
+ * maybeAutoCompact after each settled turn) — the SAME driver the mounted
+ * adapter attaches to its event stream, so the policy never drifts between the
+ * two surfaces. */
 export function buildCompactor(opts: {
 	session: Pick<Session, "runExclusive">;
 	config: CompactionConfig;
@@ -70,8 +63,7 @@ export function buildCompactor(opts: {
 	digest?: DigestSource;
 	write: (s: string) => void;
 }): WiredCompactor {
-	let active = false;
-	const compactor = new Compactor({
+	const compactor = createAutoCompactDriver({
 		session: opts.session,
 		config: opts.config,
 		rehydrate:
@@ -79,14 +71,8 @@ export function buildCompactor(opts: {
 		fallbackDigest: opts.digest
 			? () => Promise.resolve(digestFromRecorder(opts.digest!))
 			: undefined,
-		onCycleStart: () => {
-			active = true;
-			opts.write("compacting…\r\n");
-		},
-		onNote: (line) => {
-			active = false; // the outcome line ends the suppressed span
-			opts.write(`${line}\r\n`);
-		},
+		onCycleStart: () => opts.write("compacting…\r\n"),
+		onNote: (line) => opts.write(`${line}\r\n`),
 	});
-	return { compactor, compacting: () => active };
+	return { compactor, compacting: compactor.compacting };
 }

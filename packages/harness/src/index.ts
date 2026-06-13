@@ -47,3 +47,8 @@ export {
 	type CompactorSession,
 	type CompactOutcome,
 } from "./compactor.js";
+export {
+	createAutoCompactDriver,
+	type AutoCompactDriver,
+	type AutoCompactDriverOptions,
+} from "./auto-compact-driver.js";
