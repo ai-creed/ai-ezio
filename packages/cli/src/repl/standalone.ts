@@ -7,7 +7,7 @@ import type { Session } from "@ai-ezio/harness";
 import type { McpHost } from "@ai-ezio/mcp-host";
 import type { SessionRecorder } from "@ai-ezio/session-recorder";
 import { feedKey, newLineBuffer } from "./input-reader.js";
-import type { SlashController } from "./slash.js";
+import type { SlashController } from "@ai-ezio/surface";
 
 export interface StandaloneReplDeps {
 	keys: AsyncIterable<string>;

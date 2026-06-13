@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runStandaloneRepl } from "./standalone.js";
-import type { SlashOutcome } from "./slash.js";
+import type { SlashOutcome } from "@ai-ezio/surface";
 
 /** A fake slash controller: each entry in `outcomes` is matched by submitted
  * line; default is to submit the line verbatim. */

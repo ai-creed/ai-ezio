@@ -21,3 +21,13 @@ export {
 	transcriptFilePath,
 	type TranscriptViewDeps,
 } from "./transcript-view.js";
+export {
+	classifyLine,
+	SlashController,
+	type SlashCommand,
+	type SlashContext,
+	type SlashOutcome,
+	type SlashSession,
+	type SlashRecorder,
+	type LineClass,
+} from "./slash.js";

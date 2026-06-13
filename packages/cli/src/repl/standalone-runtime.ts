@@ -27,9 +27,10 @@ import {
 	resolvePager,
 	showTranscript as renderTranscript,
 	transcriptFilePath,
+	SlashController,
+	type SlashContext,
 	type SkillEnv,
 } from "@ai-ezio/surface";
-import { SlashController, type SlashContext } from "./slash.js";
 import { runStandaloneRepl } from "./standalone.js";
 
 export interface OneShotOptions {
