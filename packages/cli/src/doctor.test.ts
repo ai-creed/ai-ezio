@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDoctorReport, formatDoctorReport, type DoctorInputs } from "./doctor.js";
-import { skillDirs, type Skill, type SkillEnv } from "./skills.js";
+import { skillDirs, type Skill, type SkillEnv } from "@ai-ezio/surface";
 
 const ENV: SkillEnv = { cwd: "/proj", home: "/home/u", xdgConfigHome: undefined };
 

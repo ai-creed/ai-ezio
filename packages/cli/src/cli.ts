@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 import { aiEzioGlobalSkillsDir, describeHaxBinary, resolveHaxBinary } from "@ai-ezio/harness";
 import { buildDoctorReport, formatDoctorReport } from "./doctor.js";
 import { runResumePicker, spawnListSessions } from "./repl/resume-picker.js";
-import { discoverSkills, nodeSkillFs, skillDirs, type SkillEnv } from "./skills.js";
+import { discoverSkills, nodeSkillFs, skillDirs, type SkillEnv } from "@ai-ezio/surface";
 import { readVersionInfo } from "./version.js";
 
 /** Build the skill-discovery environment from the live process. */

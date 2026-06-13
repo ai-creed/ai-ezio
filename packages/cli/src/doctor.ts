@@ -5,7 +5,7 @@
  * CLI wires real deps and prints `formatDoctorReport`.
  */
 import type { HaxResolution } from "@ai-ezio/harness";
-import type { Skill, SkillDir } from "./skills.js";
+import type { Skill, SkillDir } from "@ai-ezio/surface";
 import type { VersionInfo } from "./version.js";
 
 export interface DoctorSkillDir extends SkillDir {

@@ -19,16 +19,18 @@ import {
 	recoverUncaptured,
 	repoKeyForPath,
 } from "@ai-ezio/session-recorder";
-import { createMountedRenderer } from "@ai-ezio/surface";
-import { discoverSkills, nodeSkillFs, type SkillEnv } from "../skills.js";
-import { makeClipboard } from "./clipboard.js";
-import { SlashController, type SlashContext } from "./slash.js";
-import { runStandaloneRepl } from "./standalone.js";
 import {
+	createMountedRenderer,
+	discoverSkills,
+	makeClipboard,
+	nodeSkillFs,
 	resolvePager,
 	showTranscript as renderTranscript,
 	transcriptFilePath,
-} from "./transcript-view.js";
+	type SkillEnv,
+} from "@ai-ezio/surface";
+import { SlashController, type SlashContext } from "./slash.js";
+import { runStandaloneRepl } from "./standalone.js";
 
 export interface OneShotOptions {
 	/** Overrides for Session.start (binary/env/args) — for tests. */

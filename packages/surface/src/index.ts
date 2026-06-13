@@ -6,3 +6,18 @@
 export { renderMarkdown } from "./render-markdown.js";
 export { createMountedRenderer } from "./mounted-renderer.js";
 export * as style from "./style.js";
+export {
+	discoverSkills,
+	nodeSkillFs,
+	skillDirs,
+	type Skill,
+	type SkillDir,
+	type SkillEnv,
+} from "./skills.js";
+export { makeClipboard } from "./clipboard.js";
+export {
+	resolvePager,
+	showTranscript,
+	transcriptFilePath,
+	type TranscriptViewDeps,
+} from "./transcript-view.js";
