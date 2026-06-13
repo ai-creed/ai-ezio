@@ -211,9 +211,13 @@ export class SlashController {
 	/** name OR alias → command (so classifyLine's `known` set is keys()). */
 	private readonly byKey = new Map<string, SlashCommand>();
 
-	constructor(ctx: SlashContext) {
+	constructor(ctx: SlashContext, opts?: { excludeCommands?: readonly string[] }) {
 		this.ctx = ctx;
-		for (const cmd of builtinCommands(() => this.summaries())) this.register(cmd);
+		const exclude = new Set(opts?.excludeCommands ?? []);
+		for (const cmd of builtinCommands(() => this.summaries())) {
+			if (exclude.has(cmd.name)) continue; // drops the command AND its aliases
+			this.register(cmd);
+		}
 	}
 
 	/** Register (or override) a command and its aliases. Last registration wins

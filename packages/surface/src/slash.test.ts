@@ -354,3 +354,25 @@ describe("/usage fullness percent (M11)", () => {
 		expect(out()).not.toContain("%");
 	});
 });
+
+describe("SlashController excludeCommands", () => {
+	it("omits quit and its exit alias when excluded", async () => {
+		const out: string[] = [];
+		const { ctx } = fakeCtx({ write: (s) => out.push(s) });
+		const ctrl = new SlashController(ctx, { excludeCommands: ["quit"] });
+
+		const quit = await ctrl.handle("/quit");
+		const exit = await ctrl.handle("/exit");
+
+		expect(quit).toEqual({ action: "handled" });
+		expect(exit).toEqual({ action: "handled" });
+		expect(out.join("")).toContain("unknown command: /quit");
+		expect(out.join("")).toContain("unknown command: /exit");
+	});
+
+	it("keeps quit -> exit by default", async () => {
+		const { ctx } = fakeCtx();
+		const ctrl = new SlashController(ctx);
+		expect(await ctrl.handle("/quit")).toEqual({ action: "exit" });
+	});
+});
