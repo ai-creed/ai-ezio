@@ -7,6 +7,31 @@ All notable changes to ai-ezio are documented here. The format is based on
 Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
 `latest`: `npm i -g @ai-creed/ai-ezio@beta` (or the unscoped `ai-ezio@beta`).
 
+## [0.2.0-beta.4] — 2026-06-14
+
+### Added
+
+- **`SlashController` `excludeCommands` option** — the controller constructor now
+  accepts `{ excludeCommands }`, dropping the named built-ins (and their aliases)
+  from the registry. This lets a host build the controller without `/quit` and
+  `/exit` while reusing the same single command set; an excluded `/quit` falls
+  through to the standard "unknown command" message.
+
+### Changed
+
+- **Slash machinery relocated to `@ai-ezio/surface`** — `slash`, `skills`,
+  `clipboard`, and `transcript-view` moved out of the `@ai-creed/ai-ezio` CLI
+  into the shared surface package so the standalone REPL and downstream mounted
+  hosts import one `SlashController`. `slash.ts` no longer depends on
+  `@ai-ezio/harness` / `@ai-ezio/session-recorder`: its `SlashContext` now uses
+  local structural `SlashSession`/`SlashRecorder` interfaces, so surface gains no
+  new package dependency. Standalone REPL behavior is unchanged (imports repointed
+  only).
+
+These are the `@ai-ezio/surface` seams ai-whisper's mounted adapter consumes to
+make ezio's slash commands work inside `whisper collab mount ezio`. Engine: hax
+submodule pin unchanged; no hax C change.
+
 ## [0.2.0-beta.3] — 2026-06-13
 
 ### Added

@@ -1,6 +1,6 @@
 {
 	"name": "@ai-creed/hax-darwin-x64",
-	"version": "0.2.0-beta.3",
+	"version": "0.2.0-beta.4",
 	"description": "Prebuilt hax engine binary for ai-ezio (darwin/x64)",
 	"license": "MIT",
 	"publishConfig": {
