@@ -7,9 +7,18 @@
  * `classifyLine` is pure (testable without effects); `SlashController` owns the
  * registry + dispatch and is the extension point for future harness commands.
  */
-import type { Session } from "@ai-ezio/harness";
 import type { AssistantTurnFinishedEvent } from "@ai-ezio/protocol";
-import type { SessionRecorder } from "@ai-ezio/session-recorder";
+
+/** Structural facet of the harness Session the controller drives. Declared
+ *  locally so @ai-ezio/surface need not depend on @ai-ezio/harness. */
+export interface SlashSession {
+	newConversation(): Promise<void>;
+	status(): Promise<{ provider: string; model: string; effort?: string }>;
+}
+/** Structural facet of the session recorder. Optional in SlashContext. */
+export interface SlashRecorder {
+	noteNewConversation(): void;
+}
 
 /** What the REPL should do after the controller handles a line. */
 export type SlashOutcome =
@@ -21,10 +30,10 @@ export type SlashOutcome =
  * and reusable outside standalone. */
 export interface SlashContext {
 	write(s: string): void;
-	session: Pick<Session, "newConversation" | "status">;
+	session: SlashSession;
 	/** Optional session recorder — notified of the /new boundary so it rotates the
 	 * conversation and does a final capture before the engine resets. */
-	recorder?: Pick<SessionRecorder, "noteNewConversation">;
+	recorder?: SlashRecorder;
 	/** Last assistant turn's content (event-tracked); "" if none yet. */
 	lastContent(): string;
 	/** Last assistant turn's usage (event-tracked); undefined if none yet. */
@@ -202,9 +211,13 @@ export class SlashController {
 	/** name OR alias → command (so classifyLine's `known` set is keys()). */
 	private readonly byKey = new Map<string, SlashCommand>();
 
-	constructor(ctx: SlashContext) {
+	constructor(ctx: SlashContext, opts?: { excludeCommands?: readonly string[] }) {
 		this.ctx = ctx;
-		for (const cmd of builtinCommands(() => this.summaries())) this.register(cmd);
+		const exclude = new Set(opts?.excludeCommands ?? []);
+		for (const cmd of builtinCommands(() => this.summaries())) {
+			if (exclude.has(cmd.name)) continue; // drops the command AND its aliases
+			this.register(cmd);
+		}
 	}
 
 	/** Register (or override) a command and its aliases. Last registration wins
