@@ -8,6 +8,7 @@
  * registry + dispatch and is the extension point for future harness commands.
  */
 import type { AssistantTurnFinishedEvent } from "@ai-ezio/protocol";
+import { parseSessions, runResumePicker, type SessionRow } from "./resume-picker.js";
 
 /** Structural facet of the harness Session the controller drives. Declared
  *  locally so @ai-ezio/surface need not depend on @ai-ezio/harness. */
@@ -50,6 +51,14 @@ export interface SlashContext {
 	compactor?: {
 		compactNow(): Promise<{ kind: string; reason?: string }>;
 	};
+	/** §1C current session id (undefined until hax materializes it). */
+	currentSessionId?: () => string | undefined;
+	/** Read the effective title for the current session (pending or stored). */
+	getSessionTitle?: () => string | undefined;
+	/** Title the current session (buffers a pending rename when no id yet). */
+	setSessionTitle?: (title: string) => void;
+	/** Runtime-owned resume flow (list → pick → switch). See runResumeFlow. */
+	resume?: () => Promise<void>;
 }
 
 export interface SlashCommand {
@@ -196,6 +205,35 @@ function builtinCommands(listCommands: () => { name: string; summary: string }[]
 			},
 		},
 		{
+			name: "rename",
+			summary: "set a friendly title for this session (shown in /resume)",
+			run: (ctx, args) => {
+				if (!ctx.setSessionTitle) {
+					ctx.write("rename unavailable\n");
+					return;
+				}
+				const title = args.trim();
+				if (title === "") {
+					const current = ctx.getSessionTitle?.();
+					ctx.write(current ? `${current}\n` : "no title set · usage: /rename <text>\n");
+					return;
+				}
+				ctx.setSessionTitle(title);
+				ctx.write(`— renamed to "${title}" —\n`);
+			},
+		},
+		{
+			name: "resume",
+			summary: "switch to a past session in this folder",
+			run: async (ctx) => {
+				if (!ctx.resume) {
+					ctx.write("resume unavailable\n");
+					return;
+				}
+				await ctx.resume();
+			},
+		},
+		{
 			name: "quit",
 			aliases: ["exit"],
 			summary: "exit ezio",
@@ -266,5 +304,66 @@ export class SlashController {
 			this.ctx.write(`/${c.name} failed: ${(e as Error).message}\n`);
 		}
 		return { action: "handled" };
+	}
+}
+
+export interface ResumeFlowDeps {
+	write(s: string): void;
+	/** True while a turn is in flight (a respawn would drop it). */
+	isBusy(): boolean;
+	/** Raw `hax --list-sessions` JSON (impure; per-runtime). */
+	listSessions(): Promise<string>;
+	/** id → title sidecar, merged into the picker rows. */
+	titles(): Map<string, string>;
+	/** The live session id (excluded from the list); undefined excludes nothing. */
+	currentSessionId(): string | undefined;
+	/** Per-mode raw-input overlay: provides the picker a raw key stream. */
+	runOverlay(
+		run: (io: { keys: AsyncIterable<string>; write(s: string): void; setRawMode(on: boolean): void }) => Promise<void>,
+	): Promise<void>;
+	/** Engine respawn + post-respawn re-wiring (per-runtime). Rejects (engine left
+	 * closed) on bad id / spawn / protocol failure — see onFatal. */
+	resume(id: string): Promise<void>;
+	/** Tear down the REPL (standalone) / pane (mounted) cleanly. Called ONLY after a
+	 * respawn failure: the old engine is already closed and cannot be revived, so per
+	 * spec §4 we "report and exit cleanly" with no fresh fallback. */
+	onFatal(): void;
+	now(): number;
+}
+
+/** Shared `/resume` orchestration (§3): busy-guard → list+merge → exclude active
+ * → arrow-pick over the runtime overlay → switch. Per-mode primitives injected. */
+export async function runResumeFlow(deps: ResumeFlowDeps): Promise<void> {
+	if (deps.isBusy()) {
+		deps.write("finish or interrupt the current turn first\n");
+		return;
+	}
+	const titles = deps.titles();
+	const active = deps.currentSessionId();
+	const rows: SessionRow[] = parseSessions(await deps.listSessions()).filter((r) => r.id !== active);
+	if (rows.length === 0) {
+		deps.write("no other sessions in this folder\n");
+		return;
+	}
+	let chosen: string | undefined;
+	await deps.runOverlay(async (io) => {
+		chosen = await runResumePicker({
+			listSessions: async () => JSON.stringify(rows), // already parsed+filtered; re-serialize for the picker
+			keys: io.keys,
+			write: io.write,
+			now: deps.now,
+			setRawMode: io.setRawMode,
+			titles,
+		});
+	});
+	if (!chosen) return; // cancel / nothing selected → no-op
+	try {
+		await deps.resume(chosen);
+	} catch (e) {
+		// Spec §4: the old session is closed and cannot be revived in place. Report
+		// and exit cleanly — NO fresh fallback. onFatal hands the engine-exit/teardown
+		// to the runtime (standalone REPL or mounted pane).
+		deps.write(`resume failed: ${(e as Error).message}\n`);
+		deps.onFatal();
 	}
 }

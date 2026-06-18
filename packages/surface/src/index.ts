@@ -24,12 +24,14 @@ export {
 export {
 	classifyLine,
 	SlashController,
+	runResumeFlow,
 	type SlashCommand,
 	type SlashContext,
 	type SlashOutcome,
 	type SlashSession,
 	type SlashRecorder,
 	type LineClass,
+	type ResumeFlowDeps,
 } from "./slash.js";
 export {
 	parseSessions,
