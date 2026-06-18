@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { TurnGate } from "./turn-gate.js";
 
+describe("TurnGate.held", () => {
+	it("is false when idle, true while an acquirer holds it", async () => {
+		const gate = new TurnGate();
+		expect(gate.held).toBe(false);
+		const release = await gate.acquire();
+		expect(gate.held).toBe(true);
+		release();
+		expect(gate.held).toBe(false);
+	});
+});
+
 describe("TurnGate", () => {
 	it("serializes acquirers in order", async () => {
 		const gate = new TurnGate();

@@ -14,6 +14,7 @@ import {
 	type StatusEvent,
 	type Transport,
 } from "@ai-ezio/protocol";
+import type { Readable, Writable } from "node:stream";
 import { spawnHax, type SpawnedHax, type SpawnHaxOptions } from "./spawn.js";
 import { TurnGate } from "./turn-gate.js";
 
@@ -83,6 +84,10 @@ export interface SessionOptions {
 	/** Deadline for a `compact` control to produce `compacted` + `idle`
 	 * (default 30_000ms). Injectable so tests use a tiny value. */
 	compactTimeoutMs?: number;
+	/** Test seam: spawn the engine child (defaults to spawnHax). */
+	spawn?: (options: SpawnHaxOptions) => SpawnedHax;
+	/** Test seam: build the transport from the child's fd streams (defaults to FdTransport). */
+	transportFactory?: (events: Readable, controls: Writable) => Transport;
 }
 
 export class Session {
@@ -96,6 +101,14 @@ export class Session {
 		(info: { code: number | null; signal: NodeJS.Signals | null }) => void
 	> = [];
 	ready?: ReadyEvent;
+
+	/** Bumped on every spawn (start + resume). The pump closure captures its own
+	 * generation; a stale generation's events and EOF are dropped, so a closed
+	 * child cannot corrupt a freshly-respawned session. */
+	private generation = 0;
+	/** Resolves when the CURRENT pump's `for await` loop has fully unwound
+	 * (its `finally` ran). `resume()` awaits this to sequence teardown. */
+	private pumpDone: Promise<void> = Promise.resolve();
 
 	private _transcriptPath?: string;
 	/** The `HAX_TRANSCRIPT` mirror path this session was started with, if any.
@@ -231,27 +244,41 @@ export class Session {
 
 	/** Spawn hax, pump events, and gate on the `ready` protocol version. */
 	async start(options: SpawnHaxOptions = {}): Promise<ReadyEvent> {
+		return this.spawnAndPump(options);
+	}
+
+	/** Spawn the child, launch the (generation-stamped) event pump, and resolve
+	 * the `ready` version gate. Shared by start() and resume() so the pump is
+	 * stamped in exactly one place. Captures the CURRENT generation — callers that
+	 * need a fresh generation (resume) bump it before calling. */
+	private async spawnAndPump(options: SpawnHaxOptions): Promise<ReadyEvent> {
 		this._transcriptPath = options.transcriptPath;
-		const spawned = spawnHax(options);
+		const gen = this.generation;
+		const spawned = (this.options.spawn ?? spawnHax)(options);
 		this.spawned = spawned;
 		spawned.child.on("exit", (code, signal) => {
+			if (gen !== this.generation) return; // stale child exit: never cascade
 			for (const handler of this.exitHandlers) handler({ code, signal });
 		});
-		const transport = new FdTransport(spawned.eventStream, spawned.controlStream);
+		const transport = (this.options.transportFactory ?? ((e, c) => new FdTransport(e, c)))(
+			spawned.eventStream,
+			spawned.controlStream,
+		);
 		this.transport = transport;
-		void (async () => {
+		this.pumpDone = (async () => {
 			try {
-				for await (const event of transport.events()) this.deliver(event);
+				for await (const event of transport.events()) {
+					if (gen !== this.generation) continue; // stale generation: drop
+					this.deliver(event);
+				}
 			} finally {
-				this.ended = true;
-				// Release parked gate holds FIRST — they are not waiters, so the
-				// drain loop below would never reach them (a dead engine emits
-				// no idle; without this, later turn initiators deadlock).
-				while (this.idleHooks.length) this.idleHooks.shift()!();
-				while (this.waiters.length || this.exclusiveWaiters.length) this.deliver(null);
+				if (gen === this.generation) {
+					this.ended = true;
+					while (this.idleHooks.length) this.idleHooks.shift()!();
+					while (this.waiters.length || this.exclusiveWaiters.length) this.deliver(null);
+				}
 			}
 		})();
-
 		const ready = (await this.waitForEvent("ready")) as ReadyEvent;
 		if (!isProtocolCompatible(ready.protocol, PROTOCOL_VERSION)) {
 			this.close();
@@ -449,6 +476,49 @@ export class Session {
 		const e = await this.waitForEvent("assistant_turn_finished"); // TurnError on no-prev
 		if (e.type !== "assistant_turn_finished") throw new Error("unexpected event");
 		return { turnId: e.turnId, content: e.content };
+	}
+
+	/** Switch this session to a past one: tear down the current hax child, reset
+	 * lifecycle state, and respawn headless hax with `--resume=ID` plus the prior
+	 * options. The constructor-bound onEvent stays attached. Rejects (engine left
+	 * closed) on spawn/protocol failure. Refuses while a turn holds the gate. */
+	async resume(sessionId: string, options: SpawnHaxOptions = {}): Promise<ReadyEvent> {
+		if (this.gate.held) {
+			throw new Error("cannot resume while a turn is in flight");
+		}
+		const release = await this.gate.acquire();
+		try {
+			const dying = this.pumpDone; // the OLD pump's completion
+			this.generation += 1; // old generation now stale: its events + EOF go inert
+			this.close(); // kill the old child + close the transport (old fd-3 EOFs)
+			await dying; // let the old pump fully unwind (its finally is a no-op now)
+			this.resetLifecycleLatches();
+			const args = [...(options.args ?? []), `--resume=${sessionId}`];
+			return await this.spawnAndPump({
+				...options,
+				args,
+				transcriptPath: options.transcriptPath ?? this._transcriptPath,
+			});
+		} finally {
+			release();
+		}
+	}
+
+	/** Clear the close()/EOF latches and any parked stream state so the same
+	 * Session object is reusable across a respawn. Safe only between turns (resume
+	 * holds the gate, so no waiters are outstanding). */
+	private resetLifecycleLatches(): void {
+		this.closed = false;
+		this.ended = false;
+		this.ready = undefined;
+		this.queue.length = 0;
+		this.waiters.length = 0;
+		this.exclusiveQueue.length = 0;
+		this.exclusiveWaiters.length = 0;
+		this.idleHooks.length = 0;
+		this.swallowNextIdle = false;
+		this.staleCompactsPending = 0;
+		this.cycleInternal = false;
 	}
 
 	/** Start a fresh conversation; resolves once the engine is idle again.
