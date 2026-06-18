@@ -4,6 +4,7 @@ import { decodeChunk } from "@ai-ezio/surface";
 import {
 	buildStandaloneKeySources,
 	buildStandaloneResumeDeps,
+	makeStandaloneOverlay,
 	resumeNotice,
 	startWithTranscript,
 } from "./standalone-runtime.js";
@@ -172,6 +173,44 @@ describe("buildStandaloneKeySources (shared stdin chunking)", () => {
 		expect(first).toEqual(["\x1b[B"]);
 		// The shared source is still alive: a fresh borrow yields the rest.
 		expect(await collect(borrowChunks())).toEqual(["\x1b[A", "\r"]);
+	});
+});
+
+describe("makeStandaloneOverlay (restores the REPL's raw mode after the picker)", () => {
+	function overlayWith() {
+		const rawModes: boolean[] = [];
+		const overlay = makeStandaloneOverlay({
+			borrowChunks: () =>
+				(async function* () {
+					yield "\r"; // Enter — the picker confirms and returns
+				})(),
+			write: () => {},
+			setRawMode: (on) => void rawModes.push(on),
+		});
+		return { overlay, rawModes };
+	}
+
+	it("restores raw mode ON even though the picker's finally turns it OFF", async () => {
+		const { overlay, rawModes } = overlayWith();
+		// Simulate runResumePicker: raw ON at start, raw OFF in its finally.
+		await overlay(async (io) => {
+			io.setRawMode(true);
+			for await (const _ of io.keys) break;
+			io.setRawMode(false); // the picker's finally
+		});
+		// The overlay's own finally re-asserts raw ON last, so the REPL stays raw.
+		expect(rawModes.at(-1)).toBe(true);
+	});
+
+	it("restores raw mode ON even if the picker run throws", async () => {
+		const { overlay, rawModes } = overlayWith();
+		await expect(
+			overlay(async (io) => {
+				io.setRawMode(false);
+				throw new Error("picker boom");
+			}),
+		).rejects.toThrow("picker boom");
+		expect(rawModes.at(-1)).toBe(true); // restored despite the throw
 	});
 });
 

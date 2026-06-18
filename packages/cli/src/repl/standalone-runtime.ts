@@ -142,6 +142,38 @@ export function buildStandaloneKeySources(chunkSource: AsyncIterator<string>): {
 	return { replKeys: codePoints(borrowChunks()), borrowChunks };
 }
 
+/**
+ * Build the standalone `/resume` overlay runner: hand the picker WHOLE chunks + a
+ * raw-mode toggle, run it, then ALWAYS restore the REPL's raw mode (ON) afterward.
+ *
+ * The shared `runResumePicker`'s `finally` unconditionally calls `setRawMode(false)`
+ * — correct for the STARTUP picker (the process then exits or re-mounts, which
+ * re-enables raw), but WRONG for the in-REPL overlay: the standalone REPL keeps
+ * running after `/resume`, so it must get raw mode back ON or its Ctrl-C / arrow /
+ * paste line-reader semantics break. This runner restores raw ON in its own
+ * `finally`, regardless of how the picker (or a throw) left it — mirroring the
+ * mounted `runInteractiveOverlay`'s restore. Exported for unit testing.
+ */
+export function makeStandaloneOverlay(deps: {
+	borrowChunks: () => AsyncIterable<string>;
+	write: (s: string) => void;
+	setRawMode: (on: boolean) => void;
+}): (
+	run: (io: {
+		keys: AsyncIterable<string>;
+		write: (s: string) => void;
+		setRawMode: (on: boolean) => void;
+	}) => Promise<void>,
+) => Promise<void> {
+	return async (run) => {
+		try {
+			await run({ keys: deps.borrowChunks(), write: deps.write, setRawMode: deps.setRawMode });
+		} finally {
+			deps.setRawMode(true); // restore the REPL's raw mode — the picker's finally turns it off
+		}
+	};
+}
+
 export interface StandaloneOptions {
 	/** Forwarded to the headless hax spawn (e.g. ["--continue"] or ["--resume=ID"])
 	 * to resume a prior session. Absent/empty → a fresh session. */
@@ -373,12 +405,13 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 				listSessions: () => spawnListSessions(resolveHaxBinary(), cwd),
 			}),
 			write: (s) => void process.stdout.write(s),
-			runOverlay: async (run) =>
-				run({
-					keys: borrowChunks(),
-					write: (s) => void process.stdout.write(s),
-					setRawMode: (on) => void process.stdin.setRawMode?.(on),
-				}),
+			// The picker's finally leaves raw mode OFF; this runner restores it ON so
+			// the REPL's line reader keeps working after /resume (see makeStandaloneOverlay).
+			runOverlay: makeStandaloneOverlay({
+				borrowChunks,
+				write: (s) => void process.stdout.write(s),
+				setRawMode: (on) => void process.stdin.setRawMode?.(on),
+			}),
 			now: () => Date.now(),
 		});
 
