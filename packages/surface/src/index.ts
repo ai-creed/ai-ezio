@@ -31,3 +31,17 @@ export {
 	type SlashRecorder,
 	type LineClass,
 } from "./slash.js";
+export {
+	parseSessions,
+	formatRelativeTime,
+	formatRow,
+	decodeChunk,
+	applyKey,
+	renderFrame,
+	runResumePicker,
+	type SessionRow,
+	type KeyToken,
+	type PickerDeps,
+	type PickerState,
+	type KeyResult,
+} from "./resume-picker.js";
