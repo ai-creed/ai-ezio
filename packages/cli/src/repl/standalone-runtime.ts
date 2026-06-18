@@ -9,7 +9,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
-import { loadConfig, Session } from "@ai-ezio/harness";
+import {
+	createRenameController,
+	createSessionTitleStore,
+	loadConfig,
+	resolveHaxBinary,
+	Session,
+} from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
 import { buildCompactor } from "./compaction-wiring.js";
@@ -25,12 +31,14 @@ import {
 	makeClipboard,
 	nodeSkillFs,
 	resolvePager,
+	runResumeFlow,
 	showTranscript as renderTranscript,
 	transcriptFilePath,
 	SlashController,
 	type SlashContext,
 	type SkillEnv,
 } from "@ai-ezio/surface";
+import { spawnListSessions } from "./resume-picker.js";
 import { runStandaloneRepl } from "./standalone.js";
 
 export interface OneShotOptions {
@@ -168,8 +176,22 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	// Compaction (M11): wired after the session exists (it needs runExclusive),
 	// but the tee below already consults it — declare the slot first.
 	let wired: ReturnType<typeof buildCompactor> | undefined;
+
+	// §1C rename controller: tracks the hax session id and buffers pending titles.
+	// Built before Session so the onEvent tee can close over it from the start.
+	const titleStore = createSessionTitleStore();
+	const rename = createRenameController({
+		store: titleStore,
+		// Defer off the delivery turn: noteEvent runs inside Session.deliver()'s
+		// onEvent tee, BEFORE the event reaches waiters, so issuing status()
+		// synchronously could register a waiter that steals the turn's settling idle.
+		// queueMicrotask runs it after the idle has been routed to submitAndWait.
+		requestStatus: () => queueMicrotask(() => void session.status().catch(() => {})),
+	});
+
 	const session = new Session({
 		onEvent: (e: ProtocolEvent) => {
+			rename.noteEvent(e);
 			// During a compaction cycle the summarize turn is plumbing, not
 			// conversation: suppress its rendering ("compacting…" chrome shows
 			// instead). The recorder and host still see every event.
@@ -237,9 +259,67 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 			restoreRaw: () => void process.stdin.setRawMode?.(true),
 			write: (s) => void process.stdout.write(s),
 		});
+
+	const stdin = process.stdin;
+
+	// Single shared key iterator. A non-closing borrow view lets the /resume picker
+	// overlay pull from the same stdin without closing it when the overlay breaks.
+	const keyIterator = readKeys(stdin);
+
+	// A non-closing view: an overlay (the /resume picker) can `for await` and break
+	// without calling .return() on the shared iterator (which would end stdin). The
+	// REPL is parked in `await slash.handle` while the overlay runs, so there is no
+	// concurrent pull.
+	const borrowKeys = (): AsyncIterable<string> => ({
+		[Symbol.asyncIterator]: () => ({
+			next: () => keyIterator.next(),
+			return: async () => ({ done: true as const, value: undefined }),
+		}),
+	});
+
+	// §3 resume thunk: list → pick → respawn + re-wire.
+	// Note: renderer.renderBanner is not in createMountedRenderer's public surface —
+	// the post-resume `status` event flows through renderer.handle (the existing tee)
+	// and re-renders the banner automatically, so no explicit call is needed.
+	const resumeThunk = () =>
+		runResumeFlow({
+			write: (s) => void process.stdout.write(s),
+			// The line-serialized REPL only dispatches a slash command between settled
+			// turns, so a turn is never in flight here; Session.resume's gate rejection
+			// is the authoritative backstop.
+			isBusy: () => false,
+			listSessions: () => spawnListSessions(resolveHaxBinary(), cwd),
+			titles: () => titleStore.loadTitles(),
+			currentSessionId: () => rename.currentSessionId(),
+			runOverlay: async (run) =>
+				run({
+					keys: borrowKeys(),
+					write: (s) => void process.stdout.write(s),
+					setRawMode: (on) => void process.stdin.setRawMode?.(on),
+				}),
+			resume: async (id) => {
+				await session.resume(id); // rejects on bad id / spawn / protocol failure
+				await host.start(session); // re-register MCP delegated tools
+				process.stdout.write(resumeNotice([`--resume=${id}`]) ?? "");
+			},
+			// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
+			// Ending the shared key iterator breaks runStandaloneRepl's loop on its
+			// next pull → normal teardown (recorder.close → host.stop → session.close).
+			onFatal: () => void keyIterator.return?.(undefined),
+			now: () => Date.now(),
+		});
+
 	const slashCtx: SlashContext = {
 		write: (s) => void process.stdout.write(s),
-		session,
+		session: {
+			// Wrap newConversation so /new re-binds the tracked id (§1C).
+			newConversation: async () => {
+				await session.newConversation();
+				rename.noteNewConversation();
+			},
+			status: () =>
+				session.status().then((s) => ({ provider: s.provider, model: s.model, effort: s.effort })),
+		},
 		recorder,
 		compactor: wired.compactor,
 		lastContent: () => lastContent,
@@ -252,6 +332,10 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 			})),
 		clipboard: makeClipboard(process.platform, spawn),
 		showTranscript,
+		currentSessionId: () => rename.currentSessionId(),
+		getSessionTitle: () => rename.getSessionTitle(),
+		setSessionTitle: (t) => rename.setSessionTitle(t),
+		resume: resumeThunk,
 	};
 	const slash = new SlashController(slashCtx);
 
@@ -260,7 +344,6 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	const notice = resumeNotice(opts.resumeArgs);
 	if (notice) process.stdout.write(notice);
 
-	const stdin = process.stdin;
 	stdin.setRawMode?.(true);
 	stdin.resume();
 	// Enable bracketed paste (ESC[?2004h) so a pasted block arrives wrapped in
@@ -272,7 +355,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	process.stdout.write("\x1b[?2004h\x1b[>1u");
 	try {
 		await runStandaloneRepl({
-			keys: readKeys(stdin),
+			keys: keyIterator,
 			session,
 			host,
 			compactor: wired.compactor,
