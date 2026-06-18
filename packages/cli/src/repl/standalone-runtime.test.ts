@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRenameController, createSessionTitleStore } from "@ai-ezio/harness";
-import { runResumeFlow } from "@ai-ezio/surface";
-import { resumeNotice, startWithTranscript } from "./standalone-runtime.js";
+import { buildStandaloneResumeDeps, resumeNotice, startWithTranscript } from "./standalone-runtime.js";
 
 /** Minimal shape of the SpawnHaxOptions the helper forwards — avoids coupling
  * the test to the harness package's export surface. */
@@ -66,53 +65,58 @@ describe("standalone wiring: RenameController + SlashContext capabilities", () =
 	});
 });
 
-describe("standalone wiring: resume thunk calls session.resume then host.start", () => {
-	it("runResumeFlow wires resume(id) → session.resume(id) + host.start(session)", async () => {
+describe("standalone wiring: buildStandaloneResumeDeps (production resume path)", () => {
+	function fakes() {
 		const store = createSessionTitleStore({ fs: makeMemFs() });
 		const rename = createRenameController({ store, requestStatus: () => {} });
-		// Seed an id so currentSessionId excludes the active session from the list.
-		rename.noteEvent({ type: "ready", sessionId: "active-id", protocolVersion: "1" } as never);
-
-		const sessionResume = vi.fn().mockResolvedValue(undefined);
-		const hostStart = vi.fn().mockResolvedValue(undefined);
+		const order: string[] = [];
+		const written: string[] = [];
+		const sessionResume = vi.fn(async (_id: string) => {
+			order.push("session.resume");
+			return {} as never;
+		});
+		const hostStart = vi.fn(async () => {
+			order.push("host.start");
+		});
 		const fakeSession = { resume: sessionResume };
 		const fakeHost = { start: hostStart };
-
-		// The target session to resume.
-		const targetId = "target-00000000-0000-0000-0000-000000000001";
-		const listJson = JSON.stringify([
-			{ id: targetId, mtime: Date.now(), mtimeNsec: 0, firstPrompt: "hello" },
-		]);
-
-		// Simulate the overlay immediately selecting the first (only) entry.
-		// We drive the overlay by calling `run` with a key stream that presses Enter.
-		await runResumeFlow({
-			write: () => {},
-			isBusy: () => false,
-			listSessions: async () => listJson,
-			titles: () => store.loadTitles(),
-			currentSessionId: () => rename.currentSessionId(),
-			runOverlay: async (run) => {
-				// Provide a key stream that sends Enter to confirm the pre-selected row.
-				const keys: AsyncIterable<string> = {
-					[Symbol.asyncIterator]: async function* () {
-						yield "\r"; // Enter — confirm selection
-					},
-				};
-				await run({ keys, write: () => {}, setRawMode: () => {} });
-			},
-			resume: async (id) => {
-				await fakeSession.resume(id);
-				await fakeHost.start(fakeSession);
-			},
-			onFatal: () => {},
-			now: () => Date.now(),
+		const keyReturn = vi.fn(async () => ({ done: true as const, value: undefined }));
+		const keyIterator = { return: keyReturn } as unknown as AsyncGenerator<string>;
+		const deps = buildStandaloneResumeDeps({
+			session: fakeSession as never,
+			host: fakeHost as never,
+			titleStore: store,
+			rename,
+			keyIterator,
+			write: (s) => void written.push(s),
+			listSessions: async () => "[]",
 		});
+		return { deps, order, written, sessionResume, hostStart, keyReturn, rename };
+	}
 
-		expect(sessionResume).toHaveBeenCalledOnce();
-		expect(sessionResume).toHaveBeenCalledWith(targetId);
+	it("resume(id) calls session.resume(id) THEN host.start(session) and writes the resume notice", async () => {
+		const { deps, order, written, sessionResume, hostStart } = fakes();
+		await deps.resume("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
+		expect(sessionResume).toHaveBeenCalledWith("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
+		// Order matters (spec §3 post-respawn re-wiring): respawn, THEN re-register tools.
+		expect(order).toEqual(["session.resume", "host.start"]);
 		expect(hostStart).toHaveBeenCalledOnce();
-		expect(hostStart).toHaveBeenCalledWith(fakeSession);
+		expect(written.join("")).toContain("resumed session 13c018d5"); // resume notice printed
+	});
+
+	it("onFatal() ends the REPL loop by returning the shared key iterator", () => {
+		const { deps, keyReturn } = fakes();
+		deps.onFatal();
+		expect(keyReturn).toHaveBeenCalledOnce();
+	});
+
+	it("isBusy is false; titles + currentSessionId delegate to the store/controller", () => {
+		const { deps, rename } = fakes();
+		expect(deps.isBusy()).toBe(false);
+		rename.noteEvent({ type: "ready", sessionId: "abc", protocolVersion: "1" } as never);
+		expect(deps.currentSessionId()).toBe("abc");
+		rename.setSessionTitle("t");
+		expect([...deps.titles().values()]).toContain("t");
 	});
 });
 

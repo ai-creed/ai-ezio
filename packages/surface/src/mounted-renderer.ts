@@ -206,6 +206,14 @@ export function createMountedRenderer(input: {
 		renderPrompt,
 		handle(event: ProtocolEvent): void {
 			switch (event.type) {
+				case "ready":
+					// A fresh `ready` signals a new (or respawned) hax process. Reset the
+					// one-shot banner flag so the next `status` event re-renders the banner
+					// for the resumed session. In --mount-mode hax auto-emits `status` right
+					// after `ready`, so the repaint is driven by the event stream — no
+					// explicit call is needed in the runtime.
+					bannerRendered = false;
+					break;
 				case "status":
 					if (!bannerRendered) {
 						renderBanner(event.provider, event.model, event.effort ?? "");

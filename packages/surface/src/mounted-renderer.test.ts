@@ -55,6 +55,39 @@ describe("createMountedRenderer", () => {
 		expect(t.out()).toContain("high");
 	});
 
+	it("re-renders the banner after a respawn (ready resets the one-shot flag)", () => {
+		// Simulates: first launch → ready+status (banner 1), then /resume → ready+status (banner 2).
+		const t = setup();
+		const READY: ProtocolEvent = { type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "x" };
+		const STATUS2: ProtocolEvent = {
+			type: "status",
+			model: "gpt-6",
+			provider: "openai",
+			protocol: "0.1.0",
+			sessionId: "s2",
+			state: "idle",
+			effort: "low",
+		};
+
+		// First launch: ready then status → one banner.
+		t.r.handle(READY);
+		t.r.handle(STATUS);
+		expect((t.out().match(/ezio/g) || []).length).toBe(1);
+
+		// Respawn: a second ready resets the flag; status re-renders the banner.
+		t.r.handle(READY);
+		t.r.handle(STATUS2);
+		const out = t.out();
+		// Two banners total — the second one shows the new model.
+		expect((out.match(/ezio/g) || []).length).toBe(2);
+		expect(out).toContain("gpt-6");
+		expect(out).toContain("openai");
+
+		// A third status (no intervening ready) does NOT add a third banner.
+		t.r.handle(STATUS2);
+		expect((t.out().match(/ezio/g) || []).length).toBe(2);
+	});
+
 	it("no-raw-delta: an assistant_delta writes nothing to the pane", () => {
 		const t = setup();
 		t.r.handle({ type: "assistant_delta", turnId: "t", text: "hello" });

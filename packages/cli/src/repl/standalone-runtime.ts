@@ -160,6 +160,52 @@ export async function startWithTranscript(
 	return transcriptPath;
 }
 
+/** Collaborators required to build the resume-flow deps for a standalone session. */
+export interface StandaloneResumeDepsInput {
+	session: Pick<Session, "resume">;
+	host: Pick<McpHost, "start">;
+	titleStore: ReturnType<typeof createSessionTitleStore>;
+	rename: ReturnType<typeof createRenameController>;
+	keyIterator: AsyncGenerator<string>;
+	write: (s: string) => void;
+	listSessions: () => Promise<string>;
+}
+
+/**
+ * Build the `ResumeFlowDeps`-shaped subset that wires the standalone session's
+ * production resume path: `resume(id)` calls `session.resume(id)` then
+ * `host.start(session)` (order matters per spec §3) and writes the resume
+ * notice; `onFatal` calls `keyIterator.return` to break the REPL loop.
+ *
+ * Extracted so tests can drive the REAL wiring with fakes instead of
+ * re-proving `runResumeFlow`'s own contract.
+ */
+export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
+	resume: (id: string) => Promise<void>;
+	onFatal: () => void;
+	isBusy: () => boolean;
+	listSessions: () => Promise<string>;
+	titles: () => Map<string, string>;
+	currentSessionId: () => string | undefined;
+} {
+	const { session, host, titleStore, rename, keyIterator, write, listSessions } = input;
+	return {
+		isBusy: () => false,
+		listSessions,
+		titles: () => titleStore.loadTitles(),
+		currentSessionId: () => rename.currentSessionId(),
+		resume: async (id: string) => {
+			await session.resume(id); // rejects on bad id / spawn / protocol failure
+			await host.start(session as Session); // re-register MCP delegated tools
+			write(resumeNotice([`--resume=${id}`]) ?? "");
+		},
+		// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
+		// Ending the shared key iterator breaks runStandaloneRepl's loop on its
+		// next pull → normal teardown (recorder.close → host.stop → session.close).
+		onFatal: () => void keyIterator.return?.(undefined),
+	};
+}
+
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
 	const cwd = process.cwd();
@@ -277,35 +323,31 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		}),
 	});
 
-	// §3 resume thunk: list → pick → respawn + re-wire.
-	// Note: renderer.renderBanner is not in createMountedRenderer's public surface —
-	// the post-resume `status` event flows through renderer.handle (the existing tee)
-	// and re-renders the banner automatically, so no explicit call is needed.
+	// §3 resume thunk: list → pick → respawn + re-wire. The session-specific deps
+	// (resume / onFatal / isBusy / listSessions / titles / currentSessionId) come from
+	// buildStandaloneResumeDeps so the production wiring is unit-testable. The banner
+	// repaints itself: session.resume emits a fresh `ready`, which resets the
+	// renderer's one-shot banner flag (mounted-renderer handle("ready")), and
+	// --mount-mode auto-emits `status` right after — redrawing the banner for the
+	// resumed session. No explicit renderer call is needed.
 	const resumeThunk = () =>
 		runResumeFlow({
+			...buildStandaloneResumeDeps({
+				session,
+				host,
+				titleStore,
+				rename,
+				keyIterator,
+				write: (s) => void process.stdout.write(s),
+				listSessions: () => spawnListSessions(resolveHaxBinary(), cwd),
+			}),
 			write: (s) => void process.stdout.write(s),
-			// The line-serialized REPL only dispatches a slash command between settled
-			// turns, so a turn is never in flight here; Session.resume's gate rejection
-			// is the authoritative backstop.
-			isBusy: () => false,
-			listSessions: () => spawnListSessions(resolveHaxBinary(), cwd),
-			titles: () => titleStore.loadTitles(),
-			currentSessionId: () => rename.currentSessionId(),
 			runOverlay: async (run) =>
 				run({
 					keys: borrowKeys(),
 					write: (s) => void process.stdout.write(s),
 					setRawMode: (on) => void process.stdin.setRawMode?.(on),
 				}),
-			resume: async (id) => {
-				await session.resume(id); // rejects on bad id / spawn / protocol failure
-				await host.start(session); // re-register MCP delegated tools
-				process.stdout.write(resumeNotice([`--resume=${id}`]) ?? "");
-			},
-			// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
-			// Ending the shared key iterator breaks runStandaloneRepl's loop on its
-			// next pull → normal teardown (recorder.close → host.stop → session.close).
-			onFatal: () => void keyIterator.return?.(undefined),
 			now: () => Date.now(),
 		});
 
