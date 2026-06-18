@@ -52,3 +52,11 @@ export {
 	type AutoCompactDriver,
 	type AutoCompactDriverOptions,
 } from "./auto-compact-driver.js";
+export {
+	createSessionTitleStore,
+	createRenameController,
+	defaultTitleStorePath,
+	type SessionTitleStore,
+	type RenameController,
+	type TitleFs,
+} from "./session-titles.js";
