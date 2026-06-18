@@ -233,11 +233,18 @@ parameterized by injected primitives so both runtimes share the control flow:
    `finish or interrupt the current turn first\n` and return (no respawn). See §4
    for how "busy" is determined per mode.
 2. **List.** `spawnListSessions()` → `parseSessions` → merge titles from the §1A
-   store. Empty list → `no other sessions in this folder\n`, return.
-3. **Pick.** Run the arrow picker (`runResumePicker`, now in surface) over a **raw
+   store.
+3. **Exclude the active session.** Filter out the row whose `id ===
+   currentSessionId()` (when an id is materialized — §1C; if the id is still
+   `undefined`, nothing is excluded). Resuming the session you are already in is a
+   pointless respawn, so it must never be offered. If the filtered list is empty —
+   there are no sessions, or the only one is the active session — write `no other
+   sessions in this folder\n` and return. (The empty-list message keys off the
+   *post-filter* count, so "only the current session exists" takes this path.)
+4. **Pick.** Run the arrow picker (`runResumePicker`, now in surface) over a **raw
    key stream** provided by the runtime. Cancel (Esc / `q` / Ctrl-C / EOF) →
    no-op return.
-4. **Switch.** Chosen id → `Session.resume(id)` (engine respawn) → per-runtime
+5. **Switch.** Chosen id → `Session.resume(id)` (engine respawn) → per-runtime
    post-respawn re-wiring.
 
 ### Raw key stream — the per-mode split
@@ -352,7 +359,9 @@ itself is single-sourced in the harness.
   settling `idle`). `Session.resume` also rejects if the turn gate is held, as a
   backstop.
 - **Picker cancel / empty list** → clean no-op with a one-line note; the current
-  session is untouched.
+  session is untouched. The empty-list path is reached both when no sessions exist
+  and when the **only** session is the active one (excluded per §3 step 3) — in both
+  cases `/resume` reports "no other sessions" and never opens the picker.
 - **Respawn failure** (bad id, hax spawn error, protocol-version mismatch) — the
   old session is already closed and cannot be revived in place. Behavior:
   **report and exit cleanly.** Write `resume failed: <reason>\n`, then let the
@@ -408,7 +417,12 @@ itself is single-sourced in the harness.
   a pending title, and that no title is ever written under the `"unknown"` sentinel.
 - **`/resume` (surface):** the shared flow helper with injected primitives —
   busy-guard branch, empty-list branch, cancel branch, and select → `resume(id)`
-  called with the chosen id; `resume` unavailable when unwired.
+  called with the chosen id; `resume` unavailable when unwired. **Active-session
+  exclusion:** with a list whose ids include `currentSessionId()`, assert that row
+  is filtered out before the picker renders (it is never selectable); and when the
+  active session is the **only** entry, the flow takes the empty-list "no other
+  sessions" path and never opens the picker. A `currentSessionId()` of `undefined`
+  excludes nothing.
 - **`Session.resume` (harness):** against the **real hax engine**
   (`HAX_PROVIDER=mock`) + a seeded session — assert history replays after resume,
   a post-resume turn succeeds, the lifecycle latches reset (a second resume works),
