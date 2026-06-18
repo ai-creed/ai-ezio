@@ -75,14 +75,16 @@ New `SlashContext` capabilities:
 
 | Capability | Used by | Standalone source | Mounted source |
 |---|---|---|---|
-| `currentSessionId(): string \| undefined` | `/rename`, `/resume` | tracked from `ready`/`status` events in `standalone-runtime.ts` | tracked from `ready`/`status` in the adapter's `onEvent` |
-| `getSessionTitle(): string \| undefined` / `setSessionTitle(title): void` | `/rename` | harness title store, keyed by `currentSessionId()` | same store, same key |
+| `currentSessionId(): string \| undefined` | `/rename`, `/resume` | the §1C tracker in `standalone-runtime.ts` (seed from `ready`, refresh via `status()` after `new_conversation` and on first-turn materialization) | the same §1C tracker in the adapter's `onEvent` + post-`/new` `status()` query |
+| `getSessionTitle(): string \| undefined` / `setSessionTitle(title): void` | `/rename` | harness title store + the §1C tracker (id may be `undefined` ⇒ pending-rename buffer, §2) | same store + tracker |
 | `resume(): Promise<void>` | `/resume` | runtime thunk: `spawnListSessions` + line-reader suspend/restore + `Session.resume` | runtime thunk: `spawnListSessions` + the new `runInteractiveOverlay` seam + `Session.resume` |
 
 The heavy work is the `resume()` thunk: it needs a raw key stream (per-mode) and
-an engine respawn (a new harness method). Three structural pieces support it: a
-title store (§1A), a relocated/generalized picker (§1B), and `Session.resume`
-plus a mounted raw-input overlay seam (§3).
+an engine respawn (a new harness method). Four structural pieces support it: a
+title store (§1A), a relocated/generalized picker (§1B), a session-id acquisition
+rule (§1C — without which `/rename` targets the wrong session, see the hax id
+materialization note there), and `Session.resume` plus a mounted raw-input overlay
+seam (§3).
 
 ## §1 — Shared pieces
 
@@ -137,6 +139,44 @@ from surface's index. This mirrors the §1 relocation the predecessor spec did f
 Surface needs no new package dependency (the picker is already pure given injected
 `keys` / `write` / `now` / `setRawMode`).
 
+### §1C — Current session id acquisition
+
+`/rename` keys the title store by the current session id, and `/resume` uses it to
+skip the active session — so both depend on the runtime knowing the live session's
+id. hax does **not** make that trivial, and the naive "track the id from
+`ready`/`status`" rule is wrong in two ways:
+
+1. **A fresh, never-written session reports no id.** `session_log_resume_hint()`
+   returns `NULL` until the log header is on disk (`header_written`), and
+   `ready`/`status` serialize a missing id as the literal `"unknown"`
+   (`vendor/hax/src/session.c:493-502`, `vendor/hax/src/protocol/emit.c:77-83` and
+   `:427-439`). hax materializes the file lazily — the id only becomes real once
+   the session has written a turn.
+2. **`/new` rotates the session without announcing it.** `new_conversation` resets
+   to a fresh session log but emits only `idle`, never a new `ready` or `status`
+   (`vendor/hax/src/agent.c:599-612` and `:1008-1011`). A tracker that listens only
+   for `ready`/`status` keeps the *previous* session's id after `/new`, so a
+   following `/rename` would title the wrong session.
+
+The acquisition rule (no hax change — all harness/runtime behavior):
+
+- The runtime maintains `currentSessionId: string | undefined`, with hax's
+  `"unknown"` **normalized to `undefined`** so callers never key on the sentinel.
+- **Seeded** from the `ready` event at start and after each `Session.resume`.
+- **Refreshed by issuing an explicit `Session.status()` control** (which re-reads
+  the live id) at the two points events alone do not cover: (a) immediately after
+  `newConversation()` resolves — re-binding to the rotated session after `/new`;
+  and (b) on each turn-settling `idle` while the tracked id is still `undefined` —
+  capturing the id the instant the first turn materializes the session file. Once a
+  real id is captured, (b) stops firing.
+- `status()` here is the concrete harness `Session.status()` (its `StatusEvent`
+  carries `sessionId`), distinct from the narrowed `SlashSession.status()` facet
+  `/status` uses. Standalone calls it on the `Session` directly; the mounted
+  adapter tracks `ready`/`status` in `onEvent` and additionally issues a `status()`
+  after `new_conversation`.
+
+This single tracker backs the `currentSessionId()` capability both commands use.
+
 ## §2 — `/rename`
 
 Command definition in `slash.ts` (added to `builtinCommands`):
@@ -148,18 +188,28 @@ summary: "set a friendly title for this session (shown in /resume)"
 
 `run(ctx, args)`:
 
-1. If `ctx.currentSessionId` is unwired or returns `undefined` → write
-   `rename unavailable\n` (no current session to title) and return.
+1. If `ctx.setSessionTitle` is unwired → write `rename unavailable\n` and return.
 2. `const title = args.trim()`.
-3. Empty (`/rename` with no argument) → write the current title
-   (`ctx.getSessionTitle()`), or `no title set · usage: /rename <text>\n` when
-   unset.
+3. Empty (`/rename` with no argument) → write the effective current title — the
+   buffered pending title (below) if one is queued, else `ctx.getSessionTitle()` —
+   or `no title set · usage: /rename <text>\n` when neither exists.
 4. Non-empty → `ctx.setSessionTitle(title)`; echo `— renamed to "<title>" —\n`.
 
-`currentSessionId` / `getSessionTitle` / `setSessionTitle` are wired in both
-runtimes (§ table above). The title is written to the §1A store keyed by the
-current id and surfaces immediately in the next `/resume` list. No engine
-round-trip, no hax change.
+`setSessionTitle(title)` is wired per-runtime over the §1A store and the §1C
+tracker, and **must handle the unmaterialized-id case** so the "title a brand-new
+session" requirement holds without a hax change:
+
+- **Current id known** (`currentSessionId()` defined) → write the store
+  immediately under that id; the title surfaces in the next `/resume` list. No
+  engine round-trip.
+- **Current id not yet materialized** (`undefined` — a brand-new session with no
+  turns, §1C) → buffer the title as a **pending rename** in the runtime
+  (in-memory), never writing under the `"unknown"` sentinel. When §1C's first-turn
+  `status()` materializes the real id, the runtime flushes the pending title to the
+  store under that id and clears the buffer. The title is therefore accepted
+  immediately and lands under the real id as soon as one exists.
+- **`/new` clears any pending rename** — the buffered title belonged to the prior
+  (now-rotated) conversation; a fresh conversation starts untitled.
 
 ## §3 — `/resume`
 
@@ -245,17 +295,42 @@ async resume(sessionId: string, options?: SpawnHaxOptions): Promise<ReadyEvent>;
 
 Implementation notes:
 
-- Acquire the turn gate (or reject if held) so a resume can never race a turn.
-- `close()` the current child + transport, then **reset the lifecycle latches**
-  (`closed`, `ended`, `ready`, queued `waiters` / `exclusiveWaiters` /
-  `idleHooks`) so the same object is reusable. (Today `close()` latches `closed`
-  permanently; resume must clear it.)
-- Respawn via the existing `start()` spawn path with
-  `args: ["--resume=" + sessionId]` appended after the protocol/mount flags, reusing
-  the prior `transcriptPath`. hax replays history over the protocol even under
-  `--mount-mode` (per the resume predecessor).
-- Return the new `ready` (its `sessionId` is the resumed id; consumers update
-  their tracked `currentSessionId`).
+- **Acquire the turn gate** (or reject if held) so a resume can never race a turn.
+  Because a resume runs between turns (the §4 busy guard) and holds the gate
+  exclusively, no turn waiters exist while it executes.
+- **Generation-stamp the event pump.** `start()`'s pump is fire-and-forget: it
+  loops `for await (event of transport.events())` and, in its `finally`, sets
+  `ended = true`, flushes `idleHooks`, and drains `waiters` / `exclusiveWaiters`
+  with `deliver(null)` (`packages/harness/src/session.ts:242-253`). A respawn that
+  reused the same `Session` while the *old* child's pump was still unwinding would
+  let that stale EOF mark the freshly-respawned session `ended` or resolve its new
+  waiters with `null` — corrupting it. Guard against this: bump a `this.generation`
+  counter on every spawn (start + resume), capture `const gen = this.generation` in
+  the pump closure, and have **both `deliver()` and the pump's `finally`
+  early-return when `gen !== this.generation`** — a prior generation's events and
+  EOF are then inert.
+- **Quiesce the old pump before clearing latches.** `close()` only closes the
+  transport and kills the child synchronously
+  (`packages/harness/src/session.ts:476-488`); the pump's `finally` runs later, when
+  fd-3 reaches EOF. So `resume()` proceeds in strict order: (1) `close()` the current
+  child + transport; (2) **await the old pump's termination** — expose a `pumpDone`
+  promise that resolves when its `finally` completes — so the old generation is fully
+  unwound; (3) **reset the lifecycle latches** (`closed`, `ended`, `ready`,
+  `waiters`, `exclusiveWaiters`, `idleHooks`) so the same object is reusable (today
+  `close()` latches `closed` permanently; resume must clear it); (4) bump
+  `generation` and respawn. Awaiting `pumpDone` is the primary ordering guarantee;
+  the generation guard is defense-in-depth for any late event that slips through
+  before EOF.
+- **Refactor:** factor `start()`'s spawn + pump-launch + `ready`-gate logic into a
+  shared private helper that both `start()` and `resume()` call, so the pump is
+  generation-stamped in exactly one place and the two entry points cannot drift.
+- Respawn with `args: ["--resume=" + sessionId]` appended after the protocol/mount
+  flags, reusing the prior `transcriptPath`. hax replays history over the protocol
+  even under `--mount-mode` (per the resume predecessor).
+- On spawn/protocol failure the method rejects with the engine left closed; the
+  caller surfaces it and exits (§4).
+- Return the new `ready` (its `sessionId` is the resumed id; consumers update their
+  tracked `currentSessionId`).
 
 ### Post-respawn re-wiring (per runtime, after `resume()` resolves)
 
@@ -284,9 +359,16 @@ itself is single-sourced in the harness.
   normal engine-exit path tear the REPL (standalone) or pane (mounted) down; the
   closed prior session is safe on disk and re-resumable on relaunch. No fresh
   fallback conversation is spawned (decision: predictable over forgiving).
-- **Rename of a brand-new session** with no turns yet: hax may not list it in
-  `--list-sessions` until it has content, so the title is stored but the row
-  appears only once the session has a turn. Known and acceptable.
+- **Rename of a brand-new session** with no turns yet: its id is not materialized
+  (§1C), so `/rename` buffers the title as a pending rename and flushes it to the
+  store under the real id on the first turn. hax also does not list the session in
+  `--list-sessions` until it has content, so the titled row appears once the session
+  has a turn — by which point the pending title has been flushed. Known and
+  acceptable.
+- **`/rename` after `/new`** titles the rotated session, not the prior one: §1C
+  re-queries `status()` after `new_conversation`, so `currentSessionId()` rebinds to
+  the fresh session before the next `/rename` (and a pending rename, if any, is
+  cleared by `/new`).
 - **Title sidecar growth** is unbounded; pruning is out of scope (future work).
 - **cwd scoping:** `/resume` lists only the current folder's sessions (unchanged
   `--list-sessions` behavior).
@@ -312,19 +394,33 @@ itself is single-sourced in the harness.
 - **Picker + merge (surface):** title merge into row display (titled id shows
   title, untitled shows `firstPrompt`, neither shows `(no prompt)`); existing
   key-handling / parse / render tests move with the module and still pass.
-- **`/rename` (surface):** via a fake `SlashContext` — no current id → unavailable;
-  no-arg with/without an existing title; non-empty sets the store and echoes the
-  confirmation.
+- **`/rename` (surface):** via a fake `SlashContext` — `setSessionTitle` unwired →
+  `rename unavailable`; no-arg with/without an existing or pending title (prints the
+  effective title or the `no title set` usage line); non-empty calls
+  `setSessionTitle` and echoes the confirmation.
+- **§1C tracker + pending rename (runtime — standalone-runtime + adapter):** the id
+  tracker normalizes hax's `"unknown"` to `undefined`; it seeds from `ready`,
+  re-queries `status()` after `newConversation()` so a **`/new` then `/rename`
+  titles the rotated session** (not the prior id — finding 2), and materializes the
+  id on the **first-turn `idle`** for a session that started `"unknown"` (finding 1).
+  A `/rename` issued while the id is `undefined` buffers a pending title; assert it
+  is **flushed to the store under the real id once materialized**, that `/new` clears
+  a pending title, and that no title is ever written under the `"unknown"` sentinel.
 - **`/resume` (surface):** the shared flow helper with injected primitives —
   busy-guard branch, empty-list branch, cancel branch, and select → `resume(id)`
   called with the chosen id; `resume` unavailable when unwired.
 - **`Session.resume` (harness):** against the **real hax engine**
   (`HAX_PROVIDER=mock`) + a seeded session — assert history replays after resume,
   a post-resume turn succeeds, the lifecycle latches reset (a second resume works),
-  and a resume is rejected while the gate is held.
-- **Standalone runtime (cli):** `currentSessionId` tracks `ready`/`status`; the
-  `resume` thunk wires the line-reader suspend/restore + respawn re-wiring; rename
-  writes the store.
+  and a resume is rejected while the gate is held. **Stale old-pump EOF race
+  (finding 3):** with a delayed old-child EOF (e.g. an injectable transport whose
+  `events()` iterator completes *after* the respawn), assert the old generation's
+  `finally`/`deliver(null)` does **not** mark the respawned session `ended` or
+  resolve its new waiters with `null` — i.e. the generation guard + `pumpDone`
+  await hold, and a turn submitted after resume still settles normally.
+- **Standalone runtime (cli):** the `resume` thunk wires the line-reader
+  suspend/restore + respawn re-wiring; rename writes the store (the id-tracker
+  specifics are covered by the §1C bullet above).
 - **Mounted overlay (ai-whisper):** `live-session.ts` `runInteractiveOverlay`
   suspends the line reader, feeds raw chunks to the async iterable, and restores
   cooked mode + the line reader afterward (assert order via a fake stdin/tty).
