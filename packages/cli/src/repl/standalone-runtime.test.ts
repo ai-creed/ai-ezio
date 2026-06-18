@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRenameController, createSessionTitleStore } from "@ai-ezio/harness";
-import { buildStandaloneResumeDeps, resumeNotice, startWithTranscript } from "./standalone-runtime.js";
+import { decodeChunk } from "@ai-ezio/surface";
+import {
+	buildStandaloneKeySources,
+	buildStandaloneResumeDeps,
+	resumeNotice,
+	startWithTranscript,
+} from "./standalone-runtime.js";
 
 /** Minimal shape of the SpawnHaxOptions the helper forwards — avoids coupling
  * the test to the harness package's export surface. */
@@ -81,13 +87,13 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		const fakeSession = { resume: sessionResume };
 		const fakeHost = { start: hostStart };
 		const keyReturn = vi.fn(async () => ({ done: true as const, value: undefined }));
-		const keyIterator = { return: keyReturn } as unknown as AsyncGenerator<string>;
+		const chunkSource = { return: keyReturn } as unknown as AsyncGenerator<string>;
 		const deps = buildStandaloneResumeDeps({
 			session: fakeSession as never,
 			host: fakeHost as never,
 			titleStore: store,
 			rename,
-			keyIterator,
+			chunkSource,
 			write: (s) => void written.push(s),
 			listSessions: async () => "[]",
 		});
@@ -104,7 +110,7 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		expect(written.join("")).toContain("resumed session 13c018d5"); // resume notice printed
 	});
 
-	it("onFatal() ends the REPL loop by returning the shared key iterator", () => {
+	it("onFatal() ends the REPL loop by returning the shared chunk source", () => {
 		const { deps, keyReturn } = fakes();
 		deps.onFatal();
 		expect(keyReturn).toHaveBeenCalledOnce();
@@ -117,6 +123,55 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		expect(deps.currentSessionId()).toBe("abc");
 		rename.setSessionTitle("t");
 		expect([...deps.titles().values()]).toContain("t");
+	});
+});
+
+describe("buildStandaloneKeySources (shared stdin chunking)", () => {
+	/** A fake whole-chunk stdin source: yields each chunk intact, exactly the way
+	 * production `stdinChunks` does (escape sequences arrive whole). */
+	async function* fakeChunkSource(chunks: string[]): AsyncGenerator<string> {
+		for (const c of chunks) yield c;
+	}
+
+	async function collect(it: AsyncIterable<string>): Promise<string[]> {
+		const out: string[] = [];
+		for await (const x of it) out.push(x);
+		return out;
+	}
+
+	it("borrowChunks() hands the picker WHOLE chunks — a Down arrow stays one item, decoded as nav (not cancel)", async () => {
+		// The regression: the standalone overlay used to borrow a per-code-point
+		// iterator, so a Down arrow ("\x1b[B") arrived split across three reads and
+		// decodeChunk("\x1b") fired "cancel" on the first byte. The shared whole-chunk
+		// source must deliver "\x1b[B" as ONE item so the picker sees a navigation key.
+		const { borrowChunks } = buildStandaloneKeySources(fakeChunkSource(["\x1b[B", "\r"]));
+		const items = await collect(borrowChunks());
+		expect(items).toEqual(["\x1b[B", "\r"]); // chunks intact — NOT split into bytes
+		expect(decodeChunk(items[0]!)).toBe("down"); // a nav key, NOT "cancel"
+		expect(decodeChunk(items[1]!)).toBe("enter");
+	});
+
+	it("replKeys splits chunks into code points for the line reader (feedKey's ESC accumulator)", async () => {
+		// The line reader must still see one code point at a time so feedKey can run
+		// its own multi-byte ESC handling — preserved, just sourced from the shared
+		// chunk iterator. A "/r" chunk becomes "/", "r".
+		const { replKeys } = buildStandaloneKeySources(fakeChunkSource(["/r"]));
+		expect(await collect(replKeys)).toEqual(["/", "r"]);
+	});
+
+	it("borrowChunks()'s return is non-closing — the shared source survives an overlay break", async () => {
+		// An overlay `for await`s a couple chunks then breaks (calls .return on the
+		// borrowed view). That must NOT end the shared source: the next borrow keeps
+		// reading the remaining chunks.
+		const { borrowChunks } = buildStandaloneKeySources(fakeChunkSource(["\x1b[B", "\x1b[A", "\r"]));
+		const first: string[] = [];
+		for await (const c of borrowChunks()) {
+			first.push(c);
+			break; // overlay stops consuming → borrowed view's return() runs (no-op)
+		}
+		expect(first).toEqual(["\x1b[B"]);
+		// The shared source is still alive: a fresh borrow yields the rest.
+		expect(await collect(borrowChunks())).toEqual(["\x1b[A", "\r"]);
 	});
 });
 

@@ -38,6 +38,7 @@ import {
 	type SlashContext,
 	type SkillEnv,
 } from "@ai-ezio/surface";
+import { stdinChunks } from "../cli.js";
 import { spawnListSessions } from "./resume-picker.js";
 import { runStandaloneRepl } from "./standalone.js";
 
@@ -102,12 +103,43 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 	return code;
 }
 
-/** Decode a readable TTY into a stream of single characters (code points). */
-async function* readKeys(stdin: NodeJS.ReadStream): AsyncGenerator<string> {
-	for await (const chunk of stdin) {
-		const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-		for (const ch of s) yield ch;
-	}
+/** Split whole stdin chunks into single code points for the line reader. The
+ * REPL's `feedKey` runs its own ESC accumulator, so it must see one code point at
+ * a time; the picker overlay, by contrast, needs WHOLE chunks (see below). Yields
+ * lazily off the shared chunk source. */
+export async function* codePoints(src: AsyncIterable<string>): AsyncGenerator<string> {
+	for await (const chunk of src) for (const ch of chunk) yield ch;
+}
+
+/**
+ * Derive both standalone input views from ONE whole-chunk stdin source so the
+ * line reader and the `/resume` overlay agree on chunking:
+ *
+ *  - `replKeys` — code points for `runStandaloneRepl` (its `feedKey` owns the ESC
+ *    accumulator, so it must see one code point at a time).
+ *  - `borrowChunks()` — WHOLE chunks for the picker overlay, so `decodeChunk` gets
+ *    a complete escape sequence (e.g. `"\x1b[B"`) in one item instead of the bare
+ *    `"\x1b"` first byte (which it would read as cancel).
+ *
+ * The two views never read concurrently: the REPL is parked in `await slash.handle`
+ * while the overlay runs, and the code-point generator is suspended at its `yield`
+ * with no pending read on the chunk source — so a single shared chunk iterator is
+ * safe. `borrowChunks` is non-closing (its `return` is a no-op) so an overlay can
+ * `for await` + break without ending the shared source; only `chunkSource.return`
+ * (via `onFatal`) ends it. Extracted + exported so the production stream wiring is
+ * unit-testable.
+ */
+export function buildStandaloneKeySources(chunkSource: AsyncIterator<string>): {
+	replKeys: AsyncGenerator<string>;
+	borrowChunks: () => AsyncIterable<string>;
+} {
+	const borrowChunks = (): AsyncIterable<string> => ({
+		[Symbol.asyncIterator]: () => ({
+			next: () => chunkSource.next(),
+			return: async () => ({ done: true as const, value: undefined }),
+		}),
+	});
+	return { replKeys: codePoints(borrowChunks()), borrowChunks };
 }
 
 export interface StandaloneOptions {
@@ -166,7 +198,9 @@ export interface StandaloneResumeDepsInput {
 	host: Pick<McpHost, "start">;
 	titleStore: ReturnType<typeof createSessionTitleStore>;
 	rename: ReturnType<typeof createRenameController>;
-	keyIterator: AsyncGenerator<string>;
+	/** The shared whole-chunk stdin source. `onFatal` ends it (via `.return`) to
+	 * break the REPL loop on its next pull. */
+	chunkSource: Pick<AsyncGenerator<string>, "return">;
 	write: (s: string) => void;
 	listSessions: () => Promise<string>;
 }
@@ -175,7 +209,7 @@ export interface StandaloneResumeDepsInput {
  * Build the `ResumeFlowDeps`-shaped subset that wires the standalone session's
  * production resume path: `resume(id)` calls `session.resume(id)` then
  * `host.start(session)` (order matters per spec §3) and writes the resume
- * notice; `onFatal` calls `keyIterator.return` to break the REPL loop.
+ * notice; `onFatal` calls `chunkSource.return` to break the REPL loop.
  *
  * Extracted so tests can drive the REAL wiring with fakes instead of
  * re-proving `runResumeFlow`'s own contract.
@@ -188,7 +222,7 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 	titles: () => Map<string, string>;
 	currentSessionId: () => string | undefined;
 } {
-	const { session, host, titleStore, rename, keyIterator, write, listSessions } = input;
+	const { session, host, titleStore, rename, chunkSource, write, listSessions } = input;
 	return {
 		isBusy: () => false,
 		listSessions,
@@ -200,9 +234,9 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 			write(resumeNotice([`--resume=${id}`]) ?? "");
 		},
 		// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
-		// Ending the shared key iterator breaks runStandaloneRepl's loop on its
+		// Ending the shared chunk source breaks runStandaloneRepl's loop on its
 		// next pull → normal teardown (recorder.close → host.stop → session.close).
-		onFatal: () => void keyIterator.return?.(undefined),
+		onFatal: () => void chunkSource.return?.(undefined),
 	};
 }
 
@@ -308,20 +342,17 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 
 	const stdin = process.stdin;
 
-	// Single shared key iterator. A non-closing borrow view lets the /resume picker
-	// overlay pull from the same stdin without closing it when the overlay breaks.
-	const keyIterator = readKeys(stdin);
-
-	// A non-closing view: an overlay (the /resume picker) can `for await` and break
-	// without calling .return() on the shared iterator (which would end stdin). The
-	// REPL is parked in `await slash.handle` while the overlay runs, so there is no
-	// concurrent pull.
-	const borrowKeys = (): AsyncIterable<string> => ({
-		[Symbol.asyncIterator]: () => ({
-			next: () => keyIterator.next(),
-			return: async () => ({ done: true as const, value: undefined }),
-		}),
-	});
+	// ONE whole-chunk stdin source feeds BOTH consumers, so they agree on chunking.
+	// stdinChunks yields raw stdin a chunk at a time (escape sequences arrive whole)
+	// and does NOT destroy the stream on a consumer's break — the overlay can stop
+	// pulling without EOFing the REPL.
+	const chunkSource = stdinChunks(stdin);
+	// replKeys: code points for the line reader (feedKey owns the ESC accumulator).
+	// borrowChunks(): WHOLE chunks for the /resume overlay, so decodeChunk sees a
+	// complete escape sequence (e.g. "\x1b[B") instead of the bare "\x1b" first byte
+	// (which it would misread as cancel). The two views never read concurrently: the
+	// REPL is parked in `await slash.handle` while the overlay runs.
+	const { replKeys, borrowChunks } = buildStandaloneKeySources(chunkSource);
 
 	// §3 resume thunk: list → pick → respawn + re-wire. The session-specific deps
 	// (resume / onFatal / isBusy / listSessions / titles / currentSessionId) come from
@@ -337,14 +368,14 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 				host,
 				titleStore,
 				rename,
-				keyIterator,
+				chunkSource,
 				write: (s) => void process.stdout.write(s),
 				listSessions: () => spawnListSessions(resolveHaxBinary(), cwd),
 			}),
 			write: (s) => void process.stdout.write(s),
 			runOverlay: async (run) =>
 				run({
-					keys: borrowKeys(),
+					keys: borrowChunks(),
 					write: (s) => void process.stdout.write(s),
 					setRawMode: (on) => void process.stdin.setRawMode?.(on),
 				}),
@@ -397,7 +428,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	process.stdout.write("\x1b[?2004h\x1b[>1u");
 	try {
 		await runStandaloneRepl({
-			keys: keyIterator,
+			keys: replKeys,
 			session,
 			host,
 			compactor: wired.compactor,
