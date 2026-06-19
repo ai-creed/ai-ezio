@@ -152,6 +152,16 @@ describe("buildStandaloneKeySources (shared stdin chunking)", () => {
 		expect(decodeChunk(items[1]!)).toBe("enter");
 	});
 
+	it("borrowChunks() passes the pagination keys through whole ([ ] and Ctrl+A)", () => {
+		// Single-byte keys can't be split; this guards that the standalone whole-chunk
+		// source delivers them intact so the picker's decodeChunk reads them directly.
+		const { borrowChunks } = buildStandaloneKeySources(fakeChunkSource(["[", "]", "\x01"]));
+		return collect(borrowChunks()).then((items) => {
+			expect(items).toEqual(["[", "]", "\x01"]);
+			expect(items.map((c) => decodeChunk(c))).toEqual(["pageprev", "pagenext", "toggleall"]);
+		});
+	});
+
 	it("replKeys splits chunks into code points for the line reader (feedKey's ESC accumulator)", async () => {
 		// The line reader must still see one code point at a time so feedKey can run
 		// its own multi-byte ESC handling — preserved, just sourced from the shared
