@@ -40,7 +40,11 @@ function fakeTransport() {
 	// Transport requires close(): void (packages/protocol/src/transport.ts) — a no-op
 	// here; the fake child kill is also a no-op, so the OLD pump only ends when a test
 	// calls end() (which is exactly how the stale-EOF ordering is driven below).
-	const t: Transport = { events: () => events, send: (c) => void sent.push(c as ProtocolEvent), close: () => {} };
+	const t: Transport = {
+		events: () => events,
+		send: (c) => void sent.push(c as ProtocolEvent),
+		close: () => {},
+	};
 	return { transport: t, push: (e: ProtocolEvent) => push(e), end: () => end(), sent };
 }
 
@@ -48,16 +52,32 @@ function fakeTransport() {
 // reject with ProtocolVersionError (isProtocolCompatible compares the major) before the
 // test can exercise anything. A literal "1" would fail against a "0.x" harness.
 const ready = (sessionId = "s") =>
-	({ type: "ready", sessionId, protocol: PROTOCOL_VERSION, haxBaseCommit: "c" }) as unknown as ProtocolEvent;
+	({
+		type: "ready",
+		sessionId,
+		protocol: PROTOCOL_VERSION,
+		haxBaseCommit: "c",
+	}) as unknown as ProtocolEvent;
 const readyResumed = (id: string) => ready(id);
 const statusEvent = (sessionId: string) =>
-	({ type: "status", sessionId, model: "m", provider: "p", protocol: PROTOCOL_VERSION, state: "idle" }) as unknown as ProtocolEvent;
+	({
+		type: "status",
+		sessionId,
+		model: "m",
+		provider: "p",
+		protocol: PROTOCOL_VERSION,
+		state: "idle",
+	}) as unknown as ProtocolEvent;
 
 describe("Session.resume", () => {
 	function makeSession(transports: ReturnType<typeof fakeTransport>[]) {
 		let i = 0;
 		const session = new Session({
-			spawn: () => ({ child: { on: () => {}, kill: () => {} } as never, eventStream: new PassThrough(), controlStream: new PassThrough() }),
+			spawn: () => ({
+				child: { on: () => {}, kill: () => {} } as never,
+				eventStream: new PassThrough(),
+				controlStream: new PassThrough(),
+			}),
 			transportFactory: () => transports[i++]!.transport,
 		});
 		return session;
@@ -69,7 +89,9 @@ describe("Session.resume", () => {
 		const started = session.start();
 		t1.push(ready());
 		await started;
-		const release = await (session as unknown as { gate: { acquire(): Promise<() => void> } }).gate.acquire();
+		const release = await (
+			session as unknown as { gate: { acquire(): Promise<() => void> } }
+		).gate.acquire();
 		// Recoverable (NOT a respawn failure): a distinct EngineBusyError so callers
 		// report "busy" and leave the session intact rather than tearing it down.
 		const err = await session.resume("other").catch((e: unknown) => e);
@@ -119,7 +141,11 @@ describe("RenameController over a real Session (§1C, no idle theft)", () => {
 			requestStatus: () => queueMicrotask(() => void session.status().catch(() => {})),
 		});
 		session = new Session({
-			spawn: () => ({ child: { on: () => {}, kill: () => {} } as never, eventStream: new PassThrough(), controlStream: new PassThrough() }),
+			spawn: () => ({
+				child: { on: () => {}, kill: () => {} } as never,
+				eventStream: new PassThrough(),
+				controlStream: new PassThrough(),
+			}),
 			transportFactory: () => t.transport,
 			onEvent: (e) => rename.noteEvent(e),
 		});
@@ -132,7 +158,11 @@ describe("RenameController over a real Session (§1C, no idle theft)", () => {
 		// the controller schedules on that same idle.
 		const turn = session.submitAndWait("hi");
 		await flush();
-		t.push({ type: "assistant_turn_finished", turnId: "t1", content: "answer" } as unknown as ProtocolEvent);
+		t.push({
+			type: "assistant_turn_finished",
+			turnId: "t1",
+			content: "answer",
+		} as unknown as ProtocolEvent);
 		t.push({ type: "idle" } as unknown as ProtocolEvent);
 		const result = await turn; // would hang if the idle were stolen
 		expect(result.content).toBe("answer");
@@ -149,10 +179,16 @@ describe("RenameController over a real Session (§1C, no idle theft)", () => {
 const haxBuilt = existsSync(new URL("../../../vendor/hax/build/hax", import.meta.url));
 
 /** Parse `hax --list-sessions` for the current cwd (the test's storage scope). */
-function listSessions(env: NodeJS.ProcessEnv): Promise<Array<{ id: string; firstPrompt: string | null }>> {
+function listSessions(
+	env: NodeJS.ProcessEnv,
+): Promise<Array<{ id: string; firstPrompt: string | null }>> {
 	return new Promise((resolve) => {
 		let out = "";
-		const c = spawn(resolveHaxBinary(), ["--list-sessions"], { cwd: process.cwd(), env, stdio: ["ignore", "pipe", "ignore"] });
+		const c = spawn(resolveHaxBinary(), ["--list-sessions"], {
+			cwd: process.cwd(),
+			env,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
 		c.stdout?.on("data", (d: Buffer) => void (out += d.toString("utf8")));
 		c.on("error", () => resolve([]));
 		c.on("exit", () => {

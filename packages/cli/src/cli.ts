@@ -17,7 +17,12 @@
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { aiEzioGlobalSkillsDir, createSessionTitleStore, describeHaxBinary, resolveHaxBinary } from "@ai-ezio/harness";
+import {
+	aiEzioGlobalSkillsDir,
+	createSessionTitleStore,
+	describeHaxBinary,
+	resolveHaxBinary,
+} from "@ai-ezio/harness";
 import { buildDoctorReport, formatDoctorReport } from "./doctor.js";
 import { runResumePicker, spawnListSessions } from "./repl/resume-picker.js";
 import { discoverSkills, nodeSkillFs, skillDirs, type SkillEnv } from "@ai-ezio/surface";

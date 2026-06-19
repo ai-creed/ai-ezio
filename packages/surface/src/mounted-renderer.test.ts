@@ -58,7 +58,12 @@ describe("createMountedRenderer", () => {
 	it("re-renders the banner after a respawn (ready resets the one-shot flag)", () => {
 		// Simulates: first launch → ready+status (banner 1), then /resume → ready+status (banner 2).
 		const t = setup();
-		const READY: ProtocolEvent = { type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "x" };
+		const READY: ProtocolEvent = {
+			type: "ready",
+			sessionId: "s1",
+			protocol: "0.1.0",
+			haxBaseCommit: "x",
+		};
 		const STATUS2: ProtocolEvent = {
 			type: "status",
 			model: "gpt-6",

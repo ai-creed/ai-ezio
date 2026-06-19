@@ -132,7 +132,9 @@ export function applyKey(state: PickerState, token: KeyToken): KeyResult {
 		case "pageprev":
 			return !showAll && pageStart > 0 ? { index: pageStart - pageSize, showAll } : keep;
 		case "pagenext":
-			return !showAll && pageStart + pageSize < count ? { index: pageStart + pageSize, showAll } : keep;
+			return !showAll && pageStart + pageSize < count
+				? { index: pageStart + pageSize, showAll }
+				: keep;
 		case "toggleall":
 			return { index, showAll: !showAll };
 		case "enter":

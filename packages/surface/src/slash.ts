@@ -319,7 +319,11 @@ export interface ResumeFlowDeps {
 	currentSessionId(): string | undefined;
 	/** Per-mode raw-input overlay: provides the picker a raw key stream. */
 	runOverlay(
-		run: (io: { keys: AsyncIterable<string>; write(s: string): void; setRawMode(on: boolean): void }) => Promise<void>,
+		run: (io: {
+			keys: AsyncIterable<string>;
+			write(s: string): void;
+			setRawMode(on: boolean): void;
+		}) => Promise<void>,
 	): Promise<void>;
 	/** Engine respawn + post-respawn re-wiring (per-runtime). Rejects (engine left
 	 * closed) on bad id / spawn / protocol failure — see onFatal. */
@@ -340,7 +344,9 @@ export async function runResumeFlow(deps: ResumeFlowDeps): Promise<void> {
 	}
 	const titles = deps.titles();
 	const active = deps.currentSessionId();
-	const rows: SessionRow[] = parseSessions(await deps.listSessions()).filter((r) => r.id !== active);
+	const rows: SessionRow[] = parseSessions(await deps.listSessions()).filter(
+		(r) => r.id !== active,
+	);
 	if (rows.length === 0) {
 		deps.write("no other sessions in this folder\n");
 		return;

@@ -34,7 +34,10 @@ describe("session title store", () => {
 	it("writes atomically via a temp file + rename", () => {
 		const fs = memFs();
 		const renamed: string[] = [];
-		const spyFs: TitleFs = { ...fs, renameSync: (f, t) => (renamed.push(`${f}->${t}`), fs.renameSync(f, t)) };
+		const spyFs: TitleFs = {
+			...fs,
+			renameSync: (f, t) => (renamed.push(`${f}->${t}`), fs.renameSync(f, t)),
+		};
 		createSessionTitleStore({ filePath: path, fs: spyFs }).setTitle("id", "x");
 		expect(renamed).toEqual([`${path}.tmp->${path}`]);
 		expect(fs.files.has(`${path}.tmp`)).toBe(false);
@@ -55,7 +58,9 @@ describe("session title store", () => {
 	});
 
 	it("defaultTitleStorePath honors XDG_STATE_HOME then HOME", () => {
-		expect(defaultTitleStorePath({ XDG_STATE_HOME: "/xdg" })).toBe("/xdg/ai-ezio/session-titles.json");
+		expect(defaultTitleStorePath({ XDG_STATE_HOME: "/xdg" })).toBe(
+			"/xdg/ai-ezio/session-titles.json",
+		);
 		expect(defaultTitleStorePath({ HOME: "/home/u" })).toBe(
 			"/home/u/.local/state/ai-ezio/session-titles.json",
 		);
@@ -68,7 +73,14 @@ import type { ProtocolEvent } from "@ai-ezio/protocol";
 const ready = (sessionId: string) =>
 	({ type: "ready", sessionId, protocol: "x", haxBaseCommit: "x" }) as unknown as ProtocolEvent;
 const status = (sessionId: string) =>
-	({ type: "status", sessionId, model: "m", provider: "p", protocol: "x", state: "idle" }) as unknown as ProtocolEvent;
+	({
+		type: "status",
+		sessionId,
+		model: "m",
+		provider: "p",
+		protocol: "x",
+		state: "idle",
+	}) as unknown as ProtocolEvent;
 const idle = () => ({ type: "idle" }) as unknown as ProtocolEvent;
 
 describe("rename controller (§1C)", () => {
@@ -79,7 +91,7 @@ describe("rename controller (§1C)", () => {
 		return { store, ctl, statusRequests };
 	}
 
-	it("normalizes hax's \"unknown\" to undefined", () => {
+	it('normalizes hax\'s "unknown" to undefined', () => {
 		const { ctl } = setup();
 		ctl.noteEvent(ready("unknown"));
 		expect(ctl.currentSessionId()).toBeUndefined();
@@ -103,7 +115,7 @@ describe("rename controller (§1C)", () => {
 		expect(statusRequests.length).toBe(1);
 	});
 
-	it("buffers a pending rename until the id materializes — never under \"unknown\"", () => {
+	it('buffers a pending rename until the id materializes — never under "unknown"', () => {
 		const { ctl, store } = setup();
 		ctl.noteEvent(ready("unknown"));
 		ctl.setSessionTitle("queued"); // no id yet → buffered, not written
@@ -137,7 +149,7 @@ describe("rename controller (§1C)", () => {
 		expect(ctl.currentSessionId()).toBeUndefined();
 	});
 
-	it("after /new returns \"unknown\", a first-turn idle re-requests status and flushes a pending rename", () => {
+	it('after /new returns "unknown", a first-turn idle re-requests status and flushes a pending rename', () => {
 		const { ctl, store, statusRequests } = setup();
 		ctl.noteEvent(ready("uuid-old"));
 		ctl.noteNewConversation(); // /new → status request #1

@@ -384,7 +384,10 @@ function baseCtx(over: Partial<SlashContext> = {}): SlashContext {
 	const out: string[] = [];
 	return {
 		write: (s) => void (out as string[]).push(s),
-		session: { newConversation: async () => {}, status: async () => ({ provider: "p", model: "m" }) },
+		session: {
+			newConversation: async () => {},
+			status: async () => ({ provider: "p", model: "m" }),
+		},
 		lastContent: () => "",
 		lastUsage: () => undefined,
 		skills: () => [],
@@ -405,7 +408,11 @@ describe("/rename", () => {
 
 	it("sets a non-empty title and echoes confirmation", async () => {
 		const setSessionTitle = vi.fn();
-		const ctx = baseCtx({ currentSessionId: () => "id", setSessionTitle, getSessionTitle: () => undefined });
+		const ctx = baseCtx({
+			currentSessionId: () => "id",
+			setSessionTitle,
+			getSessionTitle: () => undefined,
+		});
 		const out: string[] = (ctx as unknown as { __out: string[] }).__out;
 		await new SlashController(ctx).handle("/rename  wire seam ");
 		expect(setSessionTitle).toHaveBeenCalledWith("wire seam");
@@ -512,7 +519,13 @@ describe("runResumeFlow (§3)", () => {
 	it("cancel (Esc) is a no-op (no resume, no onFatal)", async () => {
 		const { deps, resumed, fatal } = flowDeps({
 			runOverlay: async (run) =>
-				run({ keys: (async function* () { yield "\x1b"; })(), write: () => {}, setRawMode: () => {} }),
+				run({
+					keys: (async function* () {
+						yield "\x1b";
+					})(),
+					write: () => {},
+					setRawMode: () => {},
+				}),
 		});
 		await runResumeFlow(deps);
 		expect(resumed).toEqual([]);

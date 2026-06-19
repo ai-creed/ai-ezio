@@ -4,7 +4,6 @@ import {
 	decodeChunk,
 	formatRelativeTime,
 	formatRow,
-	PAGE_SIZE,
 	parseSessions,
 	renderView,
 	runResumePicker,
@@ -108,7 +107,12 @@ describe("decodeChunk", () => {
 
 describe("applyKey (hard pages)", () => {
 	// 40 rows, 15/page → pages 0..2 (rows 0-14, 15-29, 30-39).
-	const st = (index: number, showAll = false): PickerState => ({ index, count: 40, pageSize: 15, showAll });
+	const st = (index: number, showAll = false): PickerState => ({
+		index,
+		count: 40,
+		pageSize: 15,
+		showAll,
+	});
 
 	it("up/down clamp WITHIN the current page", () => {
 		expect(applyKey(st(0), "up").index).toBe(0); // page top
@@ -148,7 +152,13 @@ describe("applyKey (hard pages)", () => {
 describe("renderView", () => {
 	const rows = (n: number): SessionRow[] =>
 		Array.from({ length: n }, (_, i) => row({ id: `id-${i}`, firstPrompt: `prompt ${i}` }));
-	const state = (over: Partial<PickerState>): PickerState => ({ index: 0, count: 0, pageSize: 15, showAll: false, ...over });
+	const state = (over: Partial<PickerState>): PickerState => ({
+		index: 0,
+		count: 0,
+		pageSize: 15,
+		showAll: false,
+		...over,
+	});
 
 	it("paged: header shows page X/Y · N, renders only the page slice with GLOBAL numbers", () => {
 		const r = rows(40);
@@ -271,7 +281,11 @@ describe("runResumePicker", () => {
 });
 
 describe("title merge", () => {
-	const row = (id: string, firstPrompt: string | null): SessionRow => ({ id, mtime: 0, firstPrompt });
+	const row = (id: string, firstPrompt: string | null): SessionRow => ({
+		id,
+		mtime: 0,
+		firstPrompt,
+	});
 	it("prefers a title over firstPrompt, falls back to (no prompt)", () => {
 		expect(formatRow(row("a", "first prompt text"), 0, "my title")).toContain("my title");
 		expect(formatRow(row("b", "first prompt text"), 0, undefined)).toContain("first prompt text");
