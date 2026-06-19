@@ -360,9 +360,19 @@ export async function runResumeFlow(deps: ResumeFlowDeps): Promise<void> {
 	try {
 		await deps.resume(chosen);
 	} catch (e) {
-		// Spec §4: the old session is closed and cannot be revived in place. Report
-		// and exit cleanly — NO fresh fallback. onFatal hands the engine-exit/teardown
-		// to the runtime (standalone REPL or mounted pane).
+		// A gate-held rejection (a turn/compaction grabbed the gate between the busy
+		// guard and the respawn) is RECOVERABLE — Session.resume left the session
+		// untouched. Report it as busy and leave the pane/REPL intact; do NOT call
+		// onFatal (which would tear it down). Matched by error name so surface keeps
+		// no dependency on @ai-ezio/harness. This is the same outcome as the up-front
+		// isBusy() guard, just from the harness backstop.
+		if ((e as Error).name === "EngineBusyError") {
+			deps.write("finish or interrupt the current turn first\n");
+			return;
+		}
+		// Spec §4: a real respawn failure leaves the old session closed and
+		// unrevivable. Report and exit cleanly — NO fresh fallback. onFatal hands the
+		// engine-exit/teardown to the runtime (standalone REPL or mounted pane).
 		deps.write(`resume failed: ${(e as Error).message}\n`);
 		deps.onFatal();
 	}

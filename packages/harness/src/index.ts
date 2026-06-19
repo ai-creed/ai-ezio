@@ -24,6 +24,7 @@ export { aiEzioGlobalSkillsDir } from "./skills-dir.js";
 export {
 	CompactTimeoutError,
 	type CompactResult,
+	EngineBusyError,
 	EngineExitedError,
 	type ExclusiveSession,
 	ProtocolVersionError,

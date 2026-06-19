@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { PROTOCOL_VERSION, type ProtocolEvent, type Transport } from "@ai-ezio/protocol";
-import { Session } from "./session.js";
+import { EngineBusyError, Session } from "./session.js";
 import { createRenameController } from "./session-titles.js";
 import { resolveHaxBinary } from "./resolve-hax.js";
 
@@ -70,7 +70,12 @@ describe("Session.resume", () => {
 		t1.push(ready());
 		await started;
 		const release = await (session as unknown as { gate: { acquire(): Promise<() => void> } }).gate.acquire();
-		await expect(session.resume("other")).rejects.toThrow(/turn is in flight/);
+		// Recoverable (NOT a respawn failure): a distinct EngineBusyError so callers
+		// report "busy" and leave the session intact rather than tearing it down.
+		const err = await session.resume("other").catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(EngineBusyError);
+		expect((err as Error).name).toBe("EngineBusyError");
+		expect((err as Error).message).toMatch(/turn is in flight/);
 		release();
 	});
 

@@ -529,4 +529,24 @@ describe("runResumeFlow (§3)", () => {
 		expect(out.join("")).toContain("resume failed: bad id");
 		expect(fatal.called).toBe(true); // teardown invoked; no fresh fallback session
 	});
+
+	it("a gate-held (EngineBusyError) rejection is busy, NOT fatal — no teardown", async () => {
+		// If a turn/compaction grabs the gate between the isBusy() guard and the
+		// respawn, Session.resume rejects with EngineBusyError. That is recoverable:
+		// runResumeFlow must report busy and leave the session intact (no onFatal),
+		// the same outcome as the up-front guard. (Matched by error NAME so surface
+		// keeps no dependency on @ai-ezio/harness.)
+		const busy = Object.assign(new Error("cannot resume while a turn is in flight"), {
+			name: "EngineBusyError",
+		});
+		const { deps, out, fatal } = flowDeps({
+			resume: async () => {
+				throw busy;
+			},
+		});
+		await runResumeFlow(deps);
+		expect(out.join("")).toContain("finish or interrupt the current turn first");
+		expect(out.join("")).not.toContain("resume failed");
+		expect(fatal.called).toBe(false); // session intact — pane/REPL NOT torn down
+	});
 });

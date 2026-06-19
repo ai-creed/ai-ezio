@@ -46,6 +46,17 @@ export class EngineExitedError extends Error {
 	}
 }
 
+/** Resume was requested while a turn (or compaction cycle) holds the turn gate.
+ * RECOVERABLE: the session is untouched — finish/interrupt the in-flight turn and
+ * retry. Distinguished from a respawn failure (which leaves the engine closed) so
+ * callers report "busy" and leave the session intact instead of tearing it down. */
+export class EngineBusyError extends Error {
+	constructor(message = "cannot resume while a turn is in flight") {
+		super(message);
+		this.name = "EngineBusyError";
+	}
+}
+
 /** A completed user turn. */
 export interface TurnResult {
 	turnId: string;
@@ -484,7 +495,9 @@ export class Session {
 	 * closed) on spawn/protocol failure. Refuses while a turn holds the gate. */
 	async resume(sessionId: string, options: SpawnHaxOptions = {}): Promise<ReadyEvent> {
 		if (this.gate.held) {
-			throw new Error("cannot resume while a turn is in flight");
+			// Recoverable, not fatal: the session is untouched. Callers (runResumeFlow)
+			// report "busy" and leave the pane/REPL intact rather than tearing it down.
+			throw new EngineBusyError();
 		}
 		const release = await this.gate.acquire();
 		try {
