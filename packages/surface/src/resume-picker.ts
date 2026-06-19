@@ -21,7 +21,18 @@ export interface SessionRow {
 }
 
 /** A decoded keypress (one raw input chunk → one intent). */
-export type KeyToken = "up" | "down" | "enter" | "cancel" | { digit: number } | "other";
+export type KeyToken =
+	| "up"
+	| "down"
+	| "enter"
+	| "cancel"
+	| "pageprev"
+	| "pagenext"
+	| "toggleall"
+	| "other";
+
+/** Rows shown per page when not in show-all mode. */
+export const PAGE_SIZE = 15;
 
 export interface PickerDeps {
 	/** Returns the engine's `--list-sessions` JSON (injected for tests). */
@@ -79,58 +90,101 @@ export function formatRow(row: SessionRow, nowMs: number, title?: string): strin
 }
 
 /** Decode one raw input chunk into an intent. Reading whole chunks (not code
- * points) lets a bare Esc ("\x1b") be told apart from an arrow ("\x1b[A"), which
- * share a prefix. Pure. */
+ * points) lets a bare Esc ("\x1b") be told apart from an arrow ("\x1b[A"), and a
+ * bare "[" / "]" from a CSI sequence — they share a prefix only across chunks. Pure. */
 export function decodeChunk(s: string): KeyToken {
 	if (s === "\x1b[A" || s === "\x1bOA" || s === "k") return "up";
 	if (s === "\x1b[B" || s === "\x1bOB" || s === "j") return "down";
 	if (s === "\r" || s === "\n") return "enter";
 	if (s === "\x1b" || s === "\x03" || s === "\x04" || s === "q") return "cancel";
-	if (/^[1-9]$/.test(s)) return { digit: Number(s) };
+	if (s === "[") return "pageprev";
+	if (s === "]") return "pagenext";
+	if (s === "\x01") return "toggleall"; // Ctrl+A
 	return "other";
 }
 
 export interface PickerState {
-	index: number;
-	count: number;
+	index: number; // global cursor (0-based across the whole list)
+	count: number; // total rows
+	pageSize: number; // rows per page (PAGE_SIZE)
+	showAll: boolean; // Ctrl+A toggles the all-rows view
 }
 export interface KeyResult {
 	index: number;
+	showAll: boolean;
 	done?: "select" | "cancel";
 }
 
-/** Apply one decoded key to the picker state. Up/Down clamp at the ends; a digit
- * jumps to that 1-based row (when in range) without selecting; Enter selects the
- * current row; Esc/Ctrl-C/q cancel. Pure. */
+/** Apply one decoded key to the picker state. Hard pages: up/down clamp within the
+ * current page; [ / ] jump to the first row of the prev/next page (inert at the ends
+ * and in show-all); Ctrl+A toggles show-all and preserves the cursor; Enter selects;
+ * Esc/Ctrl-C/Ctrl-D/q cancel. Pure. */
 export function applyKey(state: PickerState, token: KeyToken): KeyResult {
-	if (token === "up") return { index: Math.max(0, state.index - 1) };
-	if (token === "down") return { index: Math.min(state.count - 1, state.index + 1) };
-	if (token === "enter") return { index: state.index, done: "select" };
-	if (token === "cancel") return { index: state.index, done: "cancel" };
-	if (typeof token === "object" && "digit" in token) {
-		const i = token.digit - 1;
-		return { index: i >= 0 && i < state.count ? i : state.index };
+	const { index, count, pageSize, showAll } = state;
+	const pageStart = Math.floor(index / pageSize) * pageSize;
+	const pageEnd = Math.min(count - 1, pageStart + pageSize - 1);
+	const keep: KeyResult = { index, showAll };
+	switch (token) {
+		case "up":
+			return { index: Math.max(showAll ? 0 : pageStart, index - 1), showAll };
+		case "down":
+			return { index: Math.min(showAll ? count - 1 : pageEnd, index + 1), showAll };
+		case "pageprev":
+			return !showAll && pageStart > 0 ? { index: pageStart - pageSize, showAll } : keep;
+		case "pagenext":
+			return !showAll && pageStart + pageSize < count ? { index: pageStart + pageSize, showAll } : keep;
+		case "toggleall":
+			return { index, showAll: !showAll };
+		case "enter":
+			return { index, showAll, done: "select" };
+		case "cancel":
+			return { index, showAll, done: "cancel" };
+		default:
+			return keep;
 	}
-	return { index: state.index };
 }
 
-const PICKER_TITLE = "Resume a session  (↑/↓ move · 1-9 jump · Enter select · Esc cancel)";
+const HINTS_PAGED = "↑/↓ move · [ ] page · Ctrl+A all · Enter select · Esc cancel";
+const HINTS_SINGLE = "↑/↓ move · Ctrl+A all · Enter select · Esc cancel";
+const HINTS_ALL = "↑/↓ move · Ctrl+A pages · Enter select · Esc cancel";
 
-/** Render the full picker frame. On a redraw, prepend a cursor-up + clear so the
- * previous frame is overwritten in place rather than scrolling. Pure. */
-export function renderFrame(
+/** Render the current view: a dynamic header, the visible rows (one page, or all in
+ * show-all), and a footer of key hints. Rows keep their GLOBAL 1-based number. Pure;
+ * the caller (runResumePicker) owns the cursor-reset for the in-place redraw. */
+export function renderView(
 	rows: SessionRow[],
-	index: number,
+	state: PickerState,
 	nowMs: number,
-	isRedraw: boolean,
 	titles?: Map<string, string>,
 ): string {
-	const lines = [PICKER_TITLE, ...rows.map((r, i) => oneLine(r, i, index, nowMs, titles))];
-	// Move up over the prior frame (title + every row) and clear to end of screen.
-	const reset = isRedraw ? `\x1b[${rows.length + 1}A\r\x1b[0J` : "";
-	return `${reset}${lines.join("\n")}\n`;
+	const { index, count, pageSize, showAll } = state;
+	const pageCount = Math.max(1, Math.ceil(count / pageSize));
+	const page = Math.floor(index / pageSize);
+	const sliceStart = showAll ? 0 : page * pageSize;
+	const sliceEnd = showAll ? count : Math.min(count, page * pageSize + pageSize);
+
+	let header: string;
+	let footer: string;
+	if (showAll) {
+		header = `Resume a session  (showing all ${count} sessions)`;
+		footer = HINTS_ALL;
+	} else if (pageCount === 1) {
+		header = `Resume a session  (${count} session${count === 1 ? "" : "s"})`;
+		footer = HINTS_SINGLE;
+	} else {
+		header = `Resume a session  (page ${page + 1}/${pageCount} · ${count} sessions)`;
+		footer = HINTS_PAGED;
+	}
+
+	const lines = [header];
+	for (let i = sliceStart; i < sliceEnd; i++) {
+		lines.push(oneLine(rows[i]!, i, index, nowMs, titles));
+	}
+	lines.push(footer);
+	return `${lines.join("\n")}\n`;
 }
 
+/** One row line: global number + cursor + age/title preview. Pure. */
 function oneLine(
 	row: SessionRow,
 	i: number,
@@ -147,24 +201,33 @@ function oneLine(
 
 /**
  * Run the interactive picker. Returns the chosen session id, or undefined when
- * there is nothing to resume or the user cancels (Esc/Ctrl-C/q/EOF). The caller
- * resumes the chosen id via the Phase A self-mount.
+ * there is nothing to resume or the user cancels (Esc/Ctrl-C/q/EOF). The frame
+ * height varies (short last page, show-all, single page), so each redraw climbs the
+ * PREVIOUS frame's line count and clears to end of screen before repainting.
  */
 export async function runResumePicker(deps: PickerDeps): Promise<string | undefined> {
 	const rows = parseSessions(await deps.listSessions());
 	if (rows.length === 0) return undefined;
 
-	let index = 0;
+	let state: PickerState = { index: 0, count: rows.length, pageSize: PAGE_SIZE, showAll: false };
+	let prevLines = 0;
+	const draw = (first: boolean): void => {
+		const view = renderView(rows, state, deps.now(), deps.titles);
+		const reset = first ? "" : `\x1b[${prevLines}A\r\x1b[0J`;
+		deps.write(reset + view);
+		prevLines = (view.match(/\n/g) ?? []).length;
+	};
+
 	deps.setRawMode?.(true);
 	try {
-		deps.write(renderFrame(rows, index, deps.now(), false, deps.titles));
+		draw(true);
 		for await (const chunk of deps.keys) {
 			const token = decodeChunk(typeof chunk === "string" ? chunk : String(chunk));
-			const r = applyKey({ index, count: rows.length }, token);
-			index = r.index;
+			const r = applyKey(state, token);
+			state = { ...state, index: r.index, showAll: r.showAll };
 			if (r.done === "cancel") return undefined;
-			if (r.done === "select") return rows[index]?.id;
-			deps.write(renderFrame(rows, index, deps.now(), true, deps.titles));
+			if (r.done === "select") return rows[state.index]?.id;
+			draw(false);
 		}
 		return undefined; // input stream ended
 	} finally {

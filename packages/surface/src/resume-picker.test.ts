@@ -4,9 +4,11 @@ import {
 	decodeChunk,
 	formatRelativeTime,
 	formatRow,
+	PAGE_SIZE,
 	parseSessions,
-	renderFrame,
+	renderView,
 	runResumePicker,
+	type PickerState,
 	type SessionRow,
 } from "./resume-picker.js";
 
@@ -85,62 +87,123 @@ describe("decodeChunk", () => {
 		expect(decodeChunk("\x1b[B")).toBe("down");
 		expect(decodeChunk("j")).toBe("down");
 	});
-	it("maps enter, cancels, digits, and other", () => {
+	it("maps enter and cancels", () => {
 		expect(decodeChunk("\r")).toBe("enter");
 		expect(decodeChunk("\n")).toBe("enter");
 		expect(decodeChunk("\x1b")).toBe("cancel"); // bare Esc, distinct from an arrow
 		expect(decodeChunk("\x03")).toBe("cancel"); // Ctrl-C
 		expect(decodeChunk("\x04")).toBe("cancel"); // Ctrl-D
 		expect(decodeChunk("q")).toBe("cancel");
-		expect(decodeChunk("3")).toEqual({ digit: 3 });
+	});
+	it("maps the pagination keys (whole one-byte chunks; no CSI collision)", () => {
+		expect(decodeChunk("[")).toBe("pageprev"); // bare '[', not the start of "\x1b[A"
+		expect(decodeChunk("]")).toBe("pagenext");
+		expect(decodeChunk("\x01")).toBe("toggleall"); // Ctrl+A
+	});
+	it("falls through to other (digit-jump removed)", () => {
+		expect(decodeChunk("3")).toBe("other");
 		expect(decodeChunk("z")).toBe("other");
 	});
 });
 
-describe("applyKey", () => {
-	const st = { index: 1, count: 3 };
-	it("moves and clamps", () => {
-		expect(applyKey({ index: 0, count: 3 }, "up").index).toBe(0); // clamp top
-		expect(applyKey(st, "up").index).toBe(0);
-		expect(applyKey(st, "down").index).toBe(2);
-		expect(applyKey({ index: 2, count: 3 }, "down").index).toBe(2); // clamp bottom
+describe("applyKey (hard pages)", () => {
+	// 40 rows, 15/page → pages 0..2 (rows 0-14, 15-29, 30-39).
+	const st = (index: number, showAll = false): PickerState => ({ index, count: 40, pageSize: 15, showAll });
+
+	it("up/down clamp WITHIN the current page", () => {
+		expect(applyKey(st(0), "up").index).toBe(0); // page top
+		expect(applyKey(st(5), "up").index).toBe(4);
+		expect(applyKey(st(5), "down").index).toBe(6);
+		expect(applyKey(st(14), "down").index).toBe(14); // page bottom — does NOT spill to 15
+		expect(applyKey(st(15), "up").index).toBe(15); // top of page 1 — does NOT spill to 14
 	});
-	it("selects and cancels", () => {
-		expect(applyKey(st, "enter")).toEqual({ index: 1, done: "select" });
-		expect(applyKey(st, "cancel")).toEqual({ index: 1, done: "cancel" });
+
+	it("[ / ] jump to the first row of the prev/next page, and no-op at the ends", () => {
+		expect(applyKey(st(0), "pagenext").index).toBe(15); // page 0 → page 1
+		expect(applyKey(st(14), "pagenext").index).toBe(15);
+		expect(applyKey(st(15), "pageprev").index).toBe(0); // page 1 → page 0
+		expect(applyKey(st(0), "pageprev").index).toBe(0); // already first page → no-op
+		expect(applyKey(st(30), "pagenext").index).toBe(30); // last page → no-op
 	});
-	it("digit jumps only when in range", () => {
-		expect(applyKey(st, { digit: 3 }).index).toBe(2);
-		expect(applyKey(st, { digit: 9 }).index).toBe(1); // out of range → unchanged
+
+	it("Ctrl+A toggles showAll and preserves the cursor", () => {
+		expect(applyKey(st(20), "toggleall")).toEqual({ index: 20, showAll: true });
+		expect(applyKey(st(20, true), "toggleall")).toEqual({ index: 20, showAll: false });
+	});
+
+	it("in showAll, up/down span the whole list and [ / ] are inert", () => {
+		expect(applyKey(st(15, true), "up").index).toBe(14); // crosses the page boundary
+		expect(applyKey(st(39, true), "down").index).toBe(39); // clamp at count-1
+		expect(applyKey(st(0, true), "down").index).toBe(1);
+		expect(applyKey(st(5, true), "pagenext").index).toBe(5); // inert
+		expect(applyKey(st(20, true), "pageprev").index).toBe(20); // inert
+	});
+
+	it("selects and cancels (carrying showAll)", () => {
+		expect(applyKey(st(1), "enter")).toEqual({ index: 1, showAll: false, done: "select" });
+		expect(applyKey(st(1), "cancel")).toEqual({ index: 1, showAll: false, done: "cancel" });
 	});
 });
 
-describe("renderFrame", () => {
-	const rows = [row({ id: "a", firstPrompt: "first" }), row({ id: "b", firstPrompt: "second" })];
-	it("includes the title and every row's preview", () => {
-		const frame = renderFrame(rows, 0, NOW, false);
-		expect(frame).toContain("Resume a session");
-		expect(frame).toContain("first");
-		expect(frame).toContain("second");
+describe("renderView", () => {
+	const rows = (n: number): SessionRow[] =>
+		Array.from({ length: n }, (_, i) => row({ id: `id-${i}`, firstPrompt: `prompt ${i}` }));
+	const state = (over: Partial<PickerState>): PickerState => ({ index: 0, count: 0, pageSize: 15, showAll: false, ...over });
+
+	it("paged: header shows page X/Y · N, renders only the page slice with GLOBAL numbers", () => {
+		const r = rows(40);
+		const view = renderView(r, state({ index: 20, count: 40 }), NOW); // index 20 → page 1 (rows 15-29)
+		expect(view).toContain("page 2/3 · 40 sessions");
+		expect(view).toContain("16. "); // global number of the first row on page 1
+		expect(view).toContain("30. "); // last row on page 1
+		expect(view).not.toContain("31. "); // page 2's rows are not rendered
+		expect(view).not.toContain(" 1. "); // page 0's rows are not rendered
+		expect(view).toContain("[ ] page");
+		// cursor (❯) sits on the row matching state.index (index 20 → global row 21), nowhere
+		// else. oneLine renders the cursor as "\x1b[36m❯\x1b[0m", so the raw text is
+		// "❯\x1b[0m 21." — strip the SGR color codes first, then assert on plain text.
+		const plain = view.replace(/\x1b\[[0-9;]*m/g, "");
+		expect((plain.match(/❯/g) ?? []).length).toBe(1);
+		expect(plain).toMatch(/❯ 21\. /); // highlighted row tracks the index
+		expect(plain).not.toMatch(/❯ 16\. /); // not stuck on the first visible row
 	});
-	it("prepends a cursor-up + clear on a redraw (overwrite in place)", () => {
-		expect(renderFrame(rows, 0, NOW, false).startsWith("\x1b[")).toBe(false);
-		// title + 2 rows = move up 3 lines
-		expect(renderFrame(rows, 0, NOW, true)).toContain("\x1b[3A");
+
+	it("single page (<=15): no page indicator, no [ ] hint", () => {
+		const view = renderView(rows(3), state({ count: 3 }), NOW);
+		expect(view).toContain("(3 sessions)");
+		expect(view).not.toContain("page 1/1");
+		expect(view).not.toContain("[ ] page");
+	});
+
+	it("showAll: renders every row + the 'Ctrl+A pages' footer", () => {
+		const view = renderView(rows(40), state({ count: 40, showAll: true }), NOW);
+		expect(view).toContain("showing all 40 sessions");
+		expect(view).toContain("1. ");
+		expect(view).toContain("40. ");
+		expect(view).toContain("Ctrl+A pages");
+	});
+
+	it("a full page frame is header + 15 rows + footer = 17 newlines (drives the redraw climb)", () => {
+		const view = renderView(rows(40), state({ count: 40 }), NOW);
+		expect((view.match(/\n/g) ?? []).length).toBe(17);
 	});
 });
 
 describe("runResumePicker", () => {
 	function deps(json: string, keys: string[]) {
 		const setRawMode = vi.fn();
+		const writes: string[] = [];
 		return {
 			listSessions: () => Promise.resolve(json),
 			keys: chunks(keys),
-			write: vi.fn(),
+			write: (s: string) => void writes.push(s),
 			now: () => NOW,
 			setRawMode,
+			writes,
 		};
 	}
+	const manyJson = (n: number) =>
+		JSON.stringify(Array.from({ length: n }, (_, i) => ({ id: `id-${i}`, mtime: nowSec })));
 	const three = JSON.stringify([
 		{ id: "a", mtime: nowSec },
 		{ id: "b", mtime: nowSec },
@@ -158,17 +221,45 @@ describe("runResumePicker", () => {
 		expect(await runResumePicker(d)).toBe("b");
 	});
 
-	it("supports digit jump then enter", async () => {
-		const d = deps(three, ["3", "\r"]); // jump to row 3 = "c"
-		expect(await runResumePicker(d)).toBe("c");
+	it("pages with ] twice then selects a row on page 3 (id-30)", async () => {
+		const d = deps(manyJson(40), ["]", "]", "\r"]); // page 0 → 1 → 2; cursor at index 30
+		expect(await runResumePicker(d)).toBe("id-30");
+	});
+
+	it("[ pages back; ] then [ returns to id-0", async () => {
+		const d = deps(manyJson(40), ["]", "[", "\r"]); // → index 15 → back to index 0
+		expect(await runResumePicker(d)).toBe("id-0");
+	});
+
+	it("Ctrl+A show-all lets ↓ cross a page boundary, then selects", async () => {
+		// 20 rows: paged, ↓ would clamp at index 14. Ctrl+A → ↓ from 14 reaches 15.
+		const keys = Array(14).fill("\x1b[B"); // down to index 14 (page bottom)
+		const d = deps(manyJson(20), [...keys, "\x01", "\x1b[B", "\r"]); // toggle all, ↓ → 15, enter
+		expect(await runResumePicker(d)).toBe("id-15");
 	});
 
 	it("cancels on Esc, returning undefined", async () => {
 		expect(await runResumePicker(deps(three, ["\x1b"]))).toBeUndefined();
 	});
 
-	it("returns undefined when the input stream ends without a choice", async () => {
-		expect(await runResumePicker(deps(three, ["\x1b[B"]))).toBeUndefined();
+	it("redraw climbs the PRIOR frame's line count across a height change (page → short last page)", async () => {
+		// 16 rows: page 0 has 15 rows (full), page 1 has 1 row (short). Paging to page 1
+		// must climb 17 (page 0's header+15+footer), the previous frame's height.
+		const d = deps(manyJson(16), ["]", "\r"]);
+		await runResumePicker(d);
+		const joined = d.writes.join("");
+		expect(joined).toContain("\x1b[17A"); // climbed the full page-0 frame before drawing page 1
+	});
+
+	it("redraw climbs the prior frame's line count across a show-all toggle (both directions)", async () => {
+		// 20 rows: paged frame = header + 15 + footer = 17 lines; show-all = header + 20 +
+		// footer = 22 lines. Ctrl+A draws show-all AFTER climbing the prior paged frame (17);
+		// a second Ctrl+A draws paged AFTER climbing the prior show-all frame (22).
+		const d = deps(manyJson(20), ["\x01", "\x01", "\r"]);
+		await runResumePicker(d);
+		const joined = d.writes.join("");
+		expect(joined).toContain("\x1b[17A"); // page → show-all: climbed the paged frame
+		expect(joined).toContain("\x1b[22A"); // show-all → page: climbed the show-all frame
 	});
 
 	it("enters then restores raw mode", async () => {
