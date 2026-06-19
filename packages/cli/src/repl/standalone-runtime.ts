@@ -9,7 +9,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
-import { loadConfig, Session } from "@ai-ezio/harness";
+import {
+	createRenameController,
+	createSessionTitleStore,
+	loadConfig,
+	resolveHaxBinary,
+	Session,
+} from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
 import { buildCompactor } from "./compaction-wiring.js";
@@ -25,12 +31,15 @@ import {
 	makeClipboard,
 	nodeSkillFs,
 	resolvePager,
+	runResumeFlow,
 	showTranscript as renderTranscript,
 	transcriptFilePath,
 	SlashController,
 	type SlashContext,
 	type SkillEnv,
 } from "@ai-ezio/surface";
+import { stdinChunks } from "../cli.js";
+import { spawnListSessions } from "./resume-picker.js";
 import { runStandaloneRepl } from "./standalone.js";
 
 export interface OneShotOptions {
@@ -94,12 +103,75 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 	return code;
 }
 
-/** Decode a readable TTY into a stream of single characters (code points). */
-async function* readKeys(stdin: NodeJS.ReadStream): AsyncGenerator<string> {
-	for await (const chunk of stdin) {
-		const s = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-		for (const ch of s) yield ch;
-	}
+/** Split whole stdin chunks into single code points for the line reader. The
+ * REPL's `feedKey` runs its own ESC accumulator, so it must see one code point at
+ * a time; the picker overlay, by contrast, needs WHOLE chunks (see below). Yields
+ * lazily off the shared chunk source. */
+export async function* codePoints(src: AsyncIterable<string>): AsyncGenerator<string> {
+	for await (const chunk of src) for (const ch of chunk) yield ch;
+}
+
+/**
+ * Derive both standalone input views from ONE whole-chunk stdin source so the
+ * line reader and the `/resume` overlay agree on chunking:
+ *
+ *  - `replKeys` — code points for `runStandaloneRepl` (its `feedKey` owns the ESC
+ *    accumulator, so it must see one code point at a time).
+ *  - `borrowChunks()` — WHOLE chunks for the picker overlay, so `decodeChunk` gets
+ *    a complete escape sequence (e.g. `"\x1b[B"`) in one item instead of the bare
+ *    `"\x1b"` first byte (which it would read as cancel).
+ *
+ * The two views never read concurrently: the REPL is parked in `await slash.handle`
+ * while the overlay runs, and the code-point generator is suspended at its `yield`
+ * with no pending read on the chunk source — so a single shared chunk iterator is
+ * safe. `borrowChunks` is non-closing (its `return` is a no-op) so an overlay can
+ * `for await` + break without ending the shared source; only `chunkSource.return`
+ * (via `onFatal`) ends it. Extracted + exported so the production stream wiring is
+ * unit-testable.
+ */
+export function buildStandaloneKeySources(chunkSource: AsyncIterator<string>): {
+	replKeys: AsyncGenerator<string>;
+	borrowChunks: () => AsyncIterable<string>;
+} {
+	const borrowChunks = (): AsyncIterable<string> => ({
+		[Symbol.asyncIterator]: () => ({
+			next: () => chunkSource.next(),
+			return: async () => ({ done: true as const, value: undefined }),
+		}),
+	});
+	return { replKeys: codePoints(borrowChunks()), borrowChunks };
+}
+
+/**
+ * Build the standalone `/resume` overlay runner: hand the picker WHOLE chunks + a
+ * raw-mode toggle, run it, then ALWAYS restore the REPL's raw mode (ON) afterward.
+ *
+ * The shared `runResumePicker`'s `finally` unconditionally calls `setRawMode(false)`
+ * — correct for the STARTUP picker (the process then exits or re-mounts, which
+ * re-enables raw), but WRONG for the in-REPL overlay: the standalone REPL keeps
+ * running after `/resume`, so it must get raw mode back ON or its Ctrl-C / arrow /
+ * paste line-reader semantics break. This runner restores raw ON in its own
+ * `finally`, regardless of how the picker (or a throw) left it — mirroring the
+ * mounted `runInteractiveOverlay`'s restore. Exported for unit testing.
+ */
+export function makeStandaloneOverlay(deps: {
+	borrowChunks: () => AsyncIterable<string>;
+	write: (s: string) => void;
+	setRawMode: (on: boolean) => void;
+}): (
+	run: (io: {
+		keys: AsyncIterable<string>;
+		write: (s: string) => void;
+		setRawMode: (on: boolean) => void;
+	}) => Promise<void>,
+) => Promise<void> {
+	return async (run) => {
+		try {
+			await run({ keys: deps.borrowChunks(), write: deps.write, setRawMode: deps.setRawMode });
+		} finally {
+			deps.setRawMode(true); // restore the REPL's raw mode — the picker's finally turns it off
+		}
+	};
 }
 
 export interface StandaloneOptions {
@@ -152,6 +224,54 @@ export async function startWithTranscript(
 	return transcriptPath;
 }
 
+/** Collaborators required to build the resume-flow deps for a standalone session. */
+export interface StandaloneResumeDepsInput {
+	session: Pick<Session, "resume">;
+	host: Pick<McpHost, "start">;
+	titleStore: ReturnType<typeof createSessionTitleStore>;
+	rename: ReturnType<typeof createRenameController>;
+	/** The shared whole-chunk stdin source. `onFatal` ends it (via `.return`) to
+	 * break the REPL loop on its next pull. */
+	chunkSource: Pick<AsyncGenerator<string>, "return">;
+	write: (s: string) => void;
+	listSessions: () => Promise<string>;
+}
+
+/**
+ * Build the `ResumeFlowDeps`-shaped subset that wires the standalone session's
+ * production resume path: `resume(id)` calls `session.resume(id)` then
+ * `host.start(session)` (order matters per spec §3) and writes the resume
+ * notice; `onFatal` calls `chunkSource.return` to break the REPL loop.
+ *
+ * Extracted so tests can drive the REAL wiring with fakes instead of
+ * re-proving `runResumeFlow`'s own contract.
+ */
+export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
+	resume: (id: string) => Promise<void>;
+	onFatal: () => void;
+	isBusy: () => boolean;
+	listSessions: () => Promise<string>;
+	titles: () => Map<string, string>;
+	currentSessionId: () => string | undefined;
+} {
+	const { session, host, titleStore, rename, chunkSource, write, listSessions } = input;
+	return {
+		isBusy: () => false,
+		listSessions,
+		titles: () => titleStore.loadTitles(),
+		currentSessionId: () => rename.currentSessionId(),
+		resume: async (id: string) => {
+			await session.resume(id); // rejects on bad id / spawn / protocol failure
+			await host.start(session as Session); // re-register MCP delegated tools
+			write(resumeNotice([`--resume=${id}`]) ?? "");
+		},
+		// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
+		// Ending the shared chunk source breaks runStandaloneRepl's loop on its
+		// next pull → normal teardown (recorder.close → host.stop → session.close).
+		onFatal: () => void chunkSource.return?.(undefined),
+	};
+}
+
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
 	const cwd = process.cwd();
@@ -168,8 +288,22 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	// Compaction (M11): wired after the session exists (it needs runExclusive),
 	// but the tee below already consults it — declare the slot first.
 	let wired: ReturnType<typeof buildCompactor> | undefined;
+
+	// §1C rename controller: tracks the hax session id and buffers pending titles.
+	// Built before Session so the onEvent tee can close over it from the start.
+	const titleStore = createSessionTitleStore();
+	const rename = createRenameController({
+		store: titleStore,
+		// Defer off the delivery turn: noteEvent runs inside Session.deliver()'s
+		// onEvent tee, BEFORE the event reaches waiters, so issuing status()
+		// synchronously could register a waiter that steals the turn's settling idle.
+		// queueMicrotask runs it after the idle has been routed to submitAndWait.
+		requestStatus: () => queueMicrotask(() => void session.status().catch(() => {})),
+	});
+
 	const session = new Session({
 		onEvent: (e: ProtocolEvent) => {
+			rename.noteEvent(e);
 			// During a compaction cycle the summarize turn is plumbing, not
 			// conversation: suppress its rendering ("compacting…" chrome shows
 			// instead). The recorder and host still see every event.
@@ -237,9 +371,61 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 			restoreRaw: () => void process.stdin.setRawMode?.(true),
 			write: (s) => void process.stdout.write(s),
 		});
+
+	const stdin = process.stdin;
+
+	// ONE whole-chunk stdin source feeds BOTH consumers, so they agree on chunking.
+	// stdinChunks yields raw stdin a chunk at a time (escape sequences arrive whole)
+	// and does NOT destroy the stream on a consumer's break — the overlay can stop
+	// pulling without EOFing the REPL.
+	const chunkSource = stdinChunks(stdin);
+	// replKeys: code points for the line reader (feedKey owns the ESC accumulator).
+	// borrowChunks(): WHOLE chunks for the /resume overlay, so decodeChunk sees a
+	// complete escape sequence (e.g. "\x1b[B") instead of the bare "\x1b" first byte
+	// (which it would misread as cancel). The two views never read concurrently: the
+	// REPL is parked in `await slash.handle` while the overlay runs.
+	const { replKeys, borrowChunks } = buildStandaloneKeySources(chunkSource);
+
+	// §3 resume thunk: list → pick → respawn + re-wire. The session-specific deps
+	// (resume / onFatal / isBusy / listSessions / titles / currentSessionId) come from
+	// buildStandaloneResumeDeps so the production wiring is unit-testable. The banner
+	// repaints itself: session.resume emits a fresh `ready`, which resets the
+	// renderer's one-shot banner flag (mounted-renderer handle("ready")), and
+	// --mount-mode auto-emits `status` right after — redrawing the banner for the
+	// resumed session. No explicit renderer call is needed.
+	const resumeThunk = () =>
+		runResumeFlow({
+			...buildStandaloneResumeDeps({
+				session,
+				host,
+				titleStore,
+				rename,
+				chunkSource,
+				write: (s) => void process.stdout.write(s),
+				listSessions: () => spawnListSessions(resolveHaxBinary(), cwd),
+			}),
+			write: (s) => void process.stdout.write(s),
+			// The picker's finally leaves raw mode OFF; this runner restores it ON so
+			// the REPL's line reader keeps working after /resume (see makeStandaloneOverlay).
+			runOverlay: makeStandaloneOverlay({
+				borrowChunks,
+				write: (s) => void process.stdout.write(s),
+				setRawMode: (on) => void process.stdin.setRawMode?.(on),
+			}),
+			now: () => Date.now(),
+		});
+
 	const slashCtx: SlashContext = {
 		write: (s) => void process.stdout.write(s),
-		session,
+		session: {
+			// Wrap newConversation so /new re-binds the tracked id (§1C).
+			newConversation: async () => {
+				await session.newConversation();
+				rename.noteNewConversation();
+			},
+			status: () =>
+				session.status().then((s) => ({ provider: s.provider, model: s.model, effort: s.effort })),
+		},
 		recorder,
 		compactor: wired.compactor,
 		lastContent: () => lastContent,
@@ -252,6 +438,10 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 			})),
 		clipboard: makeClipboard(process.platform, spawn),
 		showTranscript,
+		currentSessionId: () => rename.currentSessionId(),
+		getSessionTitle: () => rename.getSessionTitle(),
+		setSessionTitle: (t) => rename.setSessionTitle(t),
+		resume: resumeThunk,
 	};
 	const slash = new SlashController(slashCtx);
 
@@ -260,7 +450,6 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	const notice = resumeNotice(opts.resumeArgs);
 	if (notice) process.stdout.write(notice);
 
-	const stdin = process.stdin;
 	stdin.setRawMode?.(true);
 	stdin.resume();
 	// Enable bracketed paste (ESC[?2004h) so a pasted block arrives wrapped in
@@ -272,7 +461,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	process.stdout.write("\x1b[?2004h\x1b[>1u");
 	try {
 		await runStandaloneRepl({
-			keys: readKeys(stdin),
+			keys: replKeys,
 			session,
 			host,
 			compactor: wired.compactor,

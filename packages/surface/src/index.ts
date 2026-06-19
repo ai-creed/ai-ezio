@@ -24,10 +24,26 @@ export {
 export {
 	classifyLine,
 	SlashController,
+	runResumeFlow,
 	type SlashCommand,
 	type SlashContext,
 	type SlashOutcome,
 	type SlashSession,
 	type SlashRecorder,
 	type LineClass,
+	type ResumeFlowDeps,
 } from "./slash.js";
+export {
+	parseSessions,
+	formatRelativeTime,
+	formatRow,
+	decodeChunk,
+	applyKey,
+	renderFrame,
+	runResumePicker,
+	type SessionRow,
+	type KeyToken,
+	type PickerDeps,
+	type PickerState,
+	type KeyResult,
+} from "./resume-picker.js";

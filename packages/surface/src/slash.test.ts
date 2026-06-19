@@ -376,3 +376,177 @@ describe("SlashController excludeCommands", () => {
 		expect(await ctrl.handle("/quit")).toEqual({ action: "exit" });
 	});
 });
+
+import { vi } from "vitest";
+import { runResumeFlow, type ResumeFlowDeps } from "./slash.js";
+
+function baseCtx(over: Partial<SlashContext> = {}): SlashContext {
+	const out: string[] = [];
+	return {
+		write: (s) => void (out as string[]).push(s),
+		session: { newConversation: async () => {}, status: async () => ({ provider: "p", model: "m" }) },
+		lastContent: () => "",
+		lastUsage: () => undefined,
+		skills: () => [],
+		clipboard: async () => {},
+		...over,
+		// expose captured output for assertions
+		__out: out,
+	} as unknown as SlashContext;
+}
+
+describe("/rename", () => {
+	it("is unavailable when setSessionTitle is unwired", async () => {
+		const ctx = baseCtx();
+		const out: string[] = (ctx as unknown as { __out: string[] }).__out;
+		await new SlashController(ctx).handle("/rename foo");
+		expect(out.join("")).toContain("rename unavailable");
+	});
+
+	it("sets a non-empty title and echoes confirmation", async () => {
+		const setSessionTitle = vi.fn();
+		const ctx = baseCtx({ currentSessionId: () => "id", setSessionTitle, getSessionTitle: () => undefined });
+		const out: string[] = (ctx as unknown as { __out: string[] }).__out;
+		await new SlashController(ctx).handle("/rename  wire seam ");
+		expect(setSessionTitle).toHaveBeenCalledWith("wire seam");
+		expect(out.join("")).toContain('renamed to "wire seam"');
+	});
+
+	it("no-arg prints the current/pending title or a usage hint", async () => {
+		const withTitle = baseCtx({ setSessionTitle: () => {}, getSessionTitle: () => "alpha" });
+		const o1: string[] = (withTitle as unknown as { __out: string[] }).__out;
+		await new SlashController(withTitle).handle("/rename");
+		expect(o1.join("")).toContain("alpha");
+
+		const noTitle = baseCtx({ setSessionTitle: () => {}, getSessionTitle: () => undefined });
+		const o2: string[] = (noTitle as unknown as { __out: string[] }).__out;
+		await new SlashController(noTitle).handle("/rename");
+		expect(o2.join("")).toContain("no title set");
+	});
+});
+
+describe("/resume command", () => {
+	it("is unavailable when resume is unwired", async () => {
+		const ctx = baseCtx();
+		const out: string[] = (ctx as unknown as { __out: string[] }).__out;
+		await new SlashController(ctx).handle("/resume");
+		expect(out.join("")).toContain("resume unavailable");
+	});
+
+	it("delegates to ctx.resume() when wired", async () => {
+		const resume = vi.fn(async () => {});
+		const ctx = baseCtx({ resume });
+		await new SlashController(ctx).handle("/resume");
+		expect(resume).toHaveBeenCalledOnce();
+	});
+});
+
+function flowDeps(over: Partial<ResumeFlowDeps> = {}): {
+	deps: ResumeFlowDeps;
+	out: string[];
+	resumed: string[];
+	fatal: { called: boolean };
+} {
+	const out: string[] = [];
+	const resumed: string[] = [];
+	const fatal = { called: false };
+	const deps: ResumeFlowDeps = {
+		write: (s) => void out.push(s),
+		isBusy: () => false,
+		listSessions: async () => JSON.stringify([{ id: "other", mtime: 1, firstPrompt: "p" }]),
+		titles: () => new Map(),
+		currentSessionId: () => undefined,
+		now: () => 0,
+		runOverlay: async (run) =>
+			run({
+				keys: (async function* () {
+					yield "\r"; // Enter → select row 0
+				})(),
+				write: (s) => out.push(s),
+				setRawMode: () => {},
+			}),
+		resume: async (id) => void resumed.push(id),
+		onFatal: () => void (fatal.called = true),
+		...over,
+	};
+	return { deps, out, resumed, fatal };
+}
+
+describe("runResumeFlow (§3)", () => {
+	it("refuses while busy", async () => {
+		const { deps, out, resumed } = flowDeps({ isBusy: () => true });
+		await runResumeFlow(deps);
+		expect(out.join("")).toContain("finish or interrupt the current turn first");
+		expect(resumed).toEqual([]);
+	});
+
+	it("reports 'no other sessions' on an empty list", async () => {
+		const { deps, out } = flowDeps({ listSessions: async () => "[]" });
+		await runResumeFlow(deps);
+		expect(out.join("")).toContain("no other sessions");
+	});
+
+	it("excludes the active session; selecting the only other one resumes it", async () => {
+		const { deps, resumed } = flowDeps({
+			listSessions: async () =>
+				JSON.stringify([
+					{ id: "active", mtime: 2, firstPrompt: "a" },
+					{ id: "other", mtime: 1, firstPrompt: "b" },
+				]),
+			currentSessionId: () => "active",
+		});
+		await runResumeFlow(deps);
+		expect(resumed).toEqual(["other"]); // "active" filtered out, never offered
+	});
+
+	it("takes the empty path when the only session is the active one", async () => {
+		const { deps, out, resumed } = flowDeps({
+			listSessions: async () => JSON.stringify([{ id: "active", mtime: 1, firstPrompt: "a" }]),
+			currentSessionId: () => "active",
+		});
+		await runResumeFlow(deps);
+		expect(out.join("")).toContain("no other sessions");
+		expect(resumed).toEqual([]);
+	});
+
+	it("cancel (Esc) is a no-op (no resume, no onFatal)", async () => {
+		const { deps, resumed, fatal } = flowDeps({
+			runOverlay: async (run) =>
+				run({ keys: (async function* () { yield "\x1b"; })(), write: () => {}, setRawMode: () => {} }),
+		});
+		await runResumeFlow(deps);
+		expect(resumed).toEqual([]);
+		expect(fatal.called).toBe(false);
+	});
+
+	it("respawn failure reports and exits cleanly (no fallback) — spec §4", async () => {
+		const { deps, out, fatal } = flowDeps({
+			resume: async () => {
+				throw new Error("bad id");
+			},
+		});
+		await runResumeFlow(deps);
+		expect(out.join("")).toContain("resume failed: bad id");
+		expect(fatal.called).toBe(true); // teardown invoked; no fresh fallback session
+	});
+
+	it("a gate-held (EngineBusyError) rejection is busy, NOT fatal — no teardown", async () => {
+		// If a turn/compaction grabs the gate between the isBusy() guard and the
+		// respawn, Session.resume rejects with EngineBusyError. That is recoverable:
+		// runResumeFlow must report busy and leave the session intact (no onFatal),
+		// the same outcome as the up-front guard. (Matched by error NAME so surface
+		// keeps no dependency on @ai-ezio/harness.)
+		const busy = Object.assign(new Error("cannot resume while a turn is in flight"), {
+			name: "EngineBusyError",
+		});
+		const { deps, out, fatal } = flowDeps({
+			resume: async () => {
+				throw busy;
+			},
+		});
+		await runResumeFlow(deps);
+		expect(out.join("")).toContain("finish or interrupt the current turn first");
+		expect(out.join("")).not.toContain("resume failed");
+		expect(fatal.called).toBe(false); // session intact — pane/REPL NOT torn down
+	});
+});
