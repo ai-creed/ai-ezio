@@ -56,7 +56,7 @@ under the past id), and banner re-rendered (banner chrome in captured stdout aft
 
 Verify (from `/Users/vuphan/Dev/ai-whisper`):
 ```sh
-git log --oneline 0363f5d..HEAD          # the 4 mounted commits above
+git log --oneline 0363f5d..HEAD          # the 5 mounted commits above
 pnpm install                              # refresh the file: ezio deps (resolves @ai-ezio/* from dist)
 pnpm typecheck                            # whole-repo tsc --noEmit — clean
 pnpm exec vitest run test/adapter-ai-ezio-live-session.test.ts test/live-session-runtime.test.ts
