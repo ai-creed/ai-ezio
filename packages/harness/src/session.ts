@@ -7,6 +7,7 @@ import {
 	FdTransport,
 	isProtocolCompatible,
 	PROTOCOL_VERSION,
+	type AssistantTurnFinishedEvent,
 	type DelegatedToolDef,
 	type ProtocolControl,
 	type ProtocolEvent,
@@ -62,6 +63,8 @@ export interface TurnResult {
 	turnId: string;
 	/** Authoritative handback (assistant_turn_finished.content). */
 	content: string;
+	/** Per-turn token usage (M7), when the engine reported it. */
+	usage?: AssistantTurnFinishedEvent["usage"];
 }
 
 /** Result of a `compact` control (M11). */
@@ -354,7 +357,7 @@ export class Session {
 			const e = await this.nextEventWithin();
 			if (e === null) throw new EngineExitedError("engine exited mid-turn");
 			if (e.type === "assistant_turn_finished") {
-				result = { turnId: e.turnId, content: e.content };
+				result = { turnId: e.turnId, content: e.content, usage: e.usage };
 			} else if (e.type === "error") {
 				turnError = new TurnError(e.message, e.turnId); // keep draining to idle
 			} else if (e.type === "idle") {

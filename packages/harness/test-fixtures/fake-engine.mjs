@@ -145,7 +145,15 @@ if (mode === "exit-after-ready") {
 				emit({ type: "assistant_delta", turnId, text: `ok ${ctl.text}` });
 				lastContent = `ok ${ctl.text}`;
 				lastTurnId = turnId;
-				emit({ type: "assistant_turn_finished", turnId, content: lastContent });
+				const fin = { type: "assistant_turn_finished", turnId, content: lastContent };
+				if (process.env.FAKE_USAGE) {
+					try {
+						fin.usage = JSON.parse(process.env.FAKE_USAGE);
+					} catch {
+						/* ignore — omit usage */
+					}
+				}
+				emit(fin);
 			}
 			emit({ type: "idle" });
 		}
