@@ -94,6 +94,18 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/subagent:
+    dependencies:
+      '@ai-ezio/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@ai-ezio/mcp-host':
+        specifier: workspace:*
+        version: link:../mcp-host
+      '@ai-ezio/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/surface:
     dependencies:
       '@ai-ezio/protocol':
