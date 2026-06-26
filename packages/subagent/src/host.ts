@@ -18,7 +18,7 @@ export type HostSession = Pick<Session, "registerDelegatedTools" | "sendToolResu
 export function subagentToolDef(catalog: Catalog): DelegatedToolDef {
 	const lines = catalog.names.map((n) => {
 		const p = catalog.profiles[n];
-		return `${n}${p.label ? ` = ${p.label}` : ""}`;
+		return `${n}${p?.label ? ` = ${p.label}` : ""}`;
 	});
 	return {
 		name: "subagent",
