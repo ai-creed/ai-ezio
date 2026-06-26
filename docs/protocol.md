@@ -124,6 +124,10 @@ behavior is byte-for-byte identical. Delegated output is capped to hax's shared
 tool-output limit (`HAX_TOOL_OUTPUT_CAP`, default 50K) before entering history,
 exactly like native tools.
 
+> The ezio standalone CLI raises `AI_EZIO_DELEGATED_TIMEOUT` to 30 minutes by
+> default (when unset) so a long-running `subagent` delegated call is not cut off
+> by the dead-host backstop; set the env var explicitly to override.
+
 ### M11 — context compaction
 
 The `compact` control replaces all conversation history except a trailing
