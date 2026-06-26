@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { loadSubagentHost } from "./attach.js";
+import { loadSubagentHost, makeChildSession } from "./attach.js";
 
 it("builds a host whose catalog reflects the injected codex probe", () => {
 	const fixture = JSON.stringify({
@@ -46,6 +46,22 @@ it("registers nothing when codex is unusable and no user profiles exist", () => 
 		sendToolResult: () => {},
 	} as never);
 	expect(registered).toEqual([]);
+});
+
+it("makeChildSession forwards registerDelegatedTools and sendToolResult to the underlying Session", () => {
+	const calls: string[] = [];
+	const fakeSession = {
+		start: async () => ({}),
+		submitAndWait: async () => ({ turnId: "t", content: "c" }),
+		close: () => {},
+		registerDelegatedTools: (t: unknown[]) => calls.push(`register:${t.length}`),
+		sendToolResult: (id: string, out: string, st: string) =>
+			calls.push(`result:${id}:${out}:${st}`),
+	};
+	const child = makeChildSession(fakeSession as never);
+	child.registerDelegatedTools?.([{ name: "x" } as never]);
+	child.sendToolResult?.("c1", "OUT", "ok");
+	expect(calls).toEqual(["register:1", "result:c1:OUT:ok"]);
 });
 
 it("pushes a doctor-visible note into the notes sink when the codex probe returns garbage", () => {

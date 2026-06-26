@@ -8,6 +8,21 @@ import { probeCodexModels, seedCodexProfiles } from "./codex-probe.js";
 import { SubagentHost } from "./host.js";
 import type { ChildMcp, ChildSession } from "./dispatch.js";
 
+/** Adapt a real harness Session to the ChildSession the dispatch runner needs,
+ * forwarding the delegated-tool methods the child's MCP host calls. */
+export function makeChildSession(s: Session): ChildSession {
+	return {
+		start: (o) => s.start(o),
+		// s.submitAndWait returns { turnId, content, usage } after Task 2 — the usage
+		// (AssistantTurnFinishedEvent["usage"]) is shape-compatible with SubagentUsage,
+		// so the child's real token usage reaches the surface summary.
+		submitAndWait: (text) => s.submitAndWait(text),
+		close: () => s.close(),
+		registerDelegatedTools: (tools) => s.registerDelegatedTools(tools),
+		sendToolResult: (callId, output, status) => s.sendToolResult(callId, output, status),
+	};
+}
+
 export function loadSubagentHost(opts: {
 	cwd: string;
 	env?: NodeJS.ProcessEnv;
@@ -30,14 +45,7 @@ export function loadSubagentHost(opts: {
 	// given a SubagentHost — recursion guard (no nested subagents in v0).
 	const makeSession = (onEvent: (e: ProtocolEvent) => void): ChildSession => {
 		const s = new Session({ onEvent });
-		return {
-			start: (o) => s.start(o),
-			// s.submitAndWait returns { turnId, content, usage } after Task 2 — the usage
-			// (AssistantTurnFinishedEvent["usage"]) is shape-compatible with SubagentUsage,
-			// so the child's real token usage reaches the surface summary.
-			submitAndWait: (text) => s.submitAndWait(text),
-			close: () => s.close(),
-		};
+		return makeChildSession(s);
 	};
 	const makeMcpHost = (cwd: string): ChildMcp => {
 		const h = loadMcpHost({ mode: "mounted", cwd, env });

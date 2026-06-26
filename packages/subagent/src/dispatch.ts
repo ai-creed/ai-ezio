@@ -2,6 +2,7 @@
  * chosen profile, run the task to idle, capture the final text, tear down. Never
  * rejects — every outcome is a { status, output } result the host returns verbatim. */
 import type { SubagentProfile } from "@ai-ezio/harness";
+import type { DelegatedToolDef } from "@ai-ezio/protocol";
 import { profileEnv, validateProfile } from "./profile-env.js";
 
 /** Per-turn token usage, shape-compatible with the harness `TurnResult.usage`
@@ -17,6 +18,10 @@ export interface ChildSession {
 	start(opts: { env: NodeJS.ProcessEnv }): Promise<unknown>;
 	submitAndWait(text: string): Promise<{ content: string; usage?: SubagentUsage }>;
 	close(): void;
+	/** Forward to the underlying Session so the child's MCP host can register tools. */
+	registerDelegatedTools?(tools: DelegatedToolDef[]): void;
+	/** Forward to the underlying Session so the child's MCP host can deliver tool results. */
+	sendToolResult?(callId: string, output: string, status: "ok" | "error"): void;
 }
 
 export interface ChildMcp {

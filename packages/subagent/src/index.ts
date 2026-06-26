@@ -8,7 +8,7 @@ export {
 	type HostSession,
 	type SubagentHostOptions,
 } from "./host.js";
-export { loadSubagentHost } from "./attach.js";
+export { loadSubagentHost, makeChildSession } from "./attach.js";
 export { buildCatalog, type Catalog } from "./catalog.js";
 export {
 	probeCodexModels,
