@@ -123,7 +123,9 @@ describe("loadConfig", () => {
 		const { env, write } = fakeEnv();
 		write(
 			JSON.stringify({
-				subagents: { profiles: { bad: { provider: "openai" }, ok: { provider: "openai", model: "x" } } },
+				subagents: {
+					profiles: { bad: { provider: "openai" }, ok: { provider: "openai", model: "x" } },
+				},
 			}),
 		);
 		const cfg = loadConfig(env);

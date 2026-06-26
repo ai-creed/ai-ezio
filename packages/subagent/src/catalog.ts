@@ -22,6 +22,7 @@ export function buildCatalog(args: {
 	const names = Object.keys(profiles);
 	// Default: explicit user choice, else cheapest seeded, else first profile.
 	let def = config.default;
-	if (!def || !profiles[def]) def = seed.cheapest && profiles[seed.cheapest] ? seed.cheapest : names[0];
+	if (!def || !profiles[def])
+		def = seed.cheapest && profiles[seed.cheapest] ? seed.cheapest : names[0];
 	return { profiles, default: def, timeoutMs: config.subagentTimeoutMs, names };
 }

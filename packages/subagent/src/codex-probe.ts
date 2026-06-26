@@ -86,7 +86,10 @@ export function probeCodexModels(
 	if (stdout === null) return { models: [] }; // runner opted out — quiet
 	const models = parseCodexModels(stdout);
 	if (models.length === 0 && stdout.trim() !== "") {
-		return { models: [], note: "codex debug models returned no usable models (output unparseable or empty catalog)" };
+		return {
+			models: [],
+			note: "codex debug models returned no usable models (output unparseable or empty catalog)",
+		};
 	}
 	return { models };
 }

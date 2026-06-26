@@ -4,11 +4,41 @@ import { buildCatalog } from "./catalog.js";
 
 const FIXTURE = JSON.stringify({
 	models: [
-		{ slug: "gpt-5.5", display_name: "GPT-5.5", visibility: "list", supported_in_api: true, priority: 7 },
-		{ slug: "gpt-5.4", display_name: "GPT-5.4", visibility: "list", supported_in_api: true, priority: 16 },
-		{ slug: "gpt-5.4-mini", display_name: "GPT-5.4-mini", visibility: "list", supported_in_api: true, priority: 23 },
-		{ slug: "codex-auto-review", display_name: "x", visibility: "hide", supported_in_api: true, priority: 43 },
-		{ slug: "no-api", display_name: "NoAPI", visibility: "list", supported_in_api: false, priority: 99 },
+		{
+			slug: "gpt-5.5",
+			display_name: "GPT-5.5",
+			visibility: "list",
+			supported_in_api: true,
+			priority: 7,
+		},
+		{
+			slug: "gpt-5.4",
+			display_name: "GPT-5.4",
+			visibility: "list",
+			supported_in_api: true,
+			priority: 16,
+		},
+		{
+			slug: "gpt-5.4-mini",
+			display_name: "GPT-5.4-mini",
+			visibility: "list",
+			supported_in_api: true,
+			priority: 23,
+		},
+		{
+			slug: "codex-auto-review",
+			display_name: "x",
+			visibility: "hide",
+			supported_in_api: true,
+			priority: 43,
+		},
+		{
+			slug: "no-api",
+			display_name: "NoAPI",
+			visibility: "list",
+			supported_in_api: false,
+			priority: 99,
+		},
 	],
 });
 
@@ -82,7 +112,11 @@ describe("buildCatalog", () => {
 				subagentTimeoutMs: 300000,
 				profiles: {
 					"gpt-5.4-mini": { provider: "codex", model: "gpt-5.4-mini", effort: "low" },
-					claude: { provider: "openrouter", model: "anthropic/claude-sonnet-4.6", apiKeyEnv: "OPENROUTER_API_KEY" },
+					claude: {
+						provider: "openrouter",
+						model: "anthropic/claude-sonnet-4.6",
+						apiKeyEnv: "OPENROUTER_API_KEY",
+					},
 				},
 			},
 			seed,
@@ -95,7 +129,11 @@ describe("buildCatalog", () => {
 
 	it("user default wins; empty seed + empty config -> empty catalog", () => {
 		const withDefault = buildCatalog({
-			config: { default: "claude", subagentTimeoutMs: 1, profiles: { claude: { provider: "openrouter", model: "x" } } },
+			config: {
+				default: "claude",
+				subagentTimeoutMs: 1,
+				profiles: { claude: { provider: "openrouter", model: "x" } },
+			},
 			seed: { profiles: {}, cheapest: undefined },
 		});
 		expect(withDefault.default).toBe("claude");

@@ -74,10 +74,7 @@ function clamp(n: number, lo: number, hi: number, name: string, notes: string[])
 	return n;
 }
 
-function parseSubagents(
-	raw: Record<string, unknown> | null,
-	notes: string[],
-): SubagentsConfig {
+function parseSubagents(raw: Record<string, unknown> | null, notes: string[]): SubagentsConfig {
 	const out: SubagentsConfig = {
 		default: undefined,
 		subagentTimeoutMs: SUBAGENT_TIMEOUT_DEFAULT,
@@ -141,5 +138,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EzioConfig {
 		}
 		if (typeof section.rehydrate === "boolean") c.rehydrate = section.rehydrate;
 	}
-	return { compaction: c, subagents: parseSubagents(raw as Record<string, unknown> | null, notes), notes };
+	return {
+		compaction: c,
+		subagents: parseSubagents(raw as Record<string, unknown> | null, notes),
+		notes,
+	};
 }

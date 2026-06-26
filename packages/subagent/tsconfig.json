@@ -4,11 +4,7 @@
 		"rootDir": "src",
 		"outDir": "dist"
 	},
-	"references": [
-		{ "path": "../protocol" },
-		{ "path": "../harness" },
-		{ "path": "../mcp-host" }
-	],
+	"references": [{ "path": "../protocol" }, { "path": "../harness" }, { "path": "../mcp-host" }],
 	"include": ["src/**/*.ts"],
 	"exclude": ["src/**/*.test.ts"]
 }

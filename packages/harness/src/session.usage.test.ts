@@ -14,7 +14,11 @@ describe("Session.submitAndWait usage", () => {
 		const session = new Session();
 		await session.start({
 			binary: FAKE,
-			env: { ...process.env, FAKE_ENGINE_MODE: "normal", FAKE_USAGE: JSON.stringify({ outputTokens: 7 }) },
+			env: {
+				...process.env,
+				FAKE_ENGINE_MODE: "normal",
+				FAKE_USAGE: JSON.stringify({ outputTokens: 7 }),
+			},
 		});
 		const r = await session.submitAndWait("hi");
 		expect(r.content).toBe("ok hi");
