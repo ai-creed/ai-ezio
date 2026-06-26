@@ -39,6 +39,7 @@
 		"@ai-ezio/mcp-host": "workspace:*",
 		"@ai-ezio/protocol": "workspace:*",
 		"@ai-ezio/session-recorder": "workspace:*",
+		"@ai-ezio/subagent": "workspace:*",
 		"@ai-ezio/surface": "workspace:*"
 	}
 }

@@ -17,6 +17,7 @@ import {
 	Session,
 } from "@ai-ezio/harness";
 import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
+import { loadSubagentHost, type SubagentHost } from "@ai-ezio/subagent";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
 import { buildCompactor } from "./compaction-wiring.js";
 import {
@@ -47,6 +48,8 @@ export interface OneShotOptions {
 	startOptions?: Parameters<Session["start"]>[0];
 	/** Injectable host (tests); defaults to loadMcpHost from mcp.json. */
 	host?: McpHost;
+	/** Injectable subagent host (tests); defaults to loadSubagentHost. */
+	subagentHost?: SubagentHost;
 	out?: (s: string) => void;
 	err?: (s: string) => void;
 }
@@ -59,10 +62,12 @@ export interface OneShotOptions {
  * process exit code.
  */
 export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Promise<number> {
+	if (!process.env.AI_EZIO_DELEGATED_TIMEOUT) process.env.AI_EZIO_DELEGATED_TIMEOUT = "1800000";
 	const out = opts.out ?? ((s: string) => void process.stdout.write(s));
 	const err = opts.err ?? ((s: string) => void process.stderr.write(s));
 	const cwd = process.cwd();
 	const host = opts.host ?? loadMcpHost({ mode: "mounted", cwd });
+	const subagentHost = opts.subagentHost ?? loadSubagentHost({ cwd });
 	const stateDir = ezioStateDir();
 	const repoKey = repoKeyForPath(cwd);
 	// Even a one-shot `-p` is a (single-turn) session: record it for cortex too.
@@ -71,6 +76,7 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 		onEvent: (e: ProtocolEvent) => {
 			recorder.handleEvent(e);
 			void host.handleEvent(e);
+			void subagentHost.handleEvent(e);
 		},
 	});
 
@@ -82,6 +88,8 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 	}
 	// Register delegated tools BEFORE the submit so the one-shot turn sees them.
 	await host.start(session);
+	// Register the subagent tool BEFORE the submit so the one-shot turn sees it.
+	subagentHost.start(session);
 	// Recover any projection orphaned by a crash before its final capture (idempotent).
 	await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd, warn: err });
 
@@ -98,6 +106,7 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 		// captured reliably (close() flushes the projection to cortex via callHostTool).
 		await recorder.close();
 		await host.stop();
+		await subagentHost.stop();
 		session.close();
 	}
 	return code;
@@ -228,6 +237,7 @@ export async function startWithTranscript(
 export interface StandaloneResumeDepsInput {
 	session: Pick<Session, "resume">;
 	host: Pick<McpHost, "start">;
+	subagentHost: Pick<SubagentHost, "start">;
 	titleStore: ReturnType<typeof createSessionTitleStore>;
 	rename: ReturnType<typeof createRenameController>;
 	/** The shared whole-chunk stdin source. `onFatal` ends it (via `.return`) to
@@ -254,7 +264,8 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 	titles: () => Map<string, string>;
 	currentSessionId: () => string | undefined;
 } {
-	const { session, host, titleStore, rename, chunkSource, write, listSessions } = input;
+	const { session, host, subagentHost, titleStore, rename, chunkSource, write, listSessions } =
+		input;
 	return {
 		isBusy: () => false,
 		listSessions,
@@ -263,6 +274,7 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 		resume: async (id: string) => {
 			await session.resume(id); // rejects on bad id / spawn / protocol failure
 			await host.start(session as Session); // re-register MCP delegated tools
+			subagentHost.start(session as Session); // re-register the subagent tool (same order contract)
 			write(resumeNotice([`--resume=${id}`]) ?? "");
 		},
 		// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
@@ -274,8 +286,10 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
+	if (!process.env.AI_EZIO_DELEGATED_TIMEOUT) process.env.AI_EZIO_DELEGATED_TIMEOUT = "1800000";
 	const cwd = process.cwd();
 	const host = loadMcpHost({ mode: "standalone", cwd });
+	const subagentHost = loadSubagentHost({ cwd });
 	const stateDir = ezioStateDir();
 	const repoKey = repoKeyForPath(cwd);
 	// Session recorder: assemble turns from the protocol stream and feed cortex a
@@ -315,6 +329,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 				wired?.compactor.noteUsage(e.usage);
 			}
 			void host.handleEvent(e);
+			void subagentHost.handleEvent(e);
 		},
 	});
 	const { compaction } = loadConfig();
@@ -340,6 +355,8 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 
 	// Register delegated tools BEFORE accepting input so the first turn sees them.
 	await host.start(session);
+	// Register the subagent tool BEFORE accepting input so the first turn sees it.
+	subagentHost.start(session);
 	// Recover any projection orphaned by a crash before its final capture (idempotent).
 	await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd });
 
@@ -398,6 +415,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 			...buildStandaloneResumeDeps({
 				session,
 				host,
+				subagentHost,
 				titleStore,
 				rename,
 				chunkSource,
@@ -477,6 +495,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		process.stdout.write("\x1b[<u\x1b[?2004l");
 		stdin.setRawMode?.(false);
 		stdin.pause();
+		await subagentHost.stop();
 	}
 	return 0;
 }

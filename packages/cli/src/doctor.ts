@@ -42,6 +42,8 @@ export interface DoctorInputs {
 		/** HAX_CONTEXT_LIMIT is set in the environment. */
 		contextLimitEnv: boolean;
 	};
+	/** Subagent diagnostics: codex-probe failure notes (doctor-visible). */
+	subagents?: { configNotes: string[] };
 }
 
 export function buildDoctorReport(input: DoctorInputs): DoctorReport {
@@ -72,6 +74,7 @@ export function buildDoctorReport(input: DoctorInputs): DoctorReport {
 			);
 		}
 	}
+	if (input.subagents) notes.push(...input.subagents.configNotes);
 
 	return {
 		version: input.version,

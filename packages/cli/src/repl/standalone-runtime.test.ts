@@ -87,11 +87,13 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		});
 		const fakeSession = { resume: sessionResume };
 		const fakeHost = { start: hostStart };
+		const fakeSubagentHost = { start: vi.fn() };
 		const keyReturn = vi.fn(async () => ({ done: true as const, value: undefined }));
 		const chunkSource = { return: keyReturn } as unknown as AsyncGenerator<string>;
 		const deps = buildStandaloneResumeDeps({
 			session: fakeSession as never,
 			host: fakeHost as never,
+			subagentHost: fakeSubagentHost as never,
 			titleStore: store,
 			rename,
 			chunkSource,
@@ -124,6 +126,46 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		expect(deps.currentSessionId()).toBe("abc");
 		rename.setSessionTitle("t");
 		expect([...deps.titles().values()]).toContain("t");
+	});
+
+	it("resume re-registers tools in order: session.resume -> host.start -> subagentHost.start", async () => {
+		const order: string[] = [];
+		const store = createSessionTitleStore({ fs: makeMemFs() });
+		const rename = createRenameController({ store, requestStatus: () => {} });
+		const session = {
+			resume: vi.fn(async () => {
+				order.push("session.resume");
+				return {} as never;
+			}),
+		};
+		const host = {
+			start: vi.fn(async () => {
+				order.push("host.start");
+			}),
+		};
+		const subagentHost = {
+			start: vi.fn(() => {
+				order.push("subagentHost.start");
+			}),
+			handleEvent: async () => {},
+			stop: async () => {},
+		};
+		const deps = buildStandaloneResumeDeps({
+			session: session as never,
+			host: host as never,
+			subagentHost: subagentHost as never,
+			titleStore: store,
+			rename,
+			chunkSource: {
+				return: vi.fn(async () => ({ done: true as const, value: undefined })),
+			} as never,
+			write: () => {},
+			listSessions: async () => "[]",
+		});
+		await deps.resume("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
+		// Re-registration order: respawn, THEN MCP tools, THEN the subagent tool.
+		expect(order).toEqual(["session.resume", "host.start", "subagentHost.start"]);
+		expect(subagentHost.start).toHaveBeenCalledOnce();
 	});
 });
 
