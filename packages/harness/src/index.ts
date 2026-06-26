@@ -38,8 +38,11 @@ export {
 	COMPACTION_DEFAULTS,
 	configFilePath,
 	loadConfig,
+	SUBAGENT_TIMEOUT_DEFAULT,
 	type CompactionConfig,
 	type EzioConfig,
+	type SubagentProfile,
+	type SubagentsConfig,
 } from "./config.js";
 export {
 	Compactor,
