@@ -126,3 +126,20 @@ it("cancel() tears down the child AND stops the child MCP, resolving promptly", 
 	expect(close).toHaveBeenCalled();
 	expect(mcp.stop).toHaveBeenCalled(); // child MCP stopped immediately — no orphan remains
 });
+
+it("a throwing child factory resolves as an error (never rejects)", async () => {
+	const handle = runSubagent({
+		task: "x",
+		profile: { provider: "codex", model: "gpt-5.4-mini" },
+		cwd: "/repo",
+		parentEnv: {},
+		timeoutMs: 1000,
+		makeSession: (() => ({})) as never,
+		makeMcpHost: () => {
+			throw new Error("factory boom");
+		},
+	});
+	const r = await handle.promise; // must not throw
+	expect(r.status).toBe("error");
+	expect(r.output).toMatch(/factory boom/);
+});

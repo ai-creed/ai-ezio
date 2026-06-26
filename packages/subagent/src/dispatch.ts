@@ -98,11 +98,11 @@ export function runSubagent(args: {
 		const keyErr = validateProfile(args.profile, args.parentEnv);
 		if (keyErr) return { output: keyErr, status: "error", elapsedMs: now() - startedAt };
 
-		mcp = args.makeMcpHost(args.cwd);
-		const onChildEvent = (e: unknown): void =>
-			void (mcp as ChildMcp & { handleEvent?: (e: unknown) => void }).handleEvent?.(e);
-		child = args.makeSession(onChildEvent);
 		try {
+			mcp = args.makeMcpHost(args.cwd);
+			const onChildEvent = (e: unknown): void =>
+				void (mcp as ChildMcp & { handleEvent?: (e: unknown) => void }).handleEvent?.(e);
+			child = args.makeSession(onChildEvent);
 			await child.start({ env: profileEnv(args.profile, args.parentEnv) });
 			await mcp.start(child);
 			const timeout = new Promise<never>((_resolve, reject) => {
