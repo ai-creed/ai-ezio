@@ -3,9 +3,11 @@
 - **Status:** approved (brainstorm 2026-06-26)
 - **Scope:** v0 — a single `subagent` delegated tool that runs **one** child hax
   session at a time (linear, no parallel fan-out) on a **named profile** that
-  selects a different model and/or provider. Read-only subagents, nested
-  subagents, parallel fan-out, and progress streaming are explicitly out of scope
-  (v1 backlog).
+  selects a different model and/or provider. Works **zero-config for codex users**:
+  built-in profiles are seeded from the live `codex debug models` catalog, and an
+  optional `subagents` config block overrides/extends them. Read-only subagents,
+  nested subagents, parallel fan-out, and progress streaming are explicitly out of
+  scope (v1 backlog).
 - **Repos touched:** ai-ezio only — a new `packages/subagent` package, a
   `subagents` section added to `EzioConfig` (`packages/harness/src/config.ts`),
   and two wiring sites in the standalone CLI
@@ -24,9 +26,9 @@ ezio should be able to **delegate a self-contained subtask to a smaller/cheaper
 model** — or a different vendor entirely — without polluting the parent
 conversation's context. Typical use: the parent (e.g. `gpt-5.5` on the `codex`
 provider) hands a mechanical or narrow chunk of work to a cheaper model
-(`gpt-5-mini`, a local `ollama` model, etc.), gets back a finished answer, and
-continues. This is the subagent pattern familiar from Claude Code / Codex,
-specialized to ezio's hybrid architecture.
+(`gpt-5.4-mini` on the same codex login, a local `ollama` model, etc.), gets back a
+finished answer, and continues. This is the subagent pattern familiar from Claude
+Code / Codex, specialized to ezio's hybrid architecture.
 
 The key realization that makes this cheap to build: **a subagent is just another
 host-delegated tool.** The M9 seam already lets ezio (TS) advertise a tool to the
@@ -35,6 +37,12 @@ arbitrary TS, and reply with a `tool_result`. The MCP host already rides this se
 for every ecosystem tool. The subagent rides the same seam — the only new part is
 that its "backend" is a **child hax session** instead of an MCP server. hax stays
 entirely subagent-agnostic; it only knows "this tool's result comes from the host."
+
+To keep the common case friction-free, ezio seeds **built-in default profiles**
+from the user's live codex model catalog (`codex debug models`) when codex is
+usable, so a codex user gets working cheap/standard/strong tiers with **no config
+at all**; the optional `subagents` config block only overrides or extends that
+catalog.
 
 Consequences of that framing:
 
@@ -53,12 +61,13 @@ Consequences of that framing:
 | Concurrency (v0) | Linear — one child at a time | hax dispatch is sequential; parallel deferred to v1. |
 | Dispatch runner | Full **protocol Session** per call (spawn child hax headless, `submitAndWait`, close) | Reuses the battle-tested turn-gate/error/interrupt machinery; structured events enable future streaming, per-turn usage, multi-turn, and subagent-owned MCP. |
 | Model/provider selection | **Named profiles, enum-only** | The parent model can't reliably know prices or the user's local auth; ezio owns the catalog. Enum prevents hallucinated model ids. |
+| Zero-config defaults | **Built-in profiles seeded from `codex debug models`** (when codex is usable); the optional `subagents` config merges on top | The common case (a codex login) gets working subagent tiers with no config; seeding from the live catalog keeps model ids valid and current. |
 | Subagent tool access | Full native hax tools (`read`/`bash`/`write`/`edit`) **plus** the same `mcp.json` ecosystem (child gets its own `loadMcpHost`) | Most capable subagents; accepted the per-dispatch MCP-connect cost. |
 | Read-only subagents | **Deferred to v1** | hax has no native-tool gating (tools are a compile-time array of four; only `--raw` removes them all). True read-only needs a hax tool-denylist seam — out of scope for a zero-C-change v0. |
 | Working directory | Parent cwd (child edits the same repo) | v0 use case is delegating work on the current repo. Per-profile cwd is v1. |
 | Recursion | Child gets the MCP host but **not** the subagent host | No nested subagents in v0. |
 | Surface | Minimal — existing tool-call rendering + a one-line summary (elapsed + tokens) + the final text as tool output | No new surface machinery; nested progress streaming is v1. |
-| Config location | `subagents` section in `~/.config/ai-ezio/config.json` (extends `EzioConfig`) | Sibling of `mcp.json`; general ezio settings already live here. |
+| Config location | Optional `subagents` section in `~/.config/ai-ezio/config.json` (extends `EzioConfig`) — overrides/extends the built-in catalog | Sibling of `mcp.json`; general ezio settings already live here. |
 | Wiring scope | Mode-agnostic host; wired into the standalone CLI here. Mounted wiring deferred downstream. | Mirrors how `loadMcpHost` is shared; the ai-whisper adapter lives in another repo. |
 
 ## Architecture
@@ -68,7 +77,7 @@ handler spins up and tears down a fully independent child session.
 
 ```text
 parent model
-   │  calls subagent(task, profile="cheap")
+   │  calls subagent(task, profile="gpt-5.4-mini")
    ▼
 hax (parent)  ──fd3: tool_call_requested{callId,name:"subagent",args}──►  ezio
 hax (parent)  ◄────────────────── BLOCKS on fd4 ───────────────────────  (interrupt-aware,
@@ -94,10 +103,11 @@ Each unit has one purpose, a defined interface, and is independently testable.
 ### `packages/subagent` (new)
 
 - **`SubagentHost`** — mirrors `McpHost`. Interface:
-  - `start(session: HostSession): void` — if any profiles are configured,
-    registers the single `subagent` delegated tool (schema's `profile` enum built
-    from the configured profile names). No profiles → registers nothing (the tool
-    is simply unavailable, exactly like an MCP host with no servers).
+  - `start(session: HostSession): Promise<void>` — builds the profile catalog
+    (built-in codex seed + user config), and if it is non-empty registers the single
+    `subagent` delegated tool (schema's `profile` enum built from the catalog's
+    profile names). Empty catalog → registers nothing (the tool is simply
+    unavailable, exactly like an MCP host with no servers).
   - `handleEvent(event: ProtocolEvent): Promise<void>` — acts only on
     `tool_call_requested` where `name === "subagent"`; ignores everything else.
     Also tracks the in-flight child so it can be torn down on cancellation (see
@@ -105,7 +115,18 @@ Each unit has one purpose, a defined interface, and is independently testable.
   - `stop(): Promise<void>` — tears down any in-flight child.
   - Depends on: `@ai-ezio/harness` (Session/spawn), `@ai-ezio/protocol` (types),
     `@ai-ezio/mcp-host` (`loadMcpHost` for the child's tools).
-- **profile resolution** — pure functions: `resolveProfile(name, config)` and
+- **profile catalog** — builds the effective profile map by merging two sources:
+  1. **built-in codex seed** — when codex is usable (the `codex` CLI is on `PATH`
+     and `~/.codex/auth.json` exists), run `codex debug models`, parse the JSON, keep
+     models with `visibility === "list"` and `supported_in_api === true`, and emit
+     one profile per model slug (`{ provider: "codex", model: <slug> }`, effort left
+     at the model default). The probe runs once per session and is cached; any
+     failure (CLI missing, non-zero exit, parse error, format drift) skips the seed
+     with a `doctor`-visible note and never throws.
+  2. **user config** — the optional `subagents.profiles` map, which overrides a
+     seeded slug (e.g. to pin effort) or adds new cross-provider profiles. User
+     entries win on name collision.
+- **profile resolution** — pure functions: `resolveProfile(name, catalog)` and
   `profileEnv(profile, parentEnv)` mapping a profile to the child's
   `HAX_PROVIDER` / `HAX_MODEL` / `HAX_REASONING_EFFORT` (+ the named key/base-url
   env passed through from the parent env). Pure and unit-tested in isolation.
@@ -114,10 +135,11 @@ Each unit has one purpose, a defined interface, and is independently testable.
 
 ### `EzioConfig.subagents` (extends `packages/harness/src/config.ts`)
 
-Parses and validates the `subagents` section: a `default` profile name and a
-`profiles` map. Unknown/malformed entries follow the existing config convention
-(skip with a `doctor`-visible note; never throw). Missing section = no profiles =
-feature disabled.
+Parses and validates the optional `subagents` section: a `default` profile name, a
+`profiles` map (overrides/extends the built-in codex seed), and `subagentTimeoutMs`.
+Unknown/malformed entries follow the existing config convention (skip with a
+`doctor`-visible note; never throw). Missing section = built-in codex seed only (or,
+when codex is not usable, an empty catalog = feature disabled).
 
 ### CLI wiring (`packages/cli/src/repl/standalone-runtime.ts`)
 
@@ -126,66 +148,94 @@ construct a `SubagentHost`, fan `session.onEvent` to its `handleEvent` alongside
 the recorder and MCP host, and `await subagentHost.start(session)` before the
 first submit — the same ordering contract the MCP host already follows.
 
-## Config schema
+## Profile catalog & config schema
+
+The `subagents` block is **optional**. With codex usable and no config, the catalog
+is seeded entirely from `codex debug models` — one profile per list-visible model
+slug. As of this writing a typical codex login yields:
+
+| Profile (slug) | Tier | Source |
+| --- | --- | --- |
+| `gpt-5.5` | frontier | seeded (`visibility: list`) |
+| `gpt-5.4` | strong | seeded (`visibility: list`) |
+| `gpt-5.4-mini` | cheapest / fastest | seeded (`visibility: list`) |
+
+(`codex-auto-review` and any other `visibility: hide` / non-API model are excluded.)
+
+A config block overrides a seeded slug (e.g. to pin effort) or adds cross-provider
+profiles:
 
 ```jsonc
 // ~/.config/ai-ezio/config.json  (sibling of mcp.json; extends EzioConfig)
 {
   "compaction": { /* existing — unchanged */ },
+
+  // Entirely optional. Omit it and codex users still get the seeded catalog
+  // (gpt-5.5, gpt-5.4, gpt-5.4-mini) from `codex debug models`.
   "subagents": {
-    "default": "cheap",                 // used when the model omits `profile`
+    "default": "gpt-5.4-mini",          // when the model omits `profile` (default: cheapest seeded model)
+    "subagentTimeoutMs": 300000,        // per-dispatch budget (optional)
     "profiles": {
-      "cheap": {
-        "label": "fast grunt work, lower quality",  // surfaced to the model in the tool description
-        "provider": "openai",                        // -> HAX_PROVIDER
-        "model": "gpt-5-mini",                        // -> HAX_MODEL
-        "effort": "low",                             // -> HAX_REASONING_EFFORT (optional)
-        "apiKeyEnv": "HAX_OPENAI_API_KEY"            // name of the parent-env var to pass through (optional)
-      },
-      "local":  { "label": "offline",      "provider": "ollama",
+      // Override a seeded codex slug — e.g. force low effort on the mini for cheap grunt work:
+      "gpt-5.4-mini": { "provider": "codex", "model": "gpt-5.4-mini", "effort": "low" },
+
+      // Add cross-provider tiers (each non-codex provider needs its own key):
+      "local":  { "label": "offline", "provider": "ollama",
                   "model": "qwen3:8b", "baseUrlEnv": "HAX_OPENAI_BASE_URL" },
-      "strong": { "label": "hard subtask", "provider": "openrouter",
+      "claude": { "label": "hard subtask", "provider": "openrouter",
                   "model": "anthropic/claude-sonnet-4.6", "apiKeyEnv": "OPENROUTER_API_KEY" }
     }
   }
 }
 ```
 
+Profile fields: `provider` (→ `HAX_PROVIDER`), `model` (→ `HAX_MODEL`), `effort`
+(optional → `HAX_REASONING_EFFORT`), `apiKeyEnv` / `baseUrlEnv` (optional — names of
+parent-env vars passed through to the child), `label` (optional — a hint surfaced to
+the model in the tool description; seeded codex profiles default their label to the
+model's `display_name`).
+
 Notes:
 
-- **Auth does not transfer.** The parent's `codex` (ChatGPT) login is not usable
-  by an `openai`/`openrouter` child; each non-`codex` profile needs its own key
-  present in the parent environment, named by `apiKeyEnv`. `ollama`/`llama.cpp`
-  need no key.
-- **`subagentTimeoutMs`** (optional, top-level under `subagents`, default 300000)
-  bounds a single dispatch.
+- **Default profile.** When the user sets no `default`, it is the cheapest seeded
+  codex model (the `*-mini` slug if present, else the lowest-tier list model).
+  Delegating implies offloading cheap work; the model can still name a stronger slug
+  for a hard subtask. With no seed and no user `default`, the first user profile is
+  used.
+- **Auth does not transfer.** The parent's `codex` login is reused only by
+  `provider: codex` profiles (the seeded ones). An `openai`/`openrouter` child needs
+  its own key present in the parent environment, named by `apiKeyEnv`.
+  `ollama`/`llama.cpp` need no key.
+- **`subagentTimeoutMs`** (optional, default 300000) bounds a single dispatch.
 
 ## Tool schema (advertised to the parent model)
 
 ```jsonc
 {
   "name": "subagent",
-  "description": "Delegate a self-contained subtask to a smaller/cheaper model running as an autonomous coding agent in this same repository. The subagent has no prior conversation context — give it complete instructions. Returns the subagent's final answer. Profiles: cheap = fast grunt work, lower quality; local = offline; strong = harder subtask.",
+  "description": "Delegate a self-contained subtask to a smaller/cheaper model running as an autonomous coding agent in this same repository. The subagent has no prior conversation context — give it complete instructions. Returns the subagent's final answer. Prefer the smallest profile that can do the job; name a stronger one only for a hard subtask. Profiles: gpt-5.4-mini = smaller, faster, cheapest; gpt-5.4 = strong; gpt-5.5 = frontier.",
   "parametersSchema": {
     "type": "object",
     "properties": {
       "task":    { "type": "string", "description": "Full, self-contained instructions for the subagent." },
-      "profile": { "type": "string", "enum": ["cheap", "local", "strong"] }
+      "profile": { "type": "string", "enum": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] }
     },
     "required": ["task"]
   }
 }
 ```
 
-The `profile` enum and the description's profile list are generated from the
-configured profiles (their `label`s). Omitted `profile` resolves to `default`.
+The `profile` enum and the description's profile list are generated at startup from
+the effective catalog (built-in codex seed + user config) — the example above
+reflects a typical codex login. Omitted `profile` resolves to `default` (the
+cheapest seeded model unless the user overrides it).
 
 ## Data flow (one dispatch, detailed)
 
 1. Parent model calls `subagent(task, profile?)`. hax emits `tool_call_requested`
    and blocks on fd4.
 2. `SubagentHost.handleEvent`:
-   - `profile = resolveProfile(args.profile ?? config.default)`. Unknown profile
+   - `profile = resolveProfile(args.profile ?? catalog.default)`. Unknown profile
      → reply `error` (see Error handling); return.
    - `env = profileEnv(profile, parentEnv)`; missing required key var → reply
      `error`.
@@ -214,8 +264,8 @@ contributes a one-line summary; the subagent's final answer is shown as the tool
 output:
 
 ```text
-▸ subagent [cheap: gpt-5-mini]  …running
-✔ subagent [cheap]  12.3s · 4.2k tok
+▸ subagent [gpt-5.4-mini]  …running
+✔ subagent [gpt-5.4-mini]  12.3s · 4.2k tok
   <subagent final answer = tool output>
 ```
 
@@ -226,7 +276,8 @@ and are surface-only; the model-visible tool output is the final text alone.
 
 | Case | Behavior |
 | --- | --- |
-| Unknown/invalid `profile` | `tool_result` status `error`: `unknown profile "X"; valid: cheap, local, strong`. Parent turn continues. |
+| `codex debug models` probe fails (CLI missing / bad exit / parse error / drift) | Skip the codex seed with a `doctor`-visible note; fall back to user-config profiles only. If that leaves an empty catalog, the `subagent` tool is not registered. Never blocks or fails session startup. |
+| Unknown/invalid `profile` | `tool_result` status `error`: `unknown profile "X"; valid: <catalog names>`. Parent turn continues. |
 | Missing API key for the profile | `error` result naming the missing env var. |
 | Child spawn / protocol failure (`EngineExitedError`) | `error` result; parent session unaffected. |
 | Child turn error (`TurnError`) | return the child's error message as an `error` result. |
@@ -236,8 +287,14 @@ and are surface-only; the model-visible tool output is the final text alone.
 
 ## Testing
 
+- **Catalog seeding unit** — feed a captured `codex debug models` JSON fixture
+  (inject the probe runner): assert list+API models become profiles, hidden/non-API
+  are dropped, slugs map to `{provider:"codex", model:slug}`, and a probe
+  failure/garbage output yields an empty seed + note (never throws).
+- **Catalog merge unit** — user `profiles` override a seeded slug by name and add new
+  ones; `default` resolution picks the cheapest seeded model when unset.
 - **`SubagentHost` unit** — inject child `spawn`/`transportFactory` (the existing
-  Session test seams). Assert: tool registered iff profiles exist; profile
+  Session test seams). Assert: tool registered iff the catalog is non-empty; profile
   resolution incl. `default` and unknown; the dispatch happy path replies with the
   child's content; each error-path reply. Mirror `packages/mcp-host/src/host.test.ts`.
 - **Profile/config parse** — valid, missing, malformed, clamp-with-note. Mirror
@@ -261,6 +318,15 @@ and are surface-only; the model-visible tool output is the final text alone.
   issues a **single** `register_delegated_tools`, and routes each
   `tool_call_requested` to the owning provider by name. (This also keeps display
   ordering deterministic.)
+- **codex catalog seeding (shell-out).** Seeding runs `codex debug models` (a
+  ~140 KB JSON dump) once per session, gated on codex being usable. Risks: startup
+  latency (mitigated by single-run caching + running it lazily/off the critical
+  path before the first submit), output-format drift (mitigated by defensive parsing
+  + graceful skip), and staleness within a long session (accepted — re-seed on next
+  launch). The probe must never block or fail session startup. Open question: is the
+  seed gated strictly on the parent being on `provider: codex`, or run whenever codex
+  is usable regardless of the parent provider? (Leaning: run whenever codex is usable
+  — codex profiles work via the codex login independent of the parent's provider.)
 - **Per-dispatch MCP-connect cost (accepted).** Inheriting `mcp.json` spawns and
   connects MCP servers (cortex, etc.) on every dispatch — real latency and process
   churn. v1 optimization: pool/reuse child MCP connections across dispatches.
@@ -280,4 +346,6 @@ and are surface-only; the model-visible tool output is the final text alone.
   surface.
 - Per-profile working directory / isolated worktree per dispatch.
 - MCP-connection reuse/pooling across dispatches.
+- Cross-session catalog caching (TTL'd `codex debug models` result) and auto-seed for
+  non-codex providers (e.g. an OpenRouter model list).
 - Mounted (ai-whisper) wiring of the subagent host.
