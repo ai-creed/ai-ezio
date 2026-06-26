@@ -69,7 +69,11 @@ export class McpHost {
 		if (event.type !== "tool_call_requested") return;
 		const { callId, name, args } = event;
 		const route = this.routes.resolve(name);
-		if (!route) return this.reply(callId, `unknown tool: ${name}`, "error");
+		// Not one of our tools — another delegated-tool provider (e.g. the subagent
+		// host) owns it. Stay silent so we don't race a bogus error against the real
+		// owner's reply. hax only emits tool_call_requested for registered tools, so a
+		// genuinely-unknown name never reaches here.
+		if (!route) return;
 
 		const policy = decidePolicy(name, this.opts.toolPolicy, this.opts.mode);
 		if (policy === "deny")
