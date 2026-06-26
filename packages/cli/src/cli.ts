@@ -46,6 +46,9 @@ export async function runNativeSubcommand(argv: readonly string[]): Promise<numb
 		const { computeWiredState } = await import("./bootstrap/init-cli.js");
 		const { loadConfig } = await import("@ai-ezio/harness");
 		const ezioConfig = loadConfig();
+		const { loadSubagentHost } = await import("@ai-ezio/subagent");
+		const subagentNotes: string[] = [];
+		loadSubagentHost({ cwd: process.cwd(), notes: subagentNotes }); // probe runs; a failure pushes a note
 		const report = buildDoctorReport({
 			version: readVersionInfo(),
 			hax: describeHaxBinary(),
@@ -58,6 +61,7 @@ export async function runNativeSubcommand(argv: readonly string[]): Promise<numb
 				configNotes: ezioConfig.notes,
 				contextLimitEnv: Boolean(process.env.HAX_CONTEXT_LIMIT),
 			},
+			subagents: { configNotes: subagentNotes },
 		});
 		process.stdout.write(`${formatDoctorReport(report)}\n`);
 		return report.hax.ok ? 0 : 1;

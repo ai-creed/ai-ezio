@@ -10,6 +10,7 @@
 		{ "path": "../mcp-host" },
 		{ "path": "../protocol" },
 		{ "path": "../session-recorder" },
+		{ "path": "../subagent" },
 		{ "path": "../surface" }
 	],
 	"include": ["src/**/*.ts"],

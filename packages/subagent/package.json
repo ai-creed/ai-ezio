@@ -1,0 +1,25 @@
+{
+	"name": "@ai-ezio/subagent",
+	"version": "0.1.0",
+	"description": "ai-ezio subagent host: delegate a subtask to a child hax session on a different model/provider",
+	"license": "MIT",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"@ai-ezio/protocol": "workspace:*",
+		"@ai-ezio/harness": "workspace:*",
+		"@ai-ezio/mcp-host": "workspace:*"
+	},
+	"scripts": {
+		"build": "tsc --build",
+		"test": "vitest run"
+	}
+}

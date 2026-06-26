@@ -115,3 +115,21 @@ describe("doctor compaction diagnostics (M11)", () => {
 		expect(forced.notes.some((n) => n.includes("auto-compact"))).toBe(false);
 	});
 });
+
+describe("doctor subagent diagnostics", () => {
+	it("includes subagent codex-probe notes in the report", () => {
+		const report = buildDoctorReport({
+			version: { ezioVersion: "0", haxBaseCommit: "x" } as never,
+			hax: { ok: true, path: "/hax", source: "env", attempts: [] } as never,
+			dirs: [],
+			dirExists: () => false,
+			skills: [],
+			subagents: {
+				configNotes: [
+					"codex debug models returned no usable models (output unparseable or empty catalog)",
+				],
+			},
+		});
+		expect(report.notes.some((n) => /codex debug models/.test(n))).toBe(true);
+	});
+});

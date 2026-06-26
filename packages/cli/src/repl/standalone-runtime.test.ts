@@ -4,14 +4,36 @@ import { decodeChunk } from "@ai-ezio/surface";
 import {
 	buildStandaloneKeySources,
 	buildStandaloneResumeDeps,
+	ensureDelegatedTimeout,
 	makeStandaloneOverlay,
 	resumeNotice,
 	startWithTranscript,
+	subagentReportLine,
 } from "./standalone-runtime.js";
 
 /** Minimal shape of the SpawnHaxOptions the helper forwards — avoids coupling
  * the test to the harness package's export surface. */
 type StartOpts = { args?: string[]; transcriptPath?: string };
+
+describe("ensureDelegatedTimeout", () => {
+	it("ensureDelegatedTimeout sets the 30-minute backstop in SECONDS, only when unset", () => {
+		const fresh: NodeJS.ProcessEnv = {};
+		ensureDelegatedTimeout(fresh);
+		expect(fresh.AI_EZIO_DELEGATED_TIMEOUT).toBe("1800"); // 1800 SECONDS = 30 min (hax reads seconds)
+		const overridden: NodeJS.ProcessEnv = { AI_EZIO_DELEGATED_TIMEOUT: "60" };
+		ensureDelegatedTimeout(overridden);
+		expect(overridden.AI_EZIO_DELEGATED_TIMEOUT).toBe("60"); // user override preserved
+	});
+});
+
+describe("subagentReportLine", () => {
+	it("subagentReportLine writes a newline-terminated summary to the surface writer", () => {
+		const lines: string[] = [];
+		const report = subagentReportLine((s) => lines.push(s));
+		report("✔ subagent [cheap] 12.3s · 4.2k tok");
+		expect(lines).toEqual(["✔ subagent [cheap] 12.3s · 4.2k tok\n"]);
+	});
+});
 
 describe("resumeNotice", () => {
 	it("is undefined for a fresh (non-resume) launch", () => {
@@ -87,11 +109,13 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		});
 		const fakeSession = { resume: sessionResume };
 		const fakeHost = { start: hostStart };
+		const fakeSubagentHost = { start: vi.fn() };
 		const keyReturn = vi.fn(async () => ({ done: true as const, value: undefined }));
 		const chunkSource = { return: keyReturn } as unknown as AsyncGenerator<string>;
 		const deps = buildStandaloneResumeDeps({
 			session: fakeSession as never,
 			host: fakeHost as never,
+			subagentHost: fakeSubagentHost as never,
 			titleStore: store,
 			rename,
 			chunkSource,
@@ -124,6 +148,46 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		expect(deps.currentSessionId()).toBe("abc");
 		rename.setSessionTitle("t");
 		expect([...deps.titles().values()]).toContain("t");
+	});
+
+	it("resume re-registers tools in order: session.resume -> host.start -> subagentHost.start", async () => {
+		const order: string[] = [];
+		const store = createSessionTitleStore({ fs: makeMemFs() });
+		const rename = createRenameController({ store, requestStatus: () => {} });
+		const session = {
+			resume: vi.fn(async () => {
+				order.push("session.resume");
+				return {} as never;
+			}),
+		};
+		const host = {
+			start: vi.fn(async () => {
+				order.push("host.start");
+			}),
+		};
+		const subagentHost = {
+			start: vi.fn(() => {
+				order.push("subagentHost.start");
+			}),
+			handleEvent: async () => {},
+			stop: async () => {},
+		};
+		const deps = buildStandaloneResumeDeps({
+			session: session as never,
+			host: host as never,
+			subagentHost: subagentHost as never,
+			titleStore: store,
+			rename,
+			chunkSource: {
+				return: vi.fn(async () => ({ done: true as const, value: undefined })),
+			} as never,
+			write: () => {},
+			listSessions: async () => "[]",
+		});
+		await deps.resume("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
+		// Re-registration order: respawn, THEN MCP tools, THEN the subagent tool.
+		expect(order).toEqual(["session.resume", "host.start", "subagentHost.start"]);
+		expect(subagentHost.start).toHaveBeenCalledOnce();
 	});
 });
 

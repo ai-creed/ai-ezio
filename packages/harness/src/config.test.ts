@@ -83,4 +83,53 @@ describe("loadConfig", () => {
 		expect(cfg.notes).toHaveLength(1);
 		expect(cfg.notes[0]).toMatch(/unreadable/);
 	});
+
+	it("missing subagents section -> empty profiles, default timeout", () => {
+		const { env } = fakeEnv();
+		const cfg = loadConfig(env);
+		expect(cfg.subagents).toEqual({
+			default: undefined,
+			subagentTimeoutMs: 300000,
+			profiles: {},
+		});
+	});
+
+	it("parses a subagents section with profiles and clamps a bad timeout", () => {
+		const { env, write } = fakeEnv();
+		write(
+			JSON.stringify({
+				subagents: {
+					default: "gpt-5.4-mini",
+					subagentTimeoutMs: -5,
+					profiles: {
+						"gpt-5.4-mini": { provider: "codex", model: "gpt-5.4-mini", effort: "low" },
+						local: { provider: "ollama", model: "qwen3:8b", label: "offline" },
+					},
+				},
+			}),
+		);
+		const cfg = loadConfig(env);
+		expect(cfg.subagents.default).toBe("gpt-5.4-mini");
+		expect(cfg.subagents.subagentTimeoutMs).toBe(300000); // -5 clamped to default
+		expect(cfg.subagents.profiles["gpt-5.4-mini"]).toEqual({
+			provider: "codex",
+			model: "gpt-5.4-mini",
+			effort: "low",
+		});
+		expect(cfg.subagents.profiles.local.label).toBe("offline");
+	});
+
+	it("drops malformed profiles (missing provider/model) with a note", () => {
+		const { env, write } = fakeEnv();
+		write(
+			JSON.stringify({
+				subagents: {
+					profiles: { bad: { provider: "openai" }, ok: { provider: "openai", model: "x" } },
+				},
+			}),
+		);
+		const cfg = loadConfig(env);
+		expect(Object.keys(cfg.subagents.profiles)).toEqual(["ok"]);
+		expect(cfg.notes.some((n) => n.includes("bad"))).toBe(true);
+	});
 });
