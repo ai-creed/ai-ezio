@@ -117,7 +117,8 @@ Each unit has one purpose, a defined interface, and is independently testable.
     `@ai-ezio/mcp-host` (`loadMcpHost` for the child's tools).
 - **profile catalog** — builds the effective profile map by merging two sources:
   1. **built-in codex seed** — when codex is usable (the `codex` CLI is on `PATH`
-     and `~/.codex/auth.json` exists), run `codex debug models`, parse the JSON, keep
+     and `~/.codex/auth.json` exists), **independent of the parent's provider**, run
+     `codex debug models`, parse the JSON, keep
      models with `visibility === "list"` and `supported_in_api === true`, and emit
      one profile per model slug (`{ provider: "codex", model: <slug> }`, effort left
      at the model default). The probe runs once per session and is cached; any
@@ -323,10 +324,10 @@ and are surface-only; the model-visible tool output is the final text alone.
   latency (mitigated by single-run caching + running it lazily/off the critical
   path before the first submit), output-format drift (mitigated by defensive parsing
   + graceful skip), and staleness within a long session (accepted — re-seed on next
-  launch). The probe must never block or fail session startup. Open question: is the
-  seed gated strictly on the parent being on `provider: codex`, or run whenever codex
-  is usable regardless of the parent provider? (Leaning: run whenever codex is usable
-  — codex profiles work via the codex login independent of the parent's provider.)
+  launch). The probe must never block or fail session startup. **Resolved:** the seed
+  runs whenever codex is usable, independent of the parent's provider — codex profiles
+  work via the codex login regardless of what the parent runs on (e.g. an
+  openrouter-parent user can still delegate cheap work to a codex model).
 - **Per-dispatch MCP-connect cost (accepted).** Inheriting `mcp.json` spawns and
   connects MCP servers (cortex, etc.) on every dispatch — real latency and process
   churn. v1 optimization: pool/reuse child MCP connections across dispatches.
