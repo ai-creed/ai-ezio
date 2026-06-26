@@ -4,14 +4,36 @@ import { decodeChunk } from "@ai-ezio/surface";
 import {
 	buildStandaloneKeySources,
 	buildStandaloneResumeDeps,
+	ensureDelegatedTimeout,
 	makeStandaloneOverlay,
 	resumeNotice,
 	startWithTranscript,
+	subagentReportLine,
 } from "./standalone-runtime.js";
 
 /** Minimal shape of the SpawnHaxOptions the helper forwards — avoids coupling
  * the test to the harness package's export surface. */
 type StartOpts = { args?: string[]; transcriptPath?: string };
+
+describe("ensureDelegatedTimeout", () => {
+	it("ensureDelegatedTimeout sets the 30-minute backstop in SECONDS, only when unset", () => {
+		const fresh: NodeJS.ProcessEnv = {};
+		ensureDelegatedTimeout(fresh);
+		expect(fresh.AI_EZIO_DELEGATED_TIMEOUT).toBe("1800"); // 1800 SECONDS = 30 min (hax reads seconds)
+		const overridden: NodeJS.ProcessEnv = { AI_EZIO_DELEGATED_TIMEOUT: "60" };
+		ensureDelegatedTimeout(overridden);
+		expect(overridden.AI_EZIO_DELEGATED_TIMEOUT).toBe("60"); // user override preserved
+	});
+});
+
+describe("subagentReportLine", () => {
+	it("subagentReportLine writes a newline-terminated summary to the surface writer", () => {
+		const lines: string[] = [];
+		const report = subagentReportLine((s) => lines.push(s));
+		report("✔ subagent [cheap] 12.3s · 4.2k tok");
+		expect(lines).toEqual(["✔ subagent [cheap] 12.3s · 4.2k tok\n"]);
+	});
+});
 
 describe("resumeNotice", () => {
 	it("is undefined for a fresh (non-resume) launch", () => {

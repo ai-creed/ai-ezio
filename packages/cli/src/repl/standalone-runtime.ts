@@ -43,6 +43,22 @@ import { stdinChunks } from "../cli.js";
 import { spawnListSessions } from "./resume-picker.js";
 import { runStandaloneRepl } from "./standalone.js";
 
+/** 30 minutes, in SECONDS — hax reads AI_EZIO_DELEGATED_TIMEOUT as seconds
+ * (agent.c: atoi -> timeout_secs; emit.c: deadline_ms = timeout_secs * 1000). */
+export const SUBAGENT_DELEGATED_TIMEOUT_SECS = "1800";
+
+/** Raise the parent delegated-call dead-host backstop so a long-running subagent
+ * call isn't cut off by hax's 120s default — only when unset (respect user override). */
+export function ensureDelegatedTimeout(env: NodeJS.ProcessEnv = process.env): void {
+	if (!env.AI_EZIO_DELEGATED_TIMEOUT)
+		env.AI_EZIO_DELEGATED_TIMEOUT = SUBAGENT_DELEGATED_TIMEOUT_SECS;
+}
+
+/** Wrap a raw writer so the subagent's one-line summary is newline-terminated on the surface. */
+export function subagentReportLine(write: (s: string) => void): (line: string) => void {
+	return (line) => write(line.endsWith("\n") ? line : `${line}\n`);
+}
+
 export interface OneShotOptions {
 	/** Overrides for Session.start (binary/env/args) — for tests. */
 	startOptions?: Parameters<Session["start"]>[0];
@@ -62,12 +78,13 @@ export interface OneShotOptions {
  * process exit code.
  */
 export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Promise<number> {
-	if (!process.env.AI_EZIO_DELEGATED_TIMEOUT) process.env.AI_EZIO_DELEGATED_TIMEOUT = "1800000";
+	ensureDelegatedTimeout();
 	const out = opts.out ?? ((s: string) => void process.stdout.write(s));
 	const err = opts.err ?? ((s: string) => void process.stderr.write(s));
 	const cwd = process.cwd();
 	const host = opts.host ?? loadMcpHost({ mode: "mounted", cwd });
-	const subagentHost = opts.subagentHost ?? loadSubagentHost({ cwd });
+	const subagentHost =
+		opts.subagentHost ?? loadSubagentHost({ cwd, report: subagentReportLine(err) });
 	const stateDir = ezioStateDir();
 	const repoKey = repoKeyForPath(cwd);
 	// Even a one-shot `-p` is a (single-turn) session: record it for cortex too.
@@ -286,10 +303,13 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
-	if (!process.env.AI_EZIO_DELEGATED_TIMEOUT) process.env.AI_EZIO_DELEGATED_TIMEOUT = "1800000";
+	ensureDelegatedTimeout();
 	const cwd = process.cwd();
 	const host = loadMcpHost({ mode: "standalone", cwd });
-	const subagentHost = loadSubagentHost({ cwd });
+	const subagentHost = loadSubagentHost({
+		cwd,
+		report: subagentReportLine((s) => process.stdout.write(s)),
+	});
 	const stateDir = ezioStateDir();
 	const repoKey = repoKeyForPath(cwd);
 	// Session recorder: assemble turns from the protocol stream and feed cortex a
