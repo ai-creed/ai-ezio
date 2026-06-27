@@ -1,8 +1,8 @@
 /** The subagent host: registers a `subagent` delegated tool and services its
- * calls by running a child hax session. Mirrors McpHost's shape so it slots into
- * the same Session.onEvent fan + start()-before-first-submit wiring. */
-import type { Session } from "@ai-ezio/harness";
-import type { DelegatedToolDef, ProtocolEvent } from "@ai-ezio/protocol";
+ * calls by running a child hax session. Implements DelegatedToolProvider so it
+ * slots into a DelegatedToolRegistry alongside the MCP host. */
+import type { DelegatedReply, DelegatedToolProvider, Session } from "@ai-ezio/harness";
+import type { DelegatedToolDef, ProtocolEvent, ToolCallRequestedEvent } from "@ai-ezio/protocol";
 import type { Catalog } from "./catalog.js";
 import {
 	runSubagent,
@@ -61,41 +61,43 @@ export interface SubagentHostOptions {
 	report?: (line: string) => void;
 }
 
-export class SubagentHost {
-	private session?: HostSession;
+export class SubagentHost implements DelegatedToolProvider {
+	readonly id = "subagent";
+	private session?: HostSession; // transition shim only
 	private inFlight: DispatchHandle | undefined;
 
 	constructor(private readonly opts: SubagentHostOptions) {}
 
-	/** Register the `subagent` tool iff the catalog is non-empty. */
-	start(session: HostSession): void {
-		this.session = session;
-		if (this.opts.catalog.names.length === 0) return;
-		session.registerDelegatedTools([subagentToolDef(this.opts.catalog)]);
+	/** No-op (the catalog is built at construction); idempotent across resume. */
+	async init(): Promise<void> {}
+
+	/** The `subagent` def when the catalog is non-empty, else nothing. */
+	tools(): DelegatedToolDef[] {
+		return this.opts.catalog.names.length ? [subagentToolDef(this.opts.catalog)] : [];
 	}
 
-	async handleEvent(event: ProtocolEvent): Promise<void> {
-		// A parent turn ending while a dispatch is in flight means the turn was
-		// aborted (e.g. interrupt) — tear the child down so it does not orphan.
+	/** Cancel an in-flight child when the parent turn ends (idle/error) — no orphan. */
+	observe(event: ProtocolEvent): void {
 		if ((event.type === "idle" || event.type === "error") && this.inFlight) {
 			this.inFlight.cancel();
-			return;
+			this.inFlight = undefined;
 		}
-		if (event.type !== "tool_call_requested" || event.name !== "subagent") return;
+	}
+
+	/** Service a routed `subagent` call, replying via the injected reply. */
+	async handleToolCall(event: ToolCallRequestedEvent, reply: DelegatedReply): Promise<void> {
 		const { callId, args } = event;
 		const task = typeof args.task === "string" ? args.task : "";
-		if (!task.trim()) return this.reply(callId, "subagent: missing 'task'", "error");
-
+		if (!task.trim()) return reply(callId, "subagent: missing 'task'", "error");
 		const name = typeof args.profile === "string" ? args.profile : this.opts.catalog.default;
 		const profile = name ? this.opts.catalog.profiles[name] : undefined;
 		if (!profile) {
-			return this.reply(
+			return reply(
 				callId,
 				`unknown profile "${String(args.profile)}"; valid: ${this.opts.catalog.names.join(", ")}`,
 				"error",
 			);
 		}
-
 		const dispatch = this.opts.dispatch ?? runSubagent;
 		this.opts.report?.(`▸ subagent [${name}] …running`);
 		const handle = dispatch({
@@ -116,11 +118,25 @@ export class SubagentHost {
 			const secs = Math.round(r.elapsedMs / 100) / 10;
 			const tok = formatTokens(r.usage);
 			this.opts.report?.(`✔ subagent [${name}] ${secs}s${tok ? ` · ${tok}` : ""}`);
-			this.reply(callId, r.output, r.status);
+			reply(callId, r.output, r.status);
 		} catch (e) {
 			this.inFlight = undefined;
-			this.reply(callId, `subagent failed: ${(e as Error).message}`, "error");
+			reply(callId, `subagent failed: ${(e as Error).message}`, "error");
 		}
+	}
+
+	/** TRANSITION SHIM (removed in cleanup): register the tool. */
+	start(session: HostSession): void {
+		this.session = session;
+		const defs = this.tools();
+		if (defs.length) session.registerDelegatedTools(defs);
+	}
+
+	/** TRANSITION SHIM (removed in cleanup): observe + route. */
+	async handleEvent(event: ProtocolEvent): Promise<void> {
+		if (event.type === "idle" || event.type === "error") return this.observe(event);
+		if (event.type !== "tool_call_requested" || event.name !== "subagent") return;
+		await this.handleToolCall(event, (id, out, st) => this.reply(id, out, st));
 	}
 
 	async stop(): Promise<void> {
