@@ -11,7 +11,7 @@ it("ensureDelegatedTimeout sets the 30-minute backstop in SECONDS, only when uns
 });
 
 it("loadSessionHosts returns a registry + mcpHost and sets the timeout", () => {
-	const env: NodeJS.ProcessEnv = { XDG_CONFIG_HOME: "/nonexistent" }; // no mcp.json/subagents config
+	const env: NodeJS.ProcessEnv = { XDG_CONFIG_HOME: "/nonexistent", HOME: "/nonexistent" }; // no mcp.json/subagents config
 	const { registry, mcpHost } = loadSessionHosts({
 		mode: "mounted",
 		cwd: "/repo",
