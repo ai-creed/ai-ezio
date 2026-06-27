@@ -226,6 +226,31 @@ it("omitted profile resolves to the catalog default", async () => {
 	);
 });
 
+it("handleToolCall replies an error when task is missing/blank, without dispatching", async () => {
+	const dispatch = vi.fn();
+	const host = new SubagentHost({
+		catalog: catalogFromFixture(),
+		cwd: "/repo",
+		parentEnv: {},
+		dispatch: dispatch as never,
+		makeSession: (() => ({})) as never,
+		makeMcpHost: (() => ({})) as never,
+	});
+	const { replies, reply } = capture();
+	await host.handleToolCall(
+		{
+			type: "tool_call_requested",
+			turnId: "t",
+			callId: "c0",
+			name: "subagent",
+			args: { task: "   " },
+		},
+		reply,
+	);
+	expect(dispatch).not.toHaveBeenCalled();
+	expect(replies[0]).toEqual(["c0", "subagent: missing 'task'", "error"]);
+});
+
 // ── observe ─────────────────────────────────────────────────────────────────
 
 it("observe ignores events that are not idle or error", () => {
