@@ -506,7 +506,6 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		await runStandaloneRepl({
 			keys: replKeys,
 			session,
-			host: mcpHost,
 			compactor: wired.compactor,
 			write: (s) => void process.stdout.write(s),
 			slash,
