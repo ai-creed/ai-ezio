@@ -154,10 +154,19 @@ export class DelegatedToolRegistry {
 	 * and before the first submit (and again on resume — the map is rebuilt). */
 	async start(session: RegistrySession): Promise<void> {
 		this.session = session;
-		this.owner.clear();
-		for (const p of this.providers) await p.init?.();
+		this.owner.clear(); // idempotent: a resume re-call rebuilds the routing map from scratch
 		const defs: DelegatedToolDef[] = [];
 		for (const p of this.providers) {
+			// Per-provider isolation (Error handling table): a provider whose init()
+			// rejects contributes NO tools and does not fail the others or start().
+			// init() MUST be idempotent — on a resume re-call it resets the provider's
+			// own prior state before re-acquiring (see the provider contracts).
+			try {
+				await p.init?.();
+			} catch (e) {
+				this.warn(`delegated provider "${p.id}" init failed: ${(e as Error).message} — skipping its tools`);
+				continue;
+			}
 			for (const def of p.tools()) {
 				if (this.owner.has(def.name)) {
 					this.warn(`delegated tool "${def.name}" registered by "${p.id}" collides with "${this.owner.get(def.name)!.id}" — keeping the first`);
@@ -207,6 +216,29 @@ This makes the multi-provider race impossible by construction, so the `mcp-host`
 `7642039` "silent on non-owned" guard is **removed** as part of the mcp-host
 refactor below.
 
+### Repeated start / resume idempotence (hard requirement)
+
+`registry.start(session)` is called once at startup AND again after every respawn
+(`--continue`/`--resume`), because the engine re-registers delegated tools on a fresh
+child. Repeated `start()` MUST be safe and leave no residue. The contract:
+
+- **Registry:** `start()` clears the owner map first and rebuilds it from the
+  providers' current `tools()`, then issues exactly one `registerDelegatedTools` for
+  the fresh child. No state carries over from a prior `start()`.
+- **Providers:** `init()` MUST be idempotent — it resets the provider's own prior
+  state before re-acquiring. Concretely, the MCP host disconnects existing clients and
+  clears its route map + cached defs before reconnecting (no client leak, no stale
+  routes); the subagent host is stateless across `start()` (no-op `init`). After a
+  second `start()`, the advertised tool set and the owner map are exactly what the
+  current providers report — never a superset, never duplicated, never pointing at a
+  dead client.
+- **Ordering:** `start()` must complete before the first `submit` (creators already
+  gate the MCP host this way); the resume path runs `session.resume(id)` → `await
+  registry.start(session)`.
+
+This is verified by the resume/idempotence tests in the Testing section (calling
+`registry.start` twice; MCP re-init disconnect-before-reconnect; no stale tools).
+
 ## Host refactor — McpHost and SubagentHost become providers
 
 ### McpHost (`@ai-ezio/mcp-host`)
@@ -214,9 +246,16 @@ refactor below.
 `implements DelegatedToolProvider` with `id = "mcp"`:
 
 - `init()` — connect the configured stdio MCP servers, list their tools, build the
-  namespaced route map. (This is the connect half of today's `start()`.)
+  namespaced route map. (This is the connect half of today's `start()`.) **Must be
+  idempotent for resume:** a repeat `init()` first tears down any prior state —
+  disconnect existing clients, clear the route map and cached defs — *before*
+  reconnecting, so a re-`start()` after a respawn leaks no clients and leaves no
+  stale routes/tools. An individual server failing to connect is surfaced as a
+  one-line warning and skipped (today's behavior); a wholesale `init()` rejection
+  propagates to the registry, which isolates it (the provider then contributes no
+  tools).
 - `tools()` — return the advertised (non-host-private) namespaced `DelegatedToolDef`s
-  gathered during `init()`.
+  gathered during the most recent `init()`.
 - `handleToolCall(event, reply)` — the body of today's `handleEvent` minus the
   unknown-tool branch: apply policy (allow/deny/confirm), inject cwd, call the owning
   MCP server with the per-call timeout, and `reply(callId, output, status)`. The
@@ -235,8 +274,10 @@ factory returns it).
 
 `implements DelegatedToolProvider` with `id = "subagent"`:
 
-- `init()` — no-op (the catalog is built at construction from config + the codex
-  probe).
+- `init()` — no-op, and therefore idempotent: the catalog is built at construction
+  (config + codex probe), and resume happens between turns so no in-flight dispatch
+  exists at `start()` time. A resume re-call re-reads the same catalog; nothing to
+  reset.
 - `tools()` — `[subagentToolDef(catalog)]` when the catalog is non-empty, else `[]`.
 - `handleToolCall(event, reply)` — today's `handleEvent` tool-call body (resolve
   profile, dispatch a child, track in-flight, reply with the result) but replying via
@@ -339,7 +380,7 @@ Same shape, downstream PR:
 
 | Case | Behavior |
 | --- | --- |
-| Provider `init()` throws (e.g. an MCP server fails to connect) | The provider surfaces its own one-line warning and continues with what connected (today's McpHost behavior); `tools()` returns whatever is available. A provider whose `init` fully fails contributes no tools. |
+| Provider `init()` throws | The registry isolates it (per-provider `try/catch` in `start()`): logs one warning, that provider contributes **no** tools, the remaining providers still init + register, and `start()` **resolves** — session startup is never failed by one provider. (A single MCP server failing to connect is handled *inside* the MCP host and downgrades to a warning before it would reach this path; only a wholesale MCP `init()` rejection hits the registry's isolation.) |
 | Duplicate tool name across providers | Registry warns (both ids) and keeps the first; duplicate is not registered/routed. |
 | `tool_call_requested` for an unowned name | Ignored (cannot occur for a registered tool; never-replied calls hit hax's timeout backstop). |
 | `handleToolCall` rejects/throws | The provider is responsible for replying with an error result and never throwing out (today's contract for both hosts); the registry calls it detached (`void`). |
@@ -352,6 +393,21 @@ Same shape, downstream PR:
   every `observe`; collects defs into one `registerDelegatedTools` call; warns + keeps
   first on a duplicate name; `stop()` calls every provider's `stop`; reply routes
   through the session's `sendToolResult`.
+- **harness — init-failure isolation** — a provider whose `init()` **rejects**: the
+  registry logs a warning, that provider's tools are **absent** from the single
+  `registerDelegatedTools` call, the other provider(s) still register, and `start()`
+  **resolves** (does not throw). Routing a call to a failed provider's would-be tool
+  name is ignored (no owner).
+- **harness — repeated start / resume idempotence** — calling `registry.start(session)`
+  a second time (fresh fake session): the owner map and the merged registration reflect
+  the providers' **current** `tools()` exactly — no duplicated or stale entries; each
+  provider's `init()` is invoked again. With a fake provider that flips its `tools()`
+  between calls (e.g. drops a tool), assert the removed tool is no longer owned/routed
+  after the second `start()`.
+- **mcp-host — re-init idempotence** — calling `init()` twice (with an injected
+  connect): the first set of clients is **disconnected/closed** before the second
+  connect (no leak), and the route map + cached defs contain only the second `init()`'s
+  tools (no stale routes). A removed-server scenario leaves no orphaned route.
 - **mcp-host** — rewrite `host.test.ts` to the provider shape (`init`/`tools`/
   `handleToolCall`); assert `callHostTool`/`hostToolNames` still work; **delete** the
   cross-provider "unknown tool" assertion (now the registry's job).
@@ -366,7 +422,9 @@ Same shape, downstream PR:
   MCP + subagent hosts, returns the `mcpHost`, and sets `AI_EZIO_DELEGATED_TIMEOUT`
   when unset.
 - **cli** — update `standalone-runtime.test.ts`: the resume-ordering test asserts
-  `session.resume → registry.start`; assert the onEvent tee calls `registry.handleEvent`.
+  `session.resume → registry.start` AND that `registry.start` is invoked **again** on
+  resume (the second call is what re-registers tools on the fresh child); assert the
+  onEvent tee calls `registry.handleEvent`.
 - **ai-whisper (downstream PR)** — update the adapter tests; add an assertion that the
   mounted session advertises the `subagent` tool (it did not before).
 
@@ -401,12 +459,15 @@ Same shape, downstream PR:
 
 ## Risks / open items
 
-- **Resume semantics.** `registry.start` must be safe to call again after a re-spawn
-  (it clears and rebuilds the owner map and re-registers). Verify against the harness
-  `Session.resume` flow that re-`init()`-ing the MCP host (reconnecting servers) on
-  resume matches today's `host.start(session)` re-register behavior — the standalone
-  resume path already re-runs `host.start`, so this preserves it, but the MCP
-  reconnect cost on resume should be confirmed acceptable (it matches today).
+- **Resume semantics (specified — see "Repeated start / resume idempotence").** Repeated
+  `registry.start` after a respawn is a hard requirement, not an open question: the
+  registry clears+rebuilds the owner map and re-registers, and each provider's `init()`
+  is idempotent (MCP disconnects existing clients + clears routes/defs before
+  reconnecting). This preserves today's standalone behavior (which already re-runs
+  `host.start` on resume) while adding the missing no-leak/no-stale guarantees, and it
+  is enforced by the harness repeated-start, mcp-host re-init, and CLI resume tests.
+  The only residual is **cost**: MCP reconnect on each resume matches today's behavior
+  and is accepted.
 - **`init()` ordering vs first submit.** As today, `registry.start` must complete
   before the first `submit`; the creators already gate on this for the MCP host.
 - **ai-whisper bundling.** Mounted changes need the esbuild rebuild + global reinstall
