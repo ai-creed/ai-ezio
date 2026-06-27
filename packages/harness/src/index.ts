@@ -64,3 +64,9 @@ export {
 	type RenameController,
 	type TitleFs,
 } from "./session-titles.js";
+export {
+	DelegatedToolRegistry,
+	type DelegatedReply,
+	type DelegatedToolProvider,
+	type RegistrySession,
+} from "./delegated-registry.js";
