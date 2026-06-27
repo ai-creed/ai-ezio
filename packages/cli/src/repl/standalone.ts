@@ -12,7 +12,7 @@ import type { SlashController } from "@ai-ezio/surface";
 export interface StandaloneReplDeps {
 	keys: AsyncIterable<string>;
 	session: Pick<Session, "submitAndWait" | "interrupt" | "close">;
-	host: Pick<McpHost, "handleEvent" | "stop">;
+	host: Pick<McpHost, "stop">;
 	/** Optional compaction policy (M11): the auto trigger runs after each
 	 * settled turn; /compact reaches it through the slash context. */
 	compactor?: { maybeAutoCompact(): Promise<unknown> };

@@ -63,7 +63,6 @@ export interface SubagentHostOptions {
 
 export class SubagentHost implements DelegatedToolProvider {
 	readonly id = "subagent";
-	private session?: HostSession; // transition shim only
 	private inFlight: DispatchHandle | undefined;
 
 	constructor(private readonly opts: SubagentHostOptions) {}
@@ -125,26 +124,8 @@ export class SubagentHost implements DelegatedToolProvider {
 		}
 	}
 
-	/** TRANSITION SHIM (removed in cleanup): register the tool. */
-	start(session: HostSession): void {
-		this.session = session;
-		const defs = this.tools();
-		if (defs.length) session.registerDelegatedTools(defs);
-	}
-
-	/** TRANSITION SHIM (removed in cleanup): observe + route. */
-	async handleEvent(event: ProtocolEvent): Promise<void> {
-		if (event.type === "idle" || event.type === "error") return this.observe(event);
-		if (event.type !== "tool_call_requested" || event.name !== "subagent") return;
-		await this.handleToolCall(event, (id, out, st) => this.reply(id, out, st));
-	}
-
 	async stop(): Promise<void> {
 		this.inFlight?.cancel();
 		this.inFlight = undefined;
-	}
-
-	private reply(callId: string, output: string, status: "ok" | "error"): void {
-		this.session?.sendToolResult(callId, output, status);
 	}
 }

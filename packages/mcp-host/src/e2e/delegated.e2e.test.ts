@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveHaxBinary, Session } from "@ai-ezio/harness";
+import { resolveHaxBinary, Session, DelegatedToolRegistry } from "@ai-ezio/harness";
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import { createMcpHost } from "../attach.js";
 
@@ -33,12 +33,13 @@ describe.skipIf(!bin)("M9 delegated round-trip (real hax + stub MCP server)", ()
 			},
 			{ mode: "mounted", cwd: process.cwd() },
 		);
-		// onEvent tees every event to BOTH the collector and the host (which services
-		// tool_call_requested by calling the stub and replying with sendToolResult).
+		const reg = new DelegatedToolRegistry([host]);
+		// onEvent tees every event to BOTH the collector and the registry (which services
+		// tool_call_requested by routing to the host and replying with sendToolResult).
 		const session = new Session({
 			onEvent: (e) => {
 				events.push(e);
-				void host.handleEvent(e);
+				reg.handleEvent(e);
 			},
 		});
 
@@ -47,7 +48,7 @@ describe.skipIf(!bin)("M9 delegated round-trip (real hax + stub MCP server)", ()
 			env: { ...process.env, HAX_PROVIDER: "mock", HAX_MODEL: "mock", HAX_MOCK_SCRIPT: SCRIPT },
 		});
 
-		await host.start(session); // register delegated tools BEFORE the first submit
+		await reg.start(session); // register delegated tools BEFORE the first submit
 		const result = await session.submitAndWait("go");
 
 		const finished = events.find((e) => e.type === "tool_call_finished" && e.name === "stub__echo");

@@ -21,7 +21,8 @@ it("builds a host from an explicit config and registers tools in mounted mode", 
 		{ servers: [{ name: "cortex", command: "x", args: [] }], toolPolicy: {}, hostPrivateTools: [] },
 		{ mode: "mounted", cwd: "/repo", connect: async () => fake },
 	);
-	await host.start(session as never);
+	await host.init();
+	if (host.tools().length) session.registerDelegatedTools(host.tools());
 	expect((registered[0] as Array<{ name: string }>)[0].name).toBe("cortex__recall_memory");
 });
 
@@ -35,7 +36,8 @@ it("builds a no-op host (no servers) when config is empty", async () => {
 		{ servers: [], toolPolicy: {}, hostPrivateTools: [] },
 		{ mode: "standalone", cwd: "/repo" },
 	);
-	await host.start(session as never);
+	await host.init();
+	if (host.tools().length) session.registerDelegatedTools(host.tools());
 	expect(registered).toEqual([]);
 });
 
@@ -62,7 +64,9 @@ describe("createMcpHost host-private default", () => {
 			},
 			{ mode: "mounted", cwd: "/repo", connect: async () => client },
 		);
-		await host.start(session);
+		await host.init();
+		const defs = host.tools();
+		if (defs.length) session.registerDelegatedTools(defs);
 
 		const advertised = registered.flat().map((d) => d.name);
 		expect(advertised).toContain("cortex__recall_memory");

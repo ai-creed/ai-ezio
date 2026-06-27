@@ -1,7 +1,7 @@
 import { chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { Session } from "@ai-ezio/harness";
+import { Session, DelegatedToolRegistry } from "@ai-ezio/harness";
 import { SubagentHost } from "./host.js";
 import { buildCatalog } from "./catalog.js";
 
@@ -35,12 +35,13 @@ it("services a parent delegated subagent call over a real Session", async () => 
 		makeMcpHost: (() => ({})) as never,
 	});
 
-	const session = new Session({ onEvent: (e) => void host.handleEvent(e) });
+	const reg = new DelegatedToolRegistry([host]);
+	const session = new Session({ onEvent: (e) => reg.handleEvent(e) });
 	await session.start({
 		binary: FAKE,
 		env: { ...process.env, FAKE_DELEGATED_ARGS: JSON.stringify({ task: "do it", profile: "p" }) },
 	});
-	host.start(session); // registers `subagent` -> fake emits tool_call_requested -> host dispatches -> sendToolResult
+	await reg.start(session); // registers `subagent` -> fake emits tool_call_requested -> host dispatches -> sendToolResult
 
 	const fin = await session.waitForEvent("assistant_turn_finished");
 	expect(fin.type).toBe("assistant_turn_finished");

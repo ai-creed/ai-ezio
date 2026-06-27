@@ -18,14 +18,10 @@ it("builds a host whose catalog reflects the injected codex probe", () => {
 		env: { XDG_CONFIG_HOME: "/nonexistent" },
 		probeRun: () => fixture,
 	});
-	// Register against a fake session and assert the seeded tool is advertised.
-	const registered: unknown[] = [];
-	host.start({
-		registerDelegatedTools: (t) => registered.push(t),
-		sendToolResult: () => {},
-	} as never);
+	// Collect advertised tools directly from the provider shape.
+	const tools = host.tools();
 	const def = (
-		registered[0] as Array<{
+		tools as Array<{
 			name: string;
 			parametersSchema: { properties: { profile: { enum: string[] } } };
 		}>
@@ -40,12 +36,7 @@ it("registers nothing when codex is unusable and no user profiles exist", () => 
 		env: { XDG_CONFIG_HOME: "/nonexistent" },
 		probeRun: () => null,
 	});
-	const registered: unknown[] = [];
-	host.start({
-		registerDelegatedTools: (t) => registered.push(t),
-		sendToolResult: () => {},
-	} as never);
-	expect(registered).toEqual([]);
+	expect(host.tools()).toEqual([]);
 });
 
 it("makeChildSession forwards registerDelegatedTools and sendToolResult to the underlying Session", () => {
@@ -72,11 +63,6 @@ it("pushes a doctor-visible note into the notes sink when the codex probe return
 		probeRun: () => "garbage-not-json",
 		notes,
 	});
-	const registered: unknown[] = [];
-	host.start({
-		registerDelegatedTools: (t) => registered.push(t),
-		sendToolResult: () => {},
-	} as never);
-	expect(registered).toEqual([]); // no seed + no user profiles -> nothing registered
+	expect(host.tools()).toEqual([]); // no seed + no user profiles -> nothing registered
 	expect(notes.some((n) => /codex debug models/.test(n))).toBe(true); // doctor-visible note recorded
 });

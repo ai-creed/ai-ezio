@@ -44,7 +44,9 @@ describe("McpHost host-private tools", () => {
 			hostPrivateTools: ["cortex__capture_session"],
 			connect: async () => fakeClient(["recall_memory", "capture_session"]),
 		});
-		await host.start(session);
+		await host.init();
+		const defs = host.tools();
+		if (defs.length) session.registerDelegatedTools(defs);
 
 		const advertised = registered.flat().map((d) => d.name);
 		expect(advertised).toEqual(["cortex__recall_memory"]);
@@ -63,7 +65,9 @@ describe("McpHost host-private tools", () => {
 			connect: async () =>
 				fakeClient(["capture_session"], (tool, args) => calls.push({ tool, args })),
 		});
-		await host.start(session);
+		await host.init();
+		const defs = host.tools();
+		if (defs.length) session.registerDelegatedTools(defs);
 
 		const res = await host.callHostTool("cortex__capture_session", {
 			sessionId: "s1-0",
@@ -85,7 +89,9 @@ describe("McpHost host-private tools", () => {
 			hostPrivateTools: ["cortex__capture_session"],
 			connect: async () => fakeClient(["capture_session"]),
 		});
-		await host.start(session);
+		await host.init();
+		const defs = host.tools();
+		if (defs.length) session.registerDelegatedTools(defs);
 		await expect(host.callHostTool("cortex__capture_session", {})).rejects.toThrow(
 			/blocked by policy/,
 		);

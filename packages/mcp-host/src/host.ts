@@ -1,5 +1,5 @@
 /** The MCP host: wires a Session's delegated tools to MCP servers. */
-import type { DelegatedToolDef, ProtocolEvent, ToolCallRequestedEvent } from "@ai-ezio/protocol";
+import type { DelegatedToolDef, ToolCallRequestedEvent } from "@ai-ezio/protocol";
 import type { DelegatedReply, DelegatedToolProvider, Session } from "@ai-ezio/harness";
 import type { ServerConfig, ToolPolicy } from "./config.js";
 import { RouteMap } from "./namespace.js";
@@ -38,7 +38,6 @@ export class McpHost implements DelegatedToolProvider {
 	/** Namespaced name → def (for schema-aware cwd injection). */
 	private readonly defsByName = new Map<string, DelegatedToolDef>();
 	private advertised: DelegatedToolDef[] = [];
-	private session?: HostSession; // used only by the transition start()/reply() shims
 
 	constructor(private readonly opts: McpHostOptions) {}
 
@@ -100,22 +99,6 @@ export class McpHost implements DelegatedToolProvider {
 		}
 	}
 
-	/** TRANSITION SHIM (removed in the registry-cleanup task): old standalone/adapter
-	 * entry point. Delegates to init() + a single merged registration. */
-	async start(session: HostSession): Promise<void> {
-		this.session = session;
-		await this.init();
-		if (this.advertised.length) session.registerDelegatedTools(this.advertised);
-	}
-
-	/** TRANSITION SHIM (removed in the registry-cleanup task): old onEvent entry.
-	 * Routes only this host's own tool calls; stays silent on others. */
-	async handleEvent(event: ProtocolEvent): Promise<void> {
-		if (event.type !== "tool_call_requested") return;
-		if (!this.routes.resolve(event.name)) return;
-		await this.handleToolCall(event, (id, out, st) => this.reply(id, out, st));
-	}
-
 	/** Namespaced names of every connected tool (advertised + host-private).
 	 * Generic discovery surface for harness wiring (M11 — e.g. picking a
 	 * rehydration tool); the host itself hardcodes no tool or server name. */
@@ -158,10 +141,6 @@ export class McpHost implements DelegatedToolProvider {
 		const out = { ...args };
 		for (const arg of injectArgs) if (arg in props) out[arg] = this.opts.cwd;
 		return out;
-	}
-
-	private reply(callId: string, output: string, status: "ok" | "error"): void {
-		this.session?.sendToolResult(callId, output, status);
 	}
 
 	private warn(msg: string): void {
