@@ -61,6 +61,9 @@ importers:
       '@ai-ezio/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@ai-ezio/session-hosts':
+        specifier: workspace:*
+        version: link:../session-hosts
       '@ai-ezio/session-recorder':
         specifier: workspace:*
         version: link:../session-recorder
@@ -90,6 +93,21 @@ importers:
         version: 1.29.0(zod@4.4.3)
 
   packages/protocol: {}
+
+  packages/session-hosts:
+    dependencies:
+      '@ai-ezio/harness':
+        specifier: workspace:*
+        version: link:../harness
+      '@ai-ezio/mcp-host':
+        specifier: workspace:*
+        version: link:../mcp-host
+      '@ai-ezio/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@ai-ezio/subagent':
+        specifier: workspace:*
+        version: link:../subagent
 
   packages/session-recorder:
     dependencies:

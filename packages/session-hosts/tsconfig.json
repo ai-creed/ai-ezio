@@ -2,17 +2,13 @@
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"rootDir": "src",
-		"outDir": "dist",
-		"resolveJsonModule": true
+		"outDir": "dist"
 	},
 	"references": [
+		{ "path": "../protocol" },
 		{ "path": "../harness" },
 		{ "path": "../mcp-host" },
-		{ "path": "../protocol" },
-		{ "path": "../session-recorder" },
-		{ "path": "../session-hosts" },
-		{ "path": "../subagent" },
-		{ "path": "../surface" }
+		{ "path": "../subagent" }
 	],
 	"include": ["src/**/*.ts"],
 	"exclude": ["src/**/*.test.ts"]
