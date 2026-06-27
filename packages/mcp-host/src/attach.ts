@@ -28,9 +28,11 @@ export function createMcpHost(cfg: HostConfig, opts: CreateHostOptions): McpHost
 }
 
 /** Build an MCP host from `mcp.json` on disk (the both-modes entry point). The
- * caller MUST: (1) construct the Session with onEvent fanning to host.handleEvent,
- * (2) await session.start(), (3) `await host.start(session)` BEFORE the first
- * submit so the first turn sees the tools. */
+ * returned `McpHost` is a `DelegatedToolProvider` — register it with a
+ * `DelegatedToolRegistry` (see `@ai-ezio/session-hosts`'s `loadSessionHosts`,
+ * which bundles it with the subagent host), not by calling its methods directly.
+ * The registry calls `init()` + `tools()` and routes `tool_call_requested` to
+ * `handleToolCall`; `callHostTool`/`hostToolNames` remain for host-private use. */
 export function loadMcpHost(opts: CreateHostOptions & { env?: NodeJS.ProcessEnv }): McpHost {
 	return createMcpHost(loadConfig(opts.env ?? process.env), opts);
 }

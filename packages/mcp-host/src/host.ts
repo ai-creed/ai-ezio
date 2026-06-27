@@ -1,6 +1,6 @@
 /** The MCP host: wires a Session's delegated tools to MCP servers. */
-import type { DelegatedToolDef, ProtocolEvent } from "@ai-ezio/protocol";
-import type { Session } from "@ai-ezio/harness";
+import type { DelegatedToolDef, ToolCallRequestedEvent } from "@ai-ezio/protocol";
+import type { DelegatedReply, DelegatedToolProvider, Session } from "@ai-ezio/harness";
 import type { ServerConfig, ToolPolicy } from "./config.js";
 import { RouteMap } from "./namespace.js";
 import { connectStdio, withTimeout, type McpClient } from "./mcp-client.js";
@@ -31,21 +31,26 @@ export interface McpHostOptions {
 	confirm?: (name: string) => Promise<boolean>;
 }
 
-export class McpHost {
-	private readonly routes = new RouteMap();
+export class McpHost implements DelegatedToolProvider {
+	readonly id = "mcp";
+	private routes = new RouteMap(); // reassignable for idempotent init()
 	private readonly clients = new Map<string, McpClient>();
 	/** Namespaced name → def (for schema-aware cwd injection). */
 	private readonly defsByName = new Map<string, DelegatedToolDef>();
-	private session?: HostSession;
+	private advertised: DelegatedToolDef[] = [];
 
 	constructor(private readonly opts: McpHostOptions) {}
 
-	/** Connect servers, list tools, register with the session. Failures are
-	 * surfaced as one-line warnings; the host continues with whatever connected. */
-	async start(session: HostSession): Promise<void> {
-		this.session = session;
+	/** Connect servers + list tools, building the route map and advertised defs.
+	 * Idempotent: tears down any prior connection state before reconnecting, so a
+	 * resume re-init leaks no clients and leaves no stale routes/tools. */
+	async init(): Promise<void> {
+		for (const c of this.clients.values()) await c.close().catch(() => {});
+		this.clients.clear();
+		this.routes = new RouteMap();
+		this.defsByName.clear();
+		this.advertised = [];
 		const connect = this.opts.connect ?? connectStdio;
-		const defs: DelegatedToolDef[] = [];
 		for (const server of this.opts.servers) {
 			try {
 				const client = await connect(server);
@@ -54,37 +59,32 @@ export class McpHost {
 					const name = this.routes.add(server.name, def.name);
 					const namespaced = { ...def, name };
 					this.defsByName.set(name, namespaced);
-					if (!(this.opts.hostPrivateTools ?? []).includes(name)) defs.push(namespaced);
+					if (!(this.opts.hostPrivateTools ?? []).includes(name)) this.advertised.push(namespaced);
 				}
 			} catch (e) {
 				this.warn(`mcp: server "${server.name}" failed to connect: ${(e as Error).message}`);
 			}
 		}
-		if (defs.length) session.registerDelegatedTools(defs);
 	}
 
-	/** Feed every protocol event here (wire as Session.onEvent). Acts only on
-	 * tool_call_requested. */
-	async handleEvent(event: ProtocolEvent): Promise<void> {
-		if (event.type !== "tool_call_requested") return;
+	/** Advertised (non-host-private) defs from the most recent init(). */
+	tools(): DelegatedToolDef[] {
+		return this.advertised;
+	}
+
+	/** Service a routed call (the registry guarantees the tool is ours). */
+	async handleToolCall(event: ToolCallRequestedEvent, reply: DelegatedReply): Promise<void> {
 		const { callId, name, args } = event;
 		const route = this.routes.resolve(name);
-		// Not one of our tools — another delegated-tool provider (e.g. the subagent
-		// host) owns it. Stay silent so we don't race a bogus error against the real
-		// owner's reply. hax only emits tool_call_requested for registered tools, so a
-		// genuinely-unknown name never reaches here.
-		if (!route) return;
-
+		if (!route) return reply(callId, `unknown tool: ${name}`, "error"); // defensive; registry routes only owned
 		const policy = decidePolicy(name, this.opts.toolPolicy, this.opts.mode);
-		if (policy === "deny")
-			return this.reply(callId, `tool "${name}" is blocked by policy`, "error");
+		if (policy === "deny") return reply(callId, `tool "${name}" is blocked by policy`, "error");
 		if (policy === "confirm") {
 			const ok = this.opts.confirm ? await this.opts.confirm(name) : false;
-			if (!ok) return this.reply(callId, `tool "${name}" was not confirmed`, "error");
+			if (!ok) return reply(callId, `tool "${name}" was not confirmed`, "error");
 		}
-
 		const client = this.clients.get(route.server);
-		if (!client) return this.reply(callId, `server "${route.server}" unavailable`, "error");
+		if (!client) return reply(callId, `server "${route.server}" unavailable`, "error");
 		try {
 			const injected = this.injectCwd(name, args);
 			const res = await withTimeout(
@@ -92,12 +92,10 @@ export class McpHost {
 				this.opts.callTimeoutMs ?? 60_000,
 				`call ${name}`,
 			);
-			this.reply(callId, res.output, res.status);
+			reply(callId, res.output, res.status);
 		} catch (e) {
-			// Covers BOTH a per-call timeout AND a crashed/hung/down server: the host
-			// ALWAYS replies, so hax never reaches its 120s backstop and never hangs.
 			this.warn(`mcp: call ${name} failed: ${(e as Error).message}`);
-			this.reply(callId, `tool call failed: ${(e as Error).message}`, "error");
+			reply(callId, `tool call failed: ${(e as Error).message}`, "error");
 		}
 	}
 
@@ -143,10 +141,6 @@ export class McpHost {
 		const out = { ...args };
 		for (const arg of injectArgs) if (arg in props) out[arg] = this.opts.cwd;
 		return out;
-	}
-
-	private reply(callId: string, output: string, status: "ok" | "error"): void {
-		this.session?.sendToolResult(callId, output, status);
 	}
 
 	private warn(msg: string): void {

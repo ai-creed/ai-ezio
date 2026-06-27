@@ -36,6 +36,7 @@ describe("runStandaloneRepl", () => {
 		async function* keys() {
 			for (const k of ["h", "i", "\r", "\x04"]) yield k;
 		}
+		let closed = false;
 		const session = {
 			submitAndWait: async (t: string) => {
 				submitted.push(t);
@@ -43,14 +44,12 @@ describe("runStandaloneRepl", () => {
 				return { turnId: "t1", content: "ok" };
 			},
 			interrupt: () => {},
-			close: () => {},
+			close: () => void (closed = true),
 		};
-		let stopped = false;
 		const surface = fakeSurface();
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => void (stopped = true) } as never,
 			write: () => {},
 			slash: fakeSlash(),
 			...surface,
@@ -61,7 +60,7 @@ describe("runStandaloneRepl", () => {
 		// draws the next prompt on idle (not the REPL).
 		expect(surface.echoed).toEqual(["hi"]);
 		expect(surface.prompts()).toBe(0);
-		expect(stopped).toBe(true);
+		expect(closed).toBe(true);
 	});
 
 	it("Ctrl-C interrupts without submitting", async () => {
@@ -80,7 +79,6 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => {} } as never,
 			write: () => {},
 			slash: fakeSlash(),
 			...fakeSurface(),
@@ -106,7 +104,6 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => {} } as never,
 			write: () => {},
 			slash: fakeSlash(() => ({ action: "handled" })),
 			...surface,
@@ -134,7 +131,6 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => {} } as never,
 			write: () => {},
 			slash: fakeSlash(() => ({ action: "exit" })),
 			...fakeSurface(),
@@ -160,7 +156,6 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => {} } as never,
 			write: () => {},
 			slash: fakeSlash(),
 			...surface,
@@ -187,7 +182,6 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => {} } as never,
 			write: () => {},
 			slash: fakeSlash(),
 			showTranscript: async () => void shown++,
@@ -214,7 +208,6 @@ describe("runStandaloneRepl", () => {
 		await runStandaloneRepl({
 			keys: keys(),
 			session: session as never,
-			host: { handleEvent: async () => {}, stop: async () => {} } as never,
 			compactor: {
 				maybeAutoCompact: async () => {
 					order.push("auto-compact");

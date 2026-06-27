@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRenameController, createSessionTitleStore } from "@ai-ezio/harness";
 import { decodeChunk } from "@ai-ezio/surface";
+import type { ProtocolEvent } from "@ai-ezio/protocol";
 import {
 	buildStandaloneKeySources,
 	buildStandaloneResumeDeps,
-	ensureDelegatedTimeout,
+	makeOneShotOnEvent,
+	makeStandaloneOnEvent,
 	makeStandaloneOverlay,
 	resumeNotice,
 	startWithTranscript,
@@ -14,17 +16,6 @@ import {
 /** Minimal shape of the SpawnHaxOptions the helper forwards — avoids coupling
  * the test to the harness package's export surface. */
 type StartOpts = { args?: string[]; transcriptPath?: string };
-
-describe("ensureDelegatedTimeout", () => {
-	it("ensureDelegatedTimeout sets the 30-minute backstop in SECONDS, only when unset", () => {
-		const fresh: NodeJS.ProcessEnv = {};
-		ensureDelegatedTimeout(fresh);
-		expect(fresh.AI_EZIO_DELEGATED_TIMEOUT).toBe("1800"); // 1800 SECONDS = 30 min (hax reads seconds)
-		const overridden: NodeJS.ProcessEnv = { AI_EZIO_DELEGATED_TIMEOUT: "60" };
-		ensureDelegatedTimeout(overridden);
-		expect(overridden.AI_EZIO_DELEGATED_TIMEOUT).toBe("60"); // user override preserved
-	});
-});
 
 describe("subagentReportLine", () => {
 	it("subagentReportLine writes a newline-terminated summary to the surface writer", () => {
@@ -104,34 +95,32 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 			order.push("session.resume");
 			return {} as never;
 		});
-		const hostStart = vi.fn(async () => {
-			order.push("host.start");
+		const registryStart = vi.fn(async () => {
+			order.push("registry.start");
 		});
 		const fakeSession = { resume: sessionResume };
-		const fakeHost = { start: hostStart };
-		const fakeSubagentHost = { start: vi.fn() };
+		const fakeRegistry = { start: registryStart, handleEvent: () => {}, stop: async () => {} };
 		const keyReturn = vi.fn(async () => ({ done: true as const, value: undefined }));
 		const chunkSource = { return: keyReturn } as unknown as AsyncGenerator<string>;
 		const deps = buildStandaloneResumeDeps({
 			session: fakeSession as never,
-			host: fakeHost as never,
-			subagentHost: fakeSubagentHost as never,
+			registry: fakeRegistry as never,
 			titleStore: store,
 			rename,
 			chunkSource,
 			write: (s) => void written.push(s),
 			listSessions: async () => "[]",
 		});
-		return { deps, order, written, sessionResume, hostStart, keyReturn, rename };
+		return { deps, order, written, sessionResume, registryStart, keyReturn, rename };
 	}
 
-	it("resume(id) calls session.resume(id) THEN host.start(session) and writes the resume notice", async () => {
-		const { deps, order, written, sessionResume, hostStart } = fakes();
+	it("resume(id) calls session.resume(id) THEN registry.start(session) and writes the resume notice", async () => {
+		const { deps, order, written, sessionResume, registryStart } = fakes();
 		await deps.resume("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
 		expect(sessionResume).toHaveBeenCalledWith("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
 		// Order matters (spec §3 post-respawn re-wiring): respawn, THEN re-register tools.
-		expect(order).toEqual(["session.resume", "host.start"]);
-		expect(hostStart).toHaveBeenCalledOnce();
+		expect(order).toEqual(["session.resume", "registry.start"]);
+		expect(registryStart).toHaveBeenCalledOnce();
 		expect(written.join("")).toContain("resumed session 13c018d5"); // resume notice printed
 	});
 
@@ -150,7 +139,7 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		expect([...deps.titles().values()]).toContain("t");
 	});
 
-	it("resume re-registers tools in order: session.resume -> host.start -> subagentHost.start", async () => {
+	it("resume re-registers via the registry: session.resume THEN registry.start (called again on resume)", async () => {
 		const order: string[] = [];
 		const store = createSessionTitleStore({ fs: makeMemFs() });
 		const rename = createRenameController({ store, requestStatus: () => {} });
@@ -160,22 +149,16 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 				return {} as never;
 			}),
 		};
-		const host = {
+		const registry = {
 			start: vi.fn(async () => {
-				order.push("host.start");
+				order.push("registry.start");
 			}),
-		};
-		const subagentHost = {
-			start: vi.fn(() => {
-				order.push("subagentHost.start");
-			}),
-			handleEvent: async () => {},
+			handleEvent: () => {},
 			stop: async () => {},
 		};
 		const deps = buildStandaloneResumeDeps({
 			session: session as never,
-			host: host as never,
-			subagentHost: subagentHost as never,
+			registry: registry as never,
 			titleStore: store,
 			rename,
 			chunkSource: {
@@ -185,9 +168,40 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 			listSessions: async () => "[]",
 		});
 		await deps.resume("13c018d5-7e61-4bb6-809d-eba3d76a2b19");
-		// Re-registration order: respawn, THEN MCP tools, THEN the subagent tool.
-		expect(order).toEqual(["session.resume", "host.start", "subagentHost.start"]);
-		expect(subagentHost.start).toHaveBeenCalledOnce();
+		expect(order).toEqual(["session.resume", "registry.start"]);
+		expect(registry.start).toHaveBeenCalledOnce();
+	});
+});
+
+describe("makeStandaloneOnEvent / makeOneShotOnEvent (onEvent tee fan-out)", () => {
+	it("the standalone onEvent tee fans every event to the registry (with recorder/rename/renderer)", () => {
+		const seen: string[] = [];
+		const onEvent = makeStandaloneOnEvent({
+			registry: { handleEvent: (e: ProtocolEvent) => seen.push(`registry:${e.type}`) },
+			rename: { noteEvent: (e: ProtocolEvent) => seen.push(`rename:${e.type}`) },
+			renderer: { handle: (e: ProtocolEvent) => seen.push(`renderer:${e.type}`) },
+			recorder: { handleEvent: (e: ProtocolEvent) => seen.push(`recorder:${e.type}`) },
+			compacting: () => false,
+		});
+		onEvent({
+			type: "tool_call_requested",
+			turnId: "t",
+			callId: "c",
+			name: "subagent",
+			args: {},
+		} as ProtocolEvent);
+		expect(seen).toContain("registry:tool_call_requested"); // FAILS if the tee omits registry.handleEvent
+		expect(seen).toContain("recorder:tool_call_requested");
+	});
+
+	it("the one-shot onEvent tee fans every event to the registry (with recorder)", () => {
+		const seen: string[] = [];
+		const onEvent = makeOneShotOnEvent({
+			registry: { handleEvent: (e: ProtocolEvent) => seen.push(`registry:${e.type}`) },
+			recorder: { handleEvent: (e: ProtocolEvent) => seen.push(`recorder:${e.type}`) },
+		});
+		onEvent({ type: "idle" } as ProtocolEvent);
+		expect(seen).toEqual(["recorder:idle", "registry:idle"]);
 	});
 });
 

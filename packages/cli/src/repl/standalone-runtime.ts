@@ -12,12 +12,12 @@ import { dirname } from "node:path";
 import {
 	createRenameController,
 	createSessionTitleStore,
+	DelegatedToolRegistry,
 	loadConfig,
 	resolveHaxBinary,
 	Session,
 } from "@ai-ezio/harness";
-import { loadMcpHost, type McpHost } from "@ai-ezio/mcp-host";
-import { loadSubagentHost, type SubagentHost } from "@ai-ezio/subagent";
+import { loadSessionHosts } from "@ai-ezio/session-hosts";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
 import { buildCompactor } from "./compaction-wiring.js";
 import {
@@ -43,29 +43,44 @@ import { stdinChunks } from "../cli.js";
 import { spawnListSessions } from "./resume-picker.js";
 import { runStandaloneRepl } from "./standalone.js";
 
-/** 30 minutes, in SECONDS — hax reads AI_EZIO_DELEGATED_TIMEOUT as seconds
- * (agent.c: atoi -> timeout_secs; emit.c: deadline_ms = timeout_secs * 1000). */
-export const SUBAGENT_DELEGATED_TIMEOUT_SECS = "1800";
-
-/** Raise the parent delegated-call dead-host backstop so a long-running subagent
- * call isn't cut off by hax's 120s default — only when unset (respect user override). */
-export function ensureDelegatedTimeout(env: NodeJS.ProcessEnv = process.env): void {
-	if (!env.AI_EZIO_DELEGATED_TIMEOUT)
-		env.AI_EZIO_DELEGATED_TIMEOUT = SUBAGENT_DELEGATED_TIMEOUT_SECS;
-}
-
 /** Wrap a raw writer so the subagent's one-line summary is newline-terminated on the surface. */
 export function subagentReportLine(write: (s: string) => void): (line: string) => void {
 	return (line) => write(line.endsWith("\n") ? line : `${line}\n`);
 }
 
+export interface OnEventDeps {
+	registry: Pick<DelegatedToolRegistry, "handleEvent">;
+	recorder: { handleEvent: (e: ProtocolEvent) => void };
+	rename?: { noteEvent: (e: ProtocolEvent) => void };
+	renderer?: { handle: (e: ProtocolEvent) => void };
+	compacting?: () => boolean;
+	onFinished?: (e: AssistantTurnFinishedEvent) => void;
+}
+
+/** Interactive (runStandalone) onEvent fan. */
+export function makeStandaloneOnEvent(deps: OnEventDeps): (e: ProtocolEvent) => void {
+	return (e) => {
+		deps.rename?.noteEvent(e);
+		if (!deps.compacting?.()) deps.renderer?.handle(e);
+		deps.recorder.handleEvent(e);
+		if (e.type === "assistant_turn_finished") deps.onFinished?.(e);
+		deps.registry.handleEvent(e);
+	};
+}
+
+/** One-shot (runOneShot) onEvent fan. */
+export function makeOneShotOnEvent(
+	deps: Pick<OnEventDeps, "recorder" | "registry">,
+): (e: ProtocolEvent) => void {
+	return (e) => {
+		deps.recorder.handleEvent(e);
+		deps.registry.handleEvent(e);
+	};
+}
+
 export interface OneShotOptions {
 	/** Overrides for Session.start (binary/env/args) — for tests. */
 	startOptions?: Parameters<Session["start"]>[0];
-	/** Injectable host (tests); defaults to loadMcpHost from mcp.json. */
-	host?: McpHost;
-	/** Injectable subagent host (tests); defaults to loadSubagentHost. */
-	subagentHost?: SubagentHost;
 	out?: (s: string) => void;
 	err?: (s: string) => void;
 }
@@ -78,23 +93,26 @@ export interface OneShotOptions {
  * process exit code.
  */
 export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Promise<number> {
-	ensureDelegatedTimeout();
 	const out = opts.out ?? ((s: string) => void process.stdout.write(s));
 	const err = opts.err ?? ((s: string) => void process.stderr.write(s));
 	const cwd = process.cwd();
-	const host = opts.host ?? loadMcpHost({ mode: "mounted", cwd });
-	const subagentHost =
-		opts.subagentHost ?? loadSubagentHost({ cwd, report: subagentReportLine(err) });
+	const { registry, mcpHost } = loadSessionHosts({
+		mode: "mounted",
+		cwd,
+		report: subagentReportLine(err),
+	});
 	const stateDir = ezioStateDir();
 	const repoKey = repoKeyForPath(cwd);
 	// Even a one-shot `-p` is a (single-turn) session: record it for cortex too.
-	const recorder = createRecorder({ worktreePath: cwd, host, stateDir, repoKey, warn: err });
+	const recorder = createRecorder({
+		worktreePath: cwd,
+		host: mcpHost,
+		stateDir,
+		repoKey,
+		warn: err,
+	});
 	const session = new Session({
-		onEvent: (e: ProtocolEvent) => {
-			recorder.handleEvent(e);
-			void host.handleEvent(e);
-			void subagentHost.handleEvent(e);
-		},
+		onEvent: makeOneShotOnEvent({ recorder, registry }),
 	});
 
 	try {
@@ -104,11 +122,9 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 		return 1;
 	}
 	// Register delegated tools BEFORE the submit so the one-shot turn sees them.
-	await host.start(session);
-	// Register the subagent tool BEFORE the submit so the one-shot turn sees it.
-	subagentHost.start(session);
+	await registry.start(session);
 	// Recover any projection orphaned by a crash before its final capture (idempotent).
-	await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd, warn: err });
+	await recoverUncaptured({ host: mcpHost, stateDir, repoKey, worktreePath: cwd, warn: err });
 
 	let code = 0;
 	try {
@@ -119,11 +135,10 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 		err(`ai-ezio: ${(error as Error).message}\n`);
 		code = 1;
 	} finally {
-		// Await the final capture BEFORE tearing the host down, so the one-shot turn is
+		// Await the final capture BEFORE tearing the registry down, so the one-shot turn is
 		// captured reliably (close() flushes the projection to cortex via callHostTool).
 		await recorder.close();
-		await host.stop();
-		await subagentHost.stop();
+		await registry.stop();
 		session.close();
 	}
 	return code;
@@ -253,8 +268,7 @@ export async function startWithTranscript(
 /** Collaborators required to build the resume-flow deps for a standalone session. */
 export interface StandaloneResumeDepsInput {
 	session: Pick<Session, "resume">;
-	host: Pick<McpHost, "start">;
-	subagentHost: Pick<SubagentHost, "start">;
+	registry: Pick<DelegatedToolRegistry, "start">;
 	titleStore: ReturnType<typeof createSessionTitleStore>;
 	rename: ReturnType<typeof createRenameController>;
 	/** The shared whole-chunk stdin source. `onFatal` ends it (via `.return`) to
@@ -267,7 +281,7 @@ export interface StandaloneResumeDepsInput {
 /**
  * Build the `ResumeFlowDeps`-shaped subset that wires the standalone session's
  * production resume path: `resume(id)` calls `session.resume(id)` then
- * `host.start(session)` (order matters per spec §3) and writes the resume
+ * `registry.start(session)` (order matters per spec §3) and writes the resume
  * notice; `onFatal` calls `chunkSource.return` to break the REPL loop.
  *
  * Extracted so tests can drive the REAL wiring with fakes instead of
@@ -281,8 +295,7 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 	titles: () => Map<string, string>;
 	currentSessionId: () => string | undefined;
 } {
-	const { session, host, subagentHost, titleStore, rename, chunkSource, write, listSessions } =
-		input;
+	const { session, registry, titleStore, rename, chunkSource, write, listSessions } = input;
 	return {
 		isBusy: () => false,
 		listSessions,
@@ -290,8 +303,7 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 		currentSessionId: () => rename.currentSessionId(),
 		resume: async (id: string) => {
 			await session.resume(id); // rejects on bad id / spawn / protocol failure
-			await host.start(session as Session); // re-register MCP delegated tools
-			subagentHost.start(session as Session); // re-register the subagent tool (same order contract)
+			await registry.start(session as Session); // rebuilds routing on the fresh child
 			write(resumeNotice([`--resume=${id}`]) ?? "");
 		},
 		// Spec §4: a failed respawn leaves the engine closed and unrecoverable.
@@ -303,10 +315,9 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
-	ensureDelegatedTimeout();
 	const cwd = process.cwd();
-	const host = loadMcpHost({ mode: "standalone", cwd });
-	const subagentHost = loadSubagentHost({
+	const { registry, mcpHost } = loadSessionHosts({
+		mode: "standalone",
 		cwd,
 		report: subagentReportLine((s) => process.stdout.write(s)),
 	});
@@ -315,7 +326,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	// Session recorder: assemble turns from the protocol stream and feed cortex a
 	// Claude-format transcript via the host-private capture_session call. Cortex-blind
 	// except for the injected CortexSessionSink (inside createRecorder).
-	const recorder = createRecorder({ worktreePath: cwd, host, stateDir, repoKey });
+	const recorder = createRecorder({ worktreePath: cwd, host: mcpHost, stateDir, repoKey });
 	const renderer = createMountedRenderer({ stdout: process.stdout });
 	let lastContent = "";
 	let lastUsage: AssistantTurnFinishedEvent["usage"];
@@ -336,27 +347,24 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	});
 
 	const session = new Session({
-		onEvent: (e: ProtocolEvent) => {
-			rename.noteEvent(e);
-			// During a compaction cycle the summarize turn is plumbing, not
-			// conversation: suppress its rendering ("compacting…" chrome shows
-			// instead). The recorder and host still see every event.
-			if (!wired?.compacting()) renderer.handle(e);
-			recorder.handleEvent(e);
-			if (e.type === "assistant_turn_finished") {
+		onEvent: makeStandaloneOnEvent({
+			registry,
+			rename,
+			renderer,
+			recorder,
+			compacting: () => !!wired?.compacting(),
+			onFinished: (e) => {
 				lastContent = e.content;
 				lastUsage = e.usage;
 				wired?.compactor.noteUsage(e.usage);
-			}
-			void host.handleEvent(e);
-			void subagentHost.handleEvent(e);
-		},
+			},
+		}),
 	});
 	const { compaction } = loadConfig();
 	wired = buildCompactor({
 		session,
 		config: compaction,
-		host,
+		host: mcpHost,
 		digest: recorder,
 		write: (s) => void process.stdout.write(s),
 	});
@@ -374,11 +382,9 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	}
 
 	// Register delegated tools BEFORE accepting input so the first turn sees them.
-	await host.start(session);
-	// Register the subagent tool BEFORE accepting input so the first turn sees it.
-	subagentHost.start(session);
+	await registry.start(session);
 	// Recover any projection orphaned by a crash before its final capture (idempotent).
-	await recoverUncaptured({ host, stateDir, repoKey, worktreePath: cwd });
+	await recoverUncaptured({ host: mcpHost, stateDir, repoKey, worktreePath: cwd });
 
 	// Build the local slash controller with real capabilities. Skills are
 	// rediscovered per /skills call (cheap; reflects on-disk changes).
@@ -434,8 +440,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		runResumeFlow({
 			...buildStandaloneResumeDeps({
 				session,
-				host,
-				subagentHost,
+				registry,
 				titleStore,
 				rename,
 				chunkSource,
@@ -501,7 +506,6 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		await runStandaloneRepl({
 			keys: replKeys,
 			session,
-			host,
 			compactor: wired.compactor,
 			write: (s) => void process.stdout.write(s),
 			slash,
@@ -515,7 +519,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		process.stdout.write("\x1b[<u\x1b[?2004l");
 		stdin.setRawMode?.(false);
 		stdin.pause();
-		await subagentHost.stop();
+		await registry.stop();
 	}
 	return 0;
 }

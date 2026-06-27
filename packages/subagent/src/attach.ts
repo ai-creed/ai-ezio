@@ -1,6 +1,6 @@
 /** Shared factory: build a SubagentHost from on-disk config + the live codex seed.
  * Used by every Session creator (standalone CLI now; mounted adapter later). */
-import { loadConfig, Session } from "@ai-ezio/harness";
+import { loadConfig, Session, DelegatedToolRegistry } from "@ai-ezio/harness";
 import { loadMcpHost } from "@ai-ezio/mcp-host";
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import { buildCatalog } from "./catalog.js";
@@ -49,11 +49,12 @@ export function loadSubagentHost(opts: {
 	};
 	const makeMcpHost = (cwd: string): ChildMcp => {
 		const h = loadMcpHost({ mode: "mounted", cwd, env });
+		const reg = new DelegatedToolRegistry([h]);
 		return {
-			start: (session) => h.start(session as Parameters<typeof h.start>[0]),
+			start: (session) => reg.start(session as Parameters<typeof reg.start>[0]),
 			stop: () => h.stop(),
-			// expose handleEvent so dispatch can forward the child's events to it
-			handleEvent: (e) => void h.handleEvent(e as Parameters<typeof h.handleEvent>[0]),
+			// expose handleEvent so dispatch can forward the child's events to the registry
+			handleEvent: (e: ProtocolEvent) => reg.handleEvent(e),
 		} as ChildMcp & { handleEvent: (e: unknown) => void };
 	};
 

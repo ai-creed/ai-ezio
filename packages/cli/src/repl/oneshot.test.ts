@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createMcpHost } from "@ai-ezio/mcp-host";
 import { runOneShot } from "./standalone-runtime.js";
 
 // Reuse the harness's deterministic fake engine: in "ok" mode each submit echoes
@@ -26,15 +25,10 @@ afterAll(() => {
 });
 
 describe("runOneShot", () => {
-	it("submits the prompt through the unified Session + host and prints the handback", async () => {
+	it("submits the prompt through the unified Session + registry and prints the handback", async () => {
 		const out: string[] = [];
-		const host = createMcpHost(
-			{ servers: [], toolPolicy: {}, hostPrivateTools: [] },
-			{ mode: "mounted", cwd: "/repo" },
-		);
 		const code = await runOneShot("hello", {
 			startOptions: { binary: FAKE, env: { ...process.env, FAKE_ENGINE_MODE: "ok" } },
-			host,
 			out: (s) => out.push(s),
 			err: (s) => out.push(`ERR:${s}`),
 		});
