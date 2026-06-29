@@ -192,6 +192,14 @@ function builtinCommands(listCommands: () => { name: string; summary: string }[]
 		{
 			name: "compact",
 			summary: "summarize old history and free context",
+			// NOTE (post-hax-sync): upstream hax now ships its own `/compact` slash
+			// command (`agent_compact`) that silently rewrites conversation history
+			// inside the engine. This ezio-owned handler intercepts `/compact` here,
+			// routes it to `ctx.compactor.compactNow()` (the harness-controlled protocol
+			// `compact` control), and returns `action: "handled"` — so the literal text
+			// "/compact" is NEVER forwarded as a raw `submit` to the hax session where
+			// the engine's own slash registry would trigger `agent_compact`.
+			// Do NOT remove this command or change its return path to `action: "submit"`.
 			run: async (ctx) => {
 				if (!ctx.compactor) {
 					ctx.write("compaction unavailable\n");

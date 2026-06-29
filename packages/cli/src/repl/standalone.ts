@@ -69,6 +69,10 @@ export async function runStandaloneRepl(deps: StandaloneReplDeps): Promise<void>
 			// Route every completed line through the local slash controller first.
 			// A handled command never reaches hax (which would hang the REPL); only
 			// a "submit" outcome is forwarded to the engine.
+			// IMPORTANT (post-hax-sync): this is also the guard that prevents
+			// upstream hax's own `/compact` slash command (`agent_compact`) from
+			// being reached — SlashController handles `/compact` locally via the
+			// harness compactor and returns action:"handled", not action:"submit".
 			const outcome = await deps.slash.handle(r.submit);
 			if (outcome.action === "exit") break;
 			if (outcome.action === "submit") {

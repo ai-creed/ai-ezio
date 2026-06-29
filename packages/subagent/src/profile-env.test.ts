@@ -33,3 +33,20 @@ it("validateProfile flags a missing apiKeyEnv, passes when present or absent", (
 	).toBeNull();
 	expect(validateProfile({ provider: "codex", model: "gpt-5.4-mini" }, {})).toBeNull(); // codex needs no key
 });
+
+it("pins HAX_COMPACT_AUTO=1 even when the parent env disables it", () => {
+	const env = profileEnv({ provider: "ollama", model: "qwen3:8b" }, { HAX_COMPACT_AUTO: "0" });
+	expect(env.HAX_COMPACT_AUTO).toBe("1");
+});
+
+it("pins HAX_COMPACT_AUTO=1 when the parent env is unset", () => {
+	const env = profileEnv({ provider: "codex", model: "gpt-5.4-mini" }, {});
+	expect(env.HAX_COMPACT_AUTO).toBe("1");
+});
+
+it("a keyless local ollama profile and a codex profile both validate (no migration)", () => {
+	// upstream keeps `ollama` as a built-in config-provider recipe (keyless local),
+	// so a stale-looking ollama profile must NOT be rejected.
+	expect(validateProfile({ provider: "ollama", model: "qwen3:8b" }, {})).toBeNull();
+	expect(validateProfile({ provider: "codex", model: "gpt-5.4-mini" }, {})).toBeNull();
+});
