@@ -1,6 +1,6 @@
 # hax upstream sync (2026-06-29) + compaction reconciliation
 
-**Status:** design approved, revised after phase-gate review (2026-06-29)
+**Status:** design approved, revised after two phase-gate reviews (2026-06-29)
 **Date:** 2026-06-29
 **Scope:** sync the `emitter` hax fork onto upstream `master`, reconcile the
 compaction collision (upstream shipped its own compaction), verify the subagent
@@ -10,19 +10,26 @@ against upstream's runtime selection, then validate and publish per `UPSTREAM.md
 
 ## Revision note (post-review)
 
-A phase-gate review corrected two design errors in the first draft, both fixed
-below:
+Phase-gate reviews corrected the following design issues, all fixed below:
 
 1. **Compaction env scoping.** The main session and subagent children both spawn
    hax through the shared `spawnHax` → `haxSpawnEnv`, so an unconditional
    `HAX_COMPACT_AUTO=0` in `haxSpawnEnv` would clobber the subagent's intended
-   `=1`. The design now makes engine-auto-compaction ownership explicit per spawn
+   `=1`. The design makes engine-auto-compaction ownership explicit per spawn
    (see "Compaction env scoping").
 2. **ollama is not removed.** Upstream removed the dedicated `src/providers/
    ollama.c` but kept `ollama` as a first-class built-in config-provider recipe.
    `provider: "ollama"` still resolves; the earlier "migrate / fail loudly"
    direction is dropped in favor of a verification (see "Subagent provider
    resolution").
+3. **Main-session leak guard must be structural, not per-call-site.** The first
+   revision routed each main `session.start` / resume call through a
+   `mountedEngineEnv` helper, but a unit test on the helper alone could pass while
+   a call site (fresh `start`, `startWithTranscript`, or `resume`) silently
+   skipped it. The guard is now enforced inside the harness `Session` at its
+   single spawn chokepoint (`spawnAndPump`, shared by `start()` and `resume()`),
+   so every main spawn is force-off by construction (see "Compaction env
+   scoping").
 
 ## Background
 
@@ -136,7 +143,7 @@ Two hax session types, two regimes:
 
 | | **Main mounted session** | **Subagent child session** |
 |---|---|---|
-| hax engine auto-compact | **OFF** — `mountedEngineEnv` force-sets `HAX_COMPACT_AUTO=0`; the shared `haxSpawnEnv` only off-defaults when the key is unset and never overrides an explicit value | **ON** — `profileEnv` force-sets `HAX_COMPACT_AUTO=1` |
+| hax engine auto-compact | **OFF** — the main `Session` is constructed with `engineEnvOverrides: { HAX_COMPACT_AUTO: "0" }`, force-applied in `spawnAndPump`; the shared `haxSpawnEnv` only off-defaults when the key is unset and never overrides an explicit value | **ON** — `profileEnv` force-sets `HAX_COMPACT_AUTO=1` |
 | Driver | the **harness**, via the `compact` protocol control, **between turns** | **hax itself** (upstream `compact.c`, mid-task + end-of-turn) |
 | Summary source | host-supplied / **cortex-enriched** | engine-generated (model stream) |
 | Applied by | renamed `agent_compact_hosted` → `agent_session_compact` (drop/keep window + summary swap), signaled by the `compacted` event | `compact_apply` (internal) |
@@ -181,24 +188,39 @@ through `spawnHax` → `haxSpawnEnv` (`packages/harness/src/spawn.ts:55`), and t
 subagent child is itself a harness `Session` started with `profileEnv(...)`
 (`packages/subagent/src/dispatch.ts:111` → `packages/harness/src/session.ts:271`).
 So an unconditional `HAX_COMPACT_AUTO=0` in `haxSpawnEnv` would clobber the
-subagent's intended `=1`. The design resolves this with explicit precedence:
+subagent's intended `=1`. The design resolves this with explicit precedence and a
+**structural** main-session guard:
 
 - **`packages/harness/src/spawn.ts` → `haxSpawnEnv`:** supply an **off default
   only when the key is unset**, and **never override an explicit value**
   (`if (env.HAX_COMPACT_AUTO == null) env.HAX_COMPACT_AUTO = "0"`). This defaults
   any mounted spawn to off while leaving a caller's explicit `=1` intact.
-- **Main mounted session:** route every `session.start` / resume call's child env
-  through a single helper (e.g. `mountedEngineEnv(base)`) that **force-sets**
-  `HAX_COMPACT_AUTO=0` (`packages/cli/src/repl/standalone-runtime.ts`). Forcing
-  (not defaulting) ensures an inherited shell/parent value cannot leak engine
-  auto-compaction into the main session.
+- **`packages/harness/src/session.ts` → new `SessionOptions.engineEnvOverrides?:
+  NodeJS.ProcessEnv`:** a generic map of engine env keys the `Session` force-sets
+  onto **every** child spawn. It is applied in the single internal spawn chokepoint
+  `spawnAndPump` — which both `start()` and `resume()` route through — by merging
+  the overrides last over `options.env ?? process.env`. This guarantees the values
+  survive every start/resume path of that session by construction. (The harness
+  already carries compaction concerns such as `compactTimeoutMs`, so this fits.)
+- **Main mounted session (`packages/cli/src/repl/standalone-runtime.ts`):**
+  construct the main `Session` once with
+  `engineEnvOverrides: { HAX_COMPACT_AUTO: "0" }`. The current call sites — fresh
+  `session.start(opts.startOptions ?? {})` (`:119`), `startWithTranscript`'s
+  `session.start({ args, transcriptPath })` (`:261`), and `session.resume(id)`
+  (`:305`) — then **all** force-off via the constructor, with no per-call-site
+  change required and no path able to skip it. Forcing (not defaulting) ensures an
+  inherited shell/parent value cannot leak engine auto-compaction into the main
+  session.
 - **`packages/subagent/src/profile-env.ts` → `profileEnv`:** **force-set**
   `HAX_COMPACT_AUTO=1` (mirroring the effort set-or-clear at lines 17–18), so a
-  disabling parent env cannot strip subagent self-protection.
+  disabling parent env cannot strip subagent self-protection. The subagent's
+  `Session` is constructed **without** `engineEnvOverrides`, so nothing re-forces
+  it off.
 
-Precedence is unambiguous: each spawn source force-sets its own value at its own
-env source; the shared `haxSpawnEnv` only fills an off default when nothing is
-set. Result: main = `0` and subagent = `1` for every inherited-env combination.
+Precedence is unambiguous: the main `Session` force-sets `0` at its single spawn
+chokepoint (covering fresh/one-shot/resume); the subagent's `profileEnv` force-sets
+`1`; the shared `haxSpawnEnv` only fills an off default when nothing is set. Result:
+main = `0` and subagent = `1` for every inherited-env combination.
 
 **hax config-tier precedence (why the env value is authoritative).** Post-sync hax
 resolves every tunable in priority order: session-scoped runtime override
@@ -224,7 +246,9 @@ sync. The earlier "ollama removed → migrate / fail loudly" premise was wrong a
 is dropped. Action (verification, no code change expected):
 
 - Confirm both the seeded `codex` profiles and a local `ollama` profile resolve
-  under the reworked registry.
+  under the reworked registry (upstream's `tests/providers/test_config_provider.c`
+  already asserts `provider_find("ollama") != NULL`, a selectable single recipe
+  entry, and provider construction; the meson gate runs it).
 - Confirm the keyless `ollama` profile still passes `validateProfile` (no
   `apiKeyEnv` required) and that `config.ts` / `config.test.ts` keep
   `provider: "ollama"` as a valid example.
@@ -241,9 +265,10 @@ engine-level test asserting a reconfigure changes the emitted effort.
 
 ### File-count note
 
-The change spans roughly ten files across C, TypeScript, and docs. The
-implementation plan sequences it into small, independently-green steps (the same
-commit-split discipline used for the subagent timeout fix), not one large change.
+The change spans roughly a dozen files across C, TypeScript, and docs (the harness
+touch now includes `session.ts` for `engineEnvOverrides`). The implementation plan
+sequences it into small, independently-green steps (the same commit-split
+discipline used for the subagent timeout fix), not one large change.
 
 ## Testing strategy (test-first per layer)
 
@@ -253,9 +278,20 @@ commit-split discipline used for the subagent timeout fix), not one large change
   `HAX_COMPACT_AUTO`** (e.g. `=1` in → `=1` out) and **off-defaults to `0` only
   when the key is unset** — proving the shared wrapper does not clobber a
   subagent's `=1`.
-- main-session env test: assert the `mountedEngineEnv(base)` helper force-sets
-  `HAX_COMPACT_AUTO=0` **even when `base` already has `=1`** (no main-session
-  leak).
+- `session.test.ts` (per real start/resume path, via the `spawn` test seam): a
+  `Session` constructed with `engineEnvOverrides: { HAX_COMPACT_AUTO: "0" }` and a
+  base/`process.env` carrying `HAX_COMPACT_AUTO=1` must hand the engine spawn an
+  env with `HAX_COMPACT_AUTO=0` on **each** path:
+  - fresh `start({})`,
+  - one-shot-shaped `start({ args, transcriptPath })` (the `startWithTranscript`
+    call shape),
+  - `resume(id)`.
+  And the **negative/subagent** case: a `Session` constructed **without**
+  `engineEnvOverrides`, started with env `{ HAX_COMPACT_AUTO: "1" }` (the
+  `profileEnv` shape), hands the spawn `=1` (not clobbered).
+- standalone-runtime wiring test: the production main `Session` is constructed with
+  `engineEnvOverrides` containing `HAX_COMPACT_AUTO=0` — so the structural guard is
+  actually wired, not just available.
 - `profile-env.test.ts`: assert `profileEnv` force-sets `HAX_COMPACT_AUTO=1`
   **even when `parentEnv.HAX_COMPACT_AUTO=0`** (the leak-prevention case) and when
   the parent is unset.
@@ -277,16 +313,22 @@ commit-split discipline used for the subagent timeout fix), not one large change
 1. Duplicate symbol gone — clean compile.
 2. The `compact` control still drives `agent_compact_hosted` — `test_compact*`
    green.
-3. `mountedEngineEnv(base)` force-sets `HAX_COMPACT_AUTO=0` even when `base` has
-   `=1` (no main-session leak).
-4. `haxSpawnEnv` preserves an explicit `HAX_COMPACT_AUTO` and off-defaults only
+3. **Every** main start/resume path force-offs: the main `Session`
+   (`engineEnvOverrides: { HAX_COMPACT_AUTO: "0" }`) hands the spawn `=0` from
+   `start({})`, `start({ args, transcriptPath })`, and `resume(id)` even when the
+   base env has `=1` — exercised against the real `Session` code via the `spawn`
+   seam, not a helper in isolation.
+4. The production main `Session` is constructed with the `HAX_COMPACT_AUTO=0`
+   override (wiring is present, so no path can silently skip it).
+5. `haxSpawnEnv` preserves an explicit `HAX_COMPACT_AUTO` and off-defaults only
    when unset — a subagent's `=1` survives the shared wrapper.
-5. `profileEnv` force-sets `HAX_COMPACT_AUTO=1` despite a disabling parent env.
-6. A runtime `/model` switch reflects in the emitted effort.
-7. Subagent provider resolution: seeded `codex` and local `ollama` profiles both
+6. `profileEnv` force-sets `HAX_COMPACT_AUTO=1` despite a disabling parent env; a
+   `Session` without `engineEnvOverrides` does not re-force it off.
+7. A runtime `/model` switch reflects in the emitted effort.
+8. Subagent provider resolution: seeded `codex` and local `ollama` profiles both
    validate/resolve under the reworked registry; keyless `ollama` passes
    `validateProfile`.
-8. Manual `/compact` in mount-mode does not reach hax's silent slash path — verify
+9. Manual `/compact` in mount-mode does not reach hax's silent slash path — verify
    the mounted REPL does not forward `/`-input raw into hax's slash registry; if
    it does, add suppression/mapping (small TS change).
 
@@ -328,7 +370,9 @@ surface, so it is deferred unless real overflow is observed.
 All conflicts fall inside the documented patch-surface firewall, so the model
 holds: this is a localized port, not a fork-widening. The principal risks are
 (1) missing the duplicate-symbol clash (mitigated: it is the central, explicit
-task), (2) a missed main-session start/resume path leaving engine auto-compaction
-on (mitigated: route every main spawn through the single `mountedEngineEnv`
-helper, covered by the env tests), and (3) the manual-`/compact`-in-mount-mode
-edge case (mitigated: a verify step plus a fallback suppression).
+task), (2) a main-session start/resume path leaving engine auto-compaction on
+(mitigated **structurally**: the force-off is applied inside `Session.spawnAndPump`
+— the single chokepoint both `start()` and `resume()` share — via the constructor
+`engineEnvOverrides`, and verified per real path through the `spawn` seam plus a
+wiring test, so no call site can skip it), and (3) the manual-`/compact`-in-mount-
+mode edge case (mitigated: a verify step plus a fallback suppression).
