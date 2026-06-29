@@ -1,11 +1,28 @@
 # hax upstream sync (2026-06-29) + compaction reconciliation
 
-**Status:** design approved, pending implementation
+**Status:** design approved, revised after phase-gate review (2026-06-29)
 **Date:** 2026-06-29
 **Scope:** sync the `emitter` hax fork onto upstream `master`, reconcile the
-compaction collision (upstream shipped its own compaction), fix the removed
-`ollama` provider in the subagent path, verify the M7 effort emitter against
-upstream's runtime selection, then validate and publish per `UPSTREAM.md`.
+compaction collision (upstream shipped its own compaction), verify the subagent
+provider path under upstream's reworked provider registry (no migration expected
+— `ollama` is now a built-in recipe, not removed), verify the M7 effort emitter
+against upstream's runtime selection, then validate and publish per `UPSTREAM.md`.
+
+## Revision note (post-review)
+
+A phase-gate review corrected two design errors in the first draft, both fixed
+below:
+
+1. **Compaction env scoping.** The main session and subagent children both spawn
+   hax through the shared `spawnHax` → `haxSpawnEnv`, so an unconditional
+   `HAX_COMPACT_AUTO=0` in `haxSpawnEnv` would clobber the subagent's intended
+   `=1`. The design now makes engine-auto-compaction ownership explicit per spawn
+   (see "Compaction env scoping").
+2. **ollama is not removed.** Upstream removed the dedicated `src/providers/
+   ollama.c` but kept `ollama` as a first-class built-in config-provider recipe.
+   `provider: "ollama"` still resolves; the earlier "migrate / fail loudly"
+   direction is dropped in favor of a verification (see "Subagent provider
+   resolution").
 
 ## Background
 
@@ -81,11 +98,12 @@ tooling flags. This is the real reconciliation work.
   thread is not reading controls, so the harness physically cannot inject a
   `compact` mid-turn.
 
-If upstream's auto-compaction were left enabled for an ezio-driven session it
+If upstream's auto-compaction were left enabled for an ezio-driven main session it
 would rewrite history mid-turn with no protocol signal, desyncing the harness's
 transcript/token model and risking a double-compaction index mismatch when the
 harness later sends its own `compact` control. This is why engine auto-compaction
-must be disabled for the main mounted session.
+must be off for the main mounted session — but on for subagent children, which the
+parent cannot compact (see "Compaction ownership model").
 
 ## Goals
 
@@ -96,8 +114,10 @@ must be disabled for the main mounted session.
 - Resolve the duplicate-`agent_compact` symbol cleanly without widening the fork.
 - Preserve harness-owned, cortex-enriched compaction for the main session, and
   prevent silent engine compaction from desyncing the harness.
-- Preserve subagent overflow protection.
-- Fix the `ollama` subagent profile (upstream removed `ollama.c`).
+- Preserve subagent overflow protection (engine auto-compaction on for children).
+- Confirm the subagent provider path still resolves under upstream's reworked
+  provider registry (the seeded `codex` profiles and the local `ollama` recipe);
+  no migration expected.
 - Keep every conflict inside the documented patch-surface firewall.
 
 ## Non-goals
@@ -107,6 +127,8 @@ must be disabled for the main mounted session.
 - Not building the signaled mid-turn backstop (see Deferred work).
 - Not touching upstream's `compact.c`, provider files, or `select.c` beyond what
   the rebase mechanically requires; no reformatting hax to the TS style.
+- Not treating `provider: "ollama"` as stale/unknown — upstream intentionally
+  keeps it as a built-in recipe.
 
 ## Compaction ownership model (after the sync)
 
@@ -114,7 +136,7 @@ Two hax session types, two regimes:
 
 | | **Main mounted session** | **Subagent child session** |
 |---|---|---|
-| hax engine auto-compact | **OFF** — `HAX_COMPACT_AUTO=0` via `haxSpawnEnv` | **ON** — `profileEnv` pins `HAX_COMPACT_AUTO=1` |
+| hax engine auto-compact | **OFF** — `mountedEngineEnv` force-sets `HAX_COMPACT_AUTO=0`; the shared `haxSpawnEnv` only off-defaults when the key is unset and never overrides an explicit value | **ON** — `profileEnv` force-sets `HAX_COMPACT_AUTO=1` |
 | Driver | the **harness**, via the `compact` protocol control, **between turns** | **hax itself** (upstream `compact.c`, mid-task + end-of-turn) |
 | Summary source | host-supplied / **cortex-enriched** | engine-generated (model stream) |
 | Applied by | renamed `agent_compact_hosted` → `agent_session_compact` (drop/keep window + summary swap), signaled by the `compacted` event | `compact_apply` (internal) |
@@ -151,24 +173,63 @@ sites only; upstream keeps the name:
 Upstream's `compact.c` and its `agent_compact(st, instructions, is_auto)` are left
 untouched. The name `agent_compact_hosted` denotes the host-supplied-summary path.
 
-### B. Harness (TypeScript) — compaction scoping + ollama
+### B. Harness (TypeScript) — compaction env scoping
 
-- **`packages/harness/src/spawn.ts` → `haxSpawnEnv`:** set
-  `env.HAX_COMPACT_AUTO = "0"`. This is scoped to the main mounted child and is
-  never written to `process.env`, so it cannot leak into the subagent's
-  `parentEnv`.
-- **`packages/subagent/src/profile-env.ts` → `profileEnv`:** set
-  `env.HAX_COMPACT_AUTO = "1"` (mirroring the existing effort set-or-clear at
-  lines 17–18). This pins subagent self-protection even when a disabling value is
-  present in `parentEnv`.
-- **ollama cleanup:** upstream removed `ollama.c`. Update the local-model example
-  away from the removed `provider: "ollama"` to the supported path (a
-  config-defined custom provider / openai-compat) in both the `config.ts` doc
-  comment and the `config.test.ts` fixture (`local: { provider: "ollama", model:
-  "qwen3:8b" }`). Add a clear dispatch-time error when a profile names a provider
-  hax does not know, so a stale `ollama` config fails loudly rather than
-  cryptically. The exact replacement provider syntax is pinned during
-  implementation, once the new provider registry is in-tree.
+Engine auto-compaction is owned **per spawn**; the shared wrapper never overrides
+an explicit value. Both the main mounted session and subagent children spawn hax
+through `spawnHax` → `haxSpawnEnv` (`packages/harness/src/spawn.ts:55`), and the
+subagent child is itself a harness `Session` started with `profileEnv(...)`
+(`packages/subagent/src/dispatch.ts:111` → `packages/harness/src/session.ts:271`).
+So an unconditional `HAX_COMPACT_AUTO=0` in `haxSpawnEnv` would clobber the
+subagent's intended `=1`. The design resolves this with explicit precedence:
+
+- **`packages/harness/src/spawn.ts` → `haxSpawnEnv`:** supply an **off default
+  only when the key is unset**, and **never override an explicit value**
+  (`if (env.HAX_COMPACT_AUTO == null) env.HAX_COMPACT_AUTO = "0"`). This defaults
+  any mounted spawn to off while leaving a caller's explicit `=1` intact.
+- **Main mounted session:** route every `session.start` / resume call's child env
+  through a single helper (e.g. `mountedEngineEnv(base)`) that **force-sets**
+  `HAX_COMPACT_AUTO=0` (`packages/cli/src/repl/standalone-runtime.ts`). Forcing
+  (not defaulting) ensures an inherited shell/parent value cannot leak engine
+  auto-compaction into the main session.
+- **`packages/subagent/src/profile-env.ts` → `profileEnv`:** **force-set**
+  `HAX_COMPACT_AUTO=1` (mirroring the effort set-or-clear at lines 17–18), so a
+  disabling parent env cannot strip subagent self-protection.
+
+Precedence is unambiguous: each spawn source force-sets its own value at its own
+env source; the shared `haxSpawnEnv` only fills an off default when nothing is
+set. Result: main = `0` and subagent = `1` for every inherited-env combination.
+
+**hax config-tier precedence (why the env value is authoritative).** Post-sync hax
+resolves every tunable in priority order: session-scoped runtime override
+(`config_set_override`, written by `/model`-style slash commands) → environment
+(`HAX_COMPACT_AUTO`) → config file (`~/.config/hax/config.json`, `compact.auto`)
+→ registry default (`"1"`). Environment therefore **wins over a user's config
+file**, so the spawn-env value we set is authoritative; a user's
+`~/.config/hax/config.json` cannot re-enable engine auto-compaction on the main
+session. The only tier above env is a session-scoped slash-command override, which
+is unreachable in ezio's mounted main session (chrome suppressed, harness owns
+input) and in subagent children (no interactive REPL).
+
+### B2. Subagent provider resolution (verify; no migration)
+
+Upstream removed the dedicated `src/providers/ollama.c` but **kept `ollama` as a
+first-class provider** via a built-in config-provider recipe: `config_provider.c`
+defines `RECIPES[] = { .name = "ollama", .base_url =
+"http://127.0.0.1:11434/v1", ... }` (openai-completions dialect, keyless local,
+reachability-probed), and `registry.c` exposes recipe providers through
+`provider_find` / `make_factory`. A subagent profile
+`{ provider: "ollama", model: "qwen3:8b" }` therefore **still resolves** after the
+sync. The earlier "ollama removed → migrate / fail loudly" premise was wrong and
+is dropped. Action (verification, no code change expected):
+
+- Confirm both the seeded `codex` profiles and a local `ollama` profile resolve
+  under the reworked registry.
+- Confirm the keyless `ollama` profile still passes `validateProfile` (no
+  `apiKeyEnv` required) and that `config.ts` / `config.test.ts` keep
+  `provider: "ollama"` as a valid example.
+- Do **not** add ezio-side "unknown provider" rejection targeting `ollama`; hax
+  already errors on a genuinely unknown provider name.
 
 ### C. M7 effort verify (likely a no-op plus a test)
 
@@ -188,14 +249,19 @@ commit-split discipline used for the subagent timeout fix), not one large change
 
 ### Harness (vitest)
 
-- `spawn.test.ts`: assert `haxSpawnEnv(base)` carries `HAX_COMPACT_AUTO=0`;
-  existing assertions still hold.
-- `profile-env.test.ts`: assert `profileEnv` returns `HAX_COMPACT_AUTO=1` **even
-  when `parentEnv.HAX_COMPACT_AUTO=0`** (the leak-prevention case) and when the
-  parent is unset.
-- `config.test.ts`: the ollama fixture is updated to the supported provider path
-  and parses clean.
-- subagent dispatch: an unknown-provider profile yields a clear, loud error.
+- `spawn.test.ts`: assert `haxSpawnEnv` **preserves an explicit
+  `HAX_COMPACT_AUTO`** (e.g. `=1` in → `=1` out) and **off-defaults to `0` only
+  when the key is unset** — proving the shared wrapper does not clobber a
+  subagent's `=1`.
+- main-session env test: assert the `mountedEngineEnv(base)` helper force-sets
+  `HAX_COMPACT_AUTO=0` **even when `base` already has `=1`** (no main-session
+  leak).
+- `profile-env.test.ts`: assert `profileEnv` force-sets `HAX_COMPACT_AUTO=1`
+  **even when `parentEnv.HAX_COMPACT_AUTO=0`** (the leak-prevention case) and when
+  the parent is unset.
+- subagent provider resolution: a seeded `codex` profile and a local
+  `{ provider: "ollama", model: "qwen3:8b" }` profile both validate; the keyless
+  `ollama` profile passes `validateProfile`.
 
 ### Engine (meson)
 
@@ -204,18 +270,23 @@ commit-split discipline used for the subagent timeout fix), not one large change
   the renamed `agent_compact_hosted` path (update any direct symbol reference).
 - M7: an engine test asserting a runtime reconfigure changes the emitted effort.
 - We do not re-test upstream's `compact_should_auto` env-gating — that is
-  upstream's own coverage; our half is the `spawn.test` assertion.
+  upstream's own coverage; our half is the harness env tests above.
 
 ### Edge cases covered by tests
 
 1. Duplicate symbol gone — clean compile.
 2. The `compact` control still drives `agent_compact_hosted` — `test_compact*`
    green.
-3. Main session env carries `HAX_COMPACT_AUTO=0`.
-4. Subagent pins `HAX_COMPACT_AUTO=1` despite a disabling parent env.
-5. A runtime `/model` switch reflects in the emitted effort.
-6. A stale `ollama` profile fails with a clear error.
-7. Manual `/compact` in mount-mode does not reach hax's silent slash path — verify
+3. `mountedEngineEnv(base)` force-sets `HAX_COMPACT_AUTO=0` even when `base` has
+   `=1` (no main-session leak).
+4. `haxSpawnEnv` preserves an explicit `HAX_COMPACT_AUTO` and off-defaults only
+   when unset — a subagent's `=1` survives the shared wrapper.
+5. `profileEnv` force-sets `HAX_COMPACT_AUTO=1` despite a disabling parent env.
+6. A runtime `/model` switch reflects in the emitted effort.
+7. Subagent provider resolution: seeded `codex` and local `ollama` profiles both
+   validate/resolve under the reworked registry; keyless `ollama` passes
+   `validateProfile`.
+8. Manual `/compact` in mount-mode does not reach hax's silent slash path — verify
    the mounted REPL does not forward `/`-input raw into hax's slash registry; if
    it does, add suppression/mapping (small TS change).
 
@@ -257,5 +328,7 @@ surface, so it is deferred unless real overflow is observed.
 All conflicts fall inside the documented patch-surface firewall, so the model
 holds: this is a localized port, not a fork-widening. The principal risks are
 (1) missing the duplicate-symbol clash (mitigated: it is the central, explicit
-task), and (2) the manual-`/compact`-in-mount-mode edge case (mitigated: a
-verify step plus a fallback suppression).
+task), (2) a missed main-session start/resume path leaving engine auto-compaction
+on (mitigated: route every main spawn through the single `mountedEngineEnv`
+helper, covered by the env tests), and (3) the manual-`/compact`-in-mount-mode
+edge case (mitigated: a verify step plus a fallback suppression).
