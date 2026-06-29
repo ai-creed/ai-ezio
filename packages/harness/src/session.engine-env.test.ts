@@ -7,7 +7,12 @@ import type { SpawnHaxOptions, SpawnedHax } from "./spawn.js";
 const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
 
 const ready = (sessionId = "s"): ProtocolEvent =>
-	({ type: "ready", sessionId, protocol: PROTOCOL_VERSION, haxBaseCommit: "c" }) as unknown as ProtocolEvent;
+	({
+		type: "ready",
+		sessionId,
+		protocol: PROTOCOL_VERSION,
+		haxBaseCommit: "c",
+	}) as unknown as ProtocolEvent;
 
 /** Hand-driven transport: push events, end explicitly. */
 function fakeTransport() {
@@ -66,7 +71,11 @@ describe("Session.engineEnvOverrides", () => {
 	it("force-offs on the startWithTranscript-shaped start({ args, transcriptPath })", async () => {
 		const t = fakeTransport();
 		const { session, captured } = makeCaptured({ HAX_COMPACT_AUTO: "0" }, [t]);
-		const p = session.start({ env: { HAX_COMPACT_AUTO: "1" }, args: ["--resume=x"], transcriptPath: "/t" });
+		const p = session.start({
+			env: { HAX_COMPACT_AUTO: "1" },
+			args: ["--resume=x"],
+			transcriptPath: "/t",
+		});
 		t.push(ready());
 		await p;
 		expect(captured[0]!.env!.HAX_COMPACT_AUTO).toBe("0");
