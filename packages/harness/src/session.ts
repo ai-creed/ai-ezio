@@ -102,6 +102,11 @@ export interface SessionOptions {
 	spawn?: (options: SpawnHaxOptions) => SpawnedHax;
 	/** Test seam: build the transport from the child's fd streams (defaults to FdTransport). */
 	transportFactory?: (events: Readable, controls: Writable) => Transport;
+	/** Engine env keys force-set onto EVERY spawn of this session (fresh start AND
+	 * resume), merged last over the spawn env so an inherited value cannot win. The
+	 * main mounted session uses this to pin HAX_COMPACT_AUTO=0 regardless of which
+	 * start/resume path runs; subagent sessions omit it so profileEnv's =1 survives. */
+	engineEnvOverrides?: NodeJS.ProcessEnv;
 }
 
 export class Session {
@@ -268,7 +273,11 @@ export class Session {
 	private async spawnAndPump(options: SpawnHaxOptions): Promise<ReadyEvent> {
 		this._transcriptPath = options.transcriptPath;
 		const gen = this.generation;
-		const spawned = (this.options.spawn ?? spawnHax)(options);
+		const overrides = this.options.engineEnvOverrides;
+		const spawnOptions: SpawnHaxOptions = overrides
+			? { ...options, env: { ...(options.env ?? process.env), ...overrides } }
+			: options;
+		const spawned = (this.options.spawn ?? spawnHax)(spawnOptions);
 		this.spawned = spawned;
 		spawned.child.on("exit", (code, signal) => {
 			if (gen !== this.generation) return; // stale child exit: never cascade
