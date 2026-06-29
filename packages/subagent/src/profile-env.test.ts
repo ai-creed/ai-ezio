@@ -43,3 +43,10 @@ it("pins HAX_COMPACT_AUTO=1 when the parent env is unset", () => {
 	const env = profileEnv({ provider: "codex", model: "gpt-5.4-mini" }, {});
 	expect(env.HAX_COMPACT_AUTO).toBe("1");
 });
+
+it("a keyless local ollama profile and a codex profile both validate (no migration)", () => {
+	// upstream keeps `ollama` as a built-in config-provider recipe (keyless local),
+	// so a stale-looking ollama profile must NOT be rejected.
+	expect(validateProfile({ provider: "ollama", model: "qwen3:8b" }, {})).toBeNull();
+	expect(validateProfile({ provider: "codex", model: "gpt-5.4-mini" }, {})).toBeNull();
+});
