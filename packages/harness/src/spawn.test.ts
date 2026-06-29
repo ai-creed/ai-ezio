@@ -34,3 +34,14 @@ describe("haxSpawnEnv (transcript mirror)", () => {
 		expect(env.HAX_TRANSCRIPT).toBeUndefined();
 	});
 });
+
+describe("haxSpawnEnv (engine auto-compaction default)", () => {
+	it("off-defaults HAX_COMPACT_AUTO to 0 when the base does not set it", () => {
+		expect(haxSpawnEnv({} as NodeJS.ProcessEnv).HAX_COMPACT_AUTO).toBe("0");
+	});
+
+	it("preserves an explicit HAX_COMPACT_AUTO and never overrides it", () => {
+		expect(haxSpawnEnv({ HAX_COMPACT_AUTO: "1" } as NodeJS.ProcessEnv).HAX_COMPACT_AUTO).toBe("1");
+		expect(haxSpawnEnv({ HAX_COMPACT_AUTO: "0" } as NodeJS.ProcessEnv).HAX_COMPACT_AUTO).toBe("0");
+	});
+});

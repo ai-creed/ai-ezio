@@ -44,6 +44,9 @@ export function haxSpawnEnv(
 ): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = { ...base, HAX_EXTRA_SKILLS_DIR: aiEzioGlobalSkillsDir(base) };
 	if (transcriptPath) env.HAX_TRANSCRIPT = transcriptPath;
+	// Engine auto-compaction defaults OFF for a mounted spawn, but an explicit value
+	// (e.g. a subagent's HAX_COMPACT_AUTO=1) is preserved — never overridden here.
+	if (env.HAX_COMPACT_AUTO == null) env.HAX_COMPACT_AUTO = "0";
 	return env;
 }
 
