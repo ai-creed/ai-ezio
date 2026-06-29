@@ -16,6 +16,7 @@ import {
 	loadConfig,
 	resolveHaxBinary,
 	Session,
+	type SessionOptions,
 } from "@ai-ezio/harness";
 import { loadSessionHosts } from "@ai-ezio/session-hosts";
 import type { AssistantTurnFinishedEvent, ProtocolEvent } from "@ai-ezio/protocol";
@@ -47,6 +48,19 @@ import { runStandaloneRepl } from "./standalone.js";
 export function subagentReportLine(write: (s: string) => void): (line: string) => void {
 	return (line) => write(line.endsWith("\n") ? line : `${line}\n`);
 }
+
+/** Options for the main mounted Session — always pins engine auto-compaction OFF
+ * (HAX_COMPACT_AUTO=0) so no start/resume path can leak an inherited =1. The harness
+ * owns compaction for the main session; subagent children pin =1 via profileEnv. */
+export function mountedSessionOptions(base: SessionOptions = {}): SessionOptions {
+	return { ...base, engineEnvOverrides: { ...base.engineEnvOverrides, HAX_COMPACT_AUTO: "0" } };
+}
+
+/** Default Session factory — overridable via the `makeSession` seam so a wiring
+ * test can spy the exact options each entry point constructs its Session with.
+ * The default deliberately does NOT add the override: it comes from the call
+ * site's mountedSessionOptions wrap, so a skipped wrap fails the wiring test. */
+const defaultMakeSession = (options: SessionOptions): Session => new Session(options);
 
 export interface OnEventDeps {
 	registry: Pick<DelegatedToolRegistry, "handleEvent">;
@@ -83,6 +97,8 @@ export interface OneShotOptions {
 	startOptions?: Parameters<Session["start"]>[0];
 	out?: (s: string) => void;
 	err?: (s: string) => void;
+	/** Test seam: construct the Session (defaults to `new Session`). */
+	makeSession?: (options: SessionOptions) => Session;
 }
 
 /**
@@ -111,9 +127,9 @@ export async function runOneShot(prompt: string, opts: OneShotOptions = {}): Pro
 		repoKey,
 		warn: err,
 	});
-	const session = new Session({
-		onEvent: makeOneShotOnEvent({ recorder, registry }),
-	});
+	const session = (opts.makeSession ?? defaultMakeSession)(
+		mountedSessionOptions({ onEvent: makeOneShotOnEvent({ recorder, registry }) }),
+	);
 
 	try {
 		await session.start(opts.startOptions ?? {});
@@ -219,6 +235,8 @@ export interface StandaloneOptions {
 	/** Forwarded to the headless hax spawn (e.g. ["--continue"] or ["--resume=ID"])
 	 * to resume a prior session. Absent/empty → a fresh session. */
 	resumeArgs?: string[];
+	/** Test seam: construct the Session (defaults to `new Session`). */
+	makeSession?: (options: SessionOptions) => Session;
 }
 
 /**
@@ -346,20 +364,22 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 		requestStatus: () => queueMicrotask(() => void session.status().catch(() => {})),
 	});
 
-	const session = new Session({
-		onEvent: makeStandaloneOnEvent({
-			registry,
-			rename,
-			renderer,
-			recorder,
-			compacting: () => !!wired?.compacting(),
-			onFinished: (e) => {
-				lastContent = e.content;
-				lastUsage = e.usage;
-				wired?.compactor.noteUsage(e.usage);
-			},
+	const session = (opts.makeSession ?? defaultMakeSession)(
+		mountedSessionOptions({
+			onEvent: makeStandaloneOnEvent({
+				registry,
+				rename,
+				renderer,
+				recorder,
+				compacting: () => !!wired?.compacting(),
+				onFinished: (e) => {
+					lastContent = e.content;
+					lastUsage = e.usage;
+					wired?.compactor.noteUsage(e.usage);
+				},
+			}),
 		}),
-	});
+	);
 	const { compaction } = loadConfig();
 	wired = buildCompactor({
 		session,
