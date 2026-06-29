@@ -16,6 +16,9 @@ export function profileEnv(
 	env.HAX_MODEL = profile.model;
 	if (profile.effort) env.HAX_REASONING_EFFORT = profile.effort;
 	else delete env.HAX_REASONING_EFFORT;
+	// Subagent children self-protect: the parent cannot compact a child, so keep hax's
+	// own auto-compaction ON regardless of a disabling parent env.
+	env.HAX_COMPACT_AUTO = "1";
 	return env;
 }
 
