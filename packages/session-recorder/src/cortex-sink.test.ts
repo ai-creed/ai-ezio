@@ -8,7 +8,14 @@ import type { RecordedTurn } from "./types.js";
 const ref = { sessionId: "s1", conversationId: "s1-0", worktreePath: "/repo" };
 
 function turn(i: number, tools: RecordedTurn["toolCalls"] = []): RecordedTurn {
-	return { ref, index: i, timestamp: "", userText: `u${i}`, assistantText: `a${i}`, toolCalls: tools };
+	return {
+		ref,
+		index: i,
+		timestamp: "",
+		userText: `u${i}`,
+		assistantText: `a${i}`,
+		toolCalls: tools,
+	};
 }
 
 describe("CortexSessionSink", () => {

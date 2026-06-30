@@ -43,7 +43,14 @@ describe("renderCortexLines", () => {
 	});
 
 	it("uses the running line counter so turn numbers stay monotonic", () => {
-		const turn: RecordedTurn = { ref, index: 3, timestamp: "", userText: "u", assistantText: "a", toolCalls: [] };
+		const turn: RecordedTurn = {
+			ref,
+			index: 3,
+			timestamp: "",
+			userText: "u",
+			assistantText: "a",
+			toolCalls: [],
+		};
 		const [u, a] = renderCortexLines(turn, 6).map((l) => JSON.parse(l));
 		expect(u.turn).toBe(6);
 		expect(a.turn).toBe(7);

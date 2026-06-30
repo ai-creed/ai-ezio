@@ -191,7 +191,12 @@ describe("SessionRecorder assembly", () => {
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
 			{ type: "user_turn_started", turnId: "t1" },
-			{ type: "assistant_turn_finished", turnId: "t1", content: "Done.", usage: { outputTokens: 1 } },
+			{
+				type: "assistant_turn_finished",
+				turnId: "t1",
+				content: "Done.",
+				usage: { outputTokens: 1 },
+			},
 			{ type: "idle" },
 		]);
 
@@ -405,7 +410,14 @@ describe("SessionRecorder model attribution", () => {
 		const { rec, turns } = recWith();
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
-			{ type: "status", model: "claude-opus-4-8", provider: "anthropic", protocol: "0.1.0", sessionId: "s1", state: "idle" },
+			{
+				type: "status",
+				model: "claude-opus-4-8",
+				provider: "anthropic",
+				protocol: "0.1.0",
+				sessionId: "s1",
+				state: "idle",
+			},
 			{ type: "user_turn_started", turnId: "t1" },
 			{ type: "assistant_turn_finished", turnId: "t1", content: "Done." },
 			{ type: "idle" },
@@ -428,11 +440,25 @@ describe("SessionRecorder model attribution", () => {
 		const { rec, turns } = recWith();
 		feed(rec, [
 			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
-			{ type: "status", model: "model-a", provider: "p", protocol: "0.1.0", sessionId: "s1", state: "idle" },
+			{
+				type: "status",
+				model: "model-a",
+				provider: "p",
+				protocol: "0.1.0",
+				sessionId: "s1",
+				state: "idle",
+			},
 			{ type: "user_turn_started", turnId: "t1" },
 			{ type: "assistant_turn_finished", turnId: "t1", content: "one" },
 			{ type: "idle" },
-			{ type: "status", model: "model-b", provider: "p", protocol: "0.1.0", sessionId: "s1", state: "idle" },
+			{
+				type: "status",
+				model: "model-b",
+				provider: "p",
+				protocol: "0.1.0",
+				sessionId: "s1",
+				state: "idle",
+			},
 			{ type: "user_turn_started", turnId: "t2" },
 			{ type: "assistant_turn_finished", turnId: "t2", content: "two" },
 			{ type: "idle" },
