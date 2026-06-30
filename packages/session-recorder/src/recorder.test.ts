@@ -174,6 +174,30 @@ describe("SessionRecorder assembly", () => {
 		]);
 		expect(turns).toHaveLength(0);
 	});
+
+	it("stamps the finalize timestamp from the injected clock", () => {
+		const { sink, turns } = fakeSink();
+		const store = { append: vi.fn() };
+		const fixed = 1_751_280_062_512;
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store,
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+			now: () => fixed,
+		});
+
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{ type: "user_turn_started", turnId: "t1" },
+			{ type: "assistant_turn_finished", turnId: "t1", content: "Done.", usage: { outputTokens: 1 } },
+			{ type: "idle" },
+		]);
+
+		expect(turns).toHaveLength(1);
+		expect(turns[0]!.timestamp).toBe(new Date(fixed).toISOString());
+	});
 });
 
 describe("SessionRecorder trigger policy", () => {

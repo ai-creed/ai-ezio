@@ -13,6 +13,7 @@ describe("JsonlDurableStore", () => {
 		const turn: RecordedTurn = {
 			ref,
 			index: 0,
+			timestamp: "2026-06-30T10:41:02.512Z",
 			userText: "u",
 			assistantText: "a",
 			toolCalls: [{ name: "Read", input: "x", status: "ok" }],
