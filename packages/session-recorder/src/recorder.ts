@@ -40,6 +40,8 @@ export class SessionRecorder {
 	private conversationId = "";
 	private turnIndex = 0;
 	private turnsSinceFlush = 0;
+	/** Latest engine-reported model id (from `status` events); stamped on each finalized turn. */
+	private model = "";
 
 	private current?: RecordedTurn;
 	/** Ring of the most recent finalized turns (M11: the deterministic-digest
@@ -128,6 +130,9 @@ export class SessionRecorder {
 				// indexing as-is.
 				this.triggerFlush("compact");
 				break;
+			case "status":
+				this.model = event.model;
+				break;
 			default:
 				break;
 		}
@@ -163,6 +168,7 @@ export class SessionRecorder {
 		const turn = this.current;
 		if (!turn) return;
 		turn.timestamp = new Date(this.now()).toISOString();
+		if (this.model) turn.model = this.model;
 		this.current = undefined;
 		this.recent.push(turn);
 		if (this.recent.length > SessionRecorder.RECENT_MAX) this.recent.shift();
