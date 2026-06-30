@@ -36,9 +36,10 @@ function turn(userText: string, tools: string[] = []): RecordedTurn {
 	return {
 		ref: { sessionId: "s", conversationId: "c", worktreePath: "/r" },
 		index: 0,
+		timestamp: "",
 		userText,
 		assistantText: "a",
-		toolCalls: tools.map((name) => ({ name, status: "ok" as const })),
+		toolCalls: tools.map((name) => ({ name, input: undefined, status: "ok" as const })),
 	};
 }
 
