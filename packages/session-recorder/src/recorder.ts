@@ -21,6 +21,8 @@ export interface RecorderOptions {
 	idleDebounceMs?: number;
 	/** Force a capture every K turns even if the debounce never fires. Default 10. */
 	everyKTurns?: number;
+	/** Wall-clock source for per-turn timestamps. Default () => Date.now(). Injected in tests. */
+	now?: () => number;
 }
 
 /** Sanitize to cortex's `^[\w-]+$` (anything else → "-"). */
@@ -31,12 +33,15 @@ export function sanitizeId(s: string): string {
 export class SessionRecorder {
 	private readonly idleDebounceMs: number;
 	private readonly everyKTurns: number;
+	private readonly now: () => number;
 
 	private sessionId = "";
 	private convCounter = 0;
 	private conversationId = "";
 	private turnIndex = 0;
 	private turnsSinceFlush = 0;
+	/** Latest engine-reported model id (from `status` events); stamped on each finalized turn. */
+	private model = "";
 
 	private current?: RecordedTurn;
 	/** Ring of the most recent finalized turns (M11: the deterministic-digest
@@ -53,6 +58,7 @@ export class SessionRecorder {
 	constructor(private readonly opts: RecorderOptions) {
 		this.idleDebounceMs = opts.idleDebounceMs ?? 10_000;
 		this.everyKTurns = opts.everyKTurns ?? 10;
+		this.now = opts.now ?? (() => Date.now());
 	}
 
 	private ref(): ConversationRef {
@@ -73,6 +79,7 @@ export class SessionRecorder {
 				this.current = {
 					ref: this.ref(),
 					index: this.turnIndex++,
+					timestamp: "",
 					userText: this.pendingSubmits.shift() ?? event.text ?? "",
 					assistantText: "",
 					toolCalls: [],
@@ -123,6 +130,9 @@ export class SessionRecorder {
 				// indexing as-is.
 				this.triggerFlush("compact");
 				break;
+			case "status":
+				this.model = event.model;
+				break;
 			default:
 				break;
 		}
@@ -157,6 +167,8 @@ export class SessionRecorder {
 	private finalizeTurn(): void {
 		const turn = this.current;
 		if (!turn) return;
+		turn.timestamp = new Date(this.now()).toISOString();
+		if (this.model) turn.model = this.model;
 		this.current = undefined;
 		this.recent.push(turn);
 		if (this.recent.length > SessionRecorder.RECENT_MAX) this.recent.shift();

@@ -174,6 +174,35 @@ describe("SessionRecorder assembly", () => {
 		]);
 		expect(turns).toHaveLength(0);
 	});
+
+	it("stamps the finalize timestamp from the injected clock", () => {
+		const { sink, turns } = fakeSink();
+		const store = { append: vi.fn() };
+		const fixed = 1_751_280_062_512;
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store,
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+			now: () => fixed,
+		});
+
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{ type: "user_turn_started", turnId: "t1" },
+			{
+				type: "assistant_turn_finished",
+				turnId: "t1",
+				content: "Done.",
+				usage: { outputTokens: 1 },
+			},
+			{ type: "idle" },
+		]);
+
+		expect(turns).toHaveLength(1);
+		expect(turns[0]!.timestamp).toBe(new Date(fixed).toISOString());
+	});
 });
 
 describe("SessionRecorder trigger policy", () => {
@@ -359,5 +388,81 @@ describe("SessionRecorder recentTurns (M11)", () => {
 		expect(recent).toHaveLength(30);
 		expect(recent[recent.length - 1]!.userText).toBe("u34");
 		expect(recent[0]!.userText).toBe("u5");
+	});
+});
+
+describe("SessionRecorder model attribution", () => {
+	// Reuse the module-level fakeSink() helper; return the recorder + its turns.
+	function recWith() {
+		const { sink, turns } = fakeSink();
+		const store = { append: vi.fn() };
+		const rec = new SessionRecorder({
+			worktreePath: "/repo",
+			store,
+			sink,
+			idleDebounceMs: 9_999,
+			everyKTurns: 999,
+		});
+		return { rec, turns };
+	}
+
+	it("stamps the latest status.model onto a finalized turn", () => {
+		const { rec, turns } = recWith();
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{
+				type: "status",
+				model: "claude-opus-4-8",
+				provider: "anthropic",
+				protocol: "0.1.0",
+				sessionId: "s1",
+				state: "idle",
+			},
+			{ type: "user_turn_started", turnId: "t1" },
+			{ type: "assistant_turn_finished", turnId: "t1", content: "Done." },
+			{ type: "idle" },
+		]);
+		expect(turns[0]!.model).toBe("claude-opus-4-8");
+	});
+
+	it("omits model when no status has been observed", () => {
+		const { rec, turns } = recWith();
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{ type: "user_turn_started", turnId: "t1" },
+			{ type: "assistant_turn_finished", turnId: "t1", content: "Done." },
+			{ type: "idle" },
+		]);
+		expect(turns[0]!.model).toBeUndefined();
+	});
+
+	it("records the model in effect at each turn's finalize", () => {
+		const { rec, turns } = recWith();
+		feed(rec, [
+			{ type: "ready", sessionId: "s1", protocol: "0.1.0", haxBaseCommit: "abc" },
+			{
+				type: "status",
+				model: "model-a",
+				provider: "p",
+				protocol: "0.1.0",
+				sessionId: "s1",
+				state: "idle",
+			},
+			{ type: "user_turn_started", turnId: "t1" },
+			{ type: "assistant_turn_finished", turnId: "t1", content: "one" },
+			{ type: "idle" },
+			{
+				type: "status",
+				model: "model-b",
+				provider: "p",
+				protocol: "0.1.0",
+				sessionId: "s1",
+				state: "idle",
+			},
+			{ type: "user_turn_started", turnId: "t2" },
+			{ type: "assistant_turn_finished", turnId: "t2", content: "two" },
+			{ type: "idle" },
+		]);
+		expect(turns.map((t) => t.model)).toEqual(["model-a", "model-b"]);
 	});
 });

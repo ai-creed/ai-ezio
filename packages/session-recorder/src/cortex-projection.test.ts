@@ -12,6 +12,7 @@ describe("renderCortexLines", () => {
 		const turn: RecordedTurn = {
 			ref,
 			index: 0,
+			timestamp: "",
 			userText: "look at foo.ts",
 			assistantText: "Reading it.",
 			toolCalls: [
@@ -42,7 +43,14 @@ describe("renderCortexLines", () => {
 	});
 
 	it("uses the running line counter so turn numbers stay monotonic", () => {
-		const turn: RecordedTurn = { ref, index: 3, userText: "u", assistantText: "a", toolCalls: [] };
+		const turn: RecordedTurn = {
+			ref,
+			index: 3,
+			timestamp: "",
+			userText: "u",
+			assistantText: "a",
+			toolCalls: [],
+		};
 		const [u, a] = renderCortexLines(turn, 6).map((l) => JSON.parse(l));
 		expect(u.turn).toBe(6);
 		expect(a.turn).toBe(7);
@@ -52,6 +60,7 @@ describe("renderCortexLines", () => {
 		const turn: RecordedTurn = {
 			ref,
 			index: 0,
+			timestamp: "",
 			userText: "u",
 			assistantText: "a",
 			toolCalls: [{ name: "noop", input: undefined, status: "ok" }],
@@ -81,6 +90,7 @@ describe.skipIf(!cortexDist || !existsSync(compactPath))(
 			const turn: RecordedTurn = {
 				ref,
 				index: 0,
+				timestamp: "",
 				userText: "analyze the auth module",
 				assistantText: "reading",
 				toolCalls: [{ name: "Read", input: { file_path: "src/auth.ts" }, status: "ok" }],

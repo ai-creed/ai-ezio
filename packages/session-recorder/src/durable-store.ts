@@ -26,6 +26,8 @@ export class JsonlDurableStore implements DurableStore {
 		mkdirSync(dirname(p), { recursive: true });
 		const row = {
 			index: turn.index,
+			timestamp: turn.timestamp,
+			...(turn.model ? { model: turn.model } : {}),
 			userText: turn.userText,
 			assistantText: turn.assistantText,
 			toolCalls: turn.toolCalls,

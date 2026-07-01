@@ -30,10 +30,16 @@ export interface RecordedToolCall {
 export interface RecordedTurn {
 	ref: ConversationRef;
 	index: number;
+	/** ISO-8601 (ms) instant the turn finalized — end of generation. The telemetry
+	 * time-bucket source; assigned in SessionRecorder.finalizeTurn. */
+	timestamp: string;
 	userText: string;
 	assistantText: string;
 	toolCalls: RecordedToolCall[];
 	usage?: TokenUsage;
+	/** Engine-reported model id (the latest status.model), verbatim. Omitted when
+	 * no status has been observed for the session. */
+	model?: string;
 }
 
 export type FlushReason = "debounce" | "everyK" | "new" | "close" | "compact";
