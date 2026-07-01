@@ -7,6 +7,20 @@ All notable changes to ai-ezio are documented here. The format is based on
 Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
 `latest`: `npm i -g @ai-creed/ai-ezio@beta` (or the unscoped `ai-ezio@beta`).
 
+## [0.4.0] — 2026-07-01
+
+### Added
+
+- **Per-turn `timestamp` and `model` on ezio session records** — each
+  `.record.jsonl` row written by `@ai-ezio/session-recorder` now carries an
+  end-of-turn ISO-8601 `timestamp` (minted from an injectable clock, stamped at
+  turn finalize) and the engine-reported `model` (cached from `status` events,
+  omitted when unknown). Downstream telemetry consumers can time-bucket ezio
+  token usage by real turn-completion time and attribute it per model, instead of
+  collapsing a whole conversation onto the file's mtime. The fields are
+  additive — the durable store serializes `timestamp` always and `model` when
+  present — with no hax, protocol, or cortex-projection change.
+
 ## [0.2.0-beta.4] — 2026-06-14
 
 ### Added
