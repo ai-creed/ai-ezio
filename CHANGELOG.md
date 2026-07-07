@@ -21,6 +21,66 @@ Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
   additive — the durable store serializes `timestamp` always and `model` when
   present — with no hax, protocol, or cortex-projection change.
 
+## [0.3.0] — 2026-06-28
+
+### Added
+
+- **`@ai-ezio/subagent` — subagent v0 (delegated-tool dispatch)** — a new
+  package that registers a `subagent` delegated tool and services its calls by
+  spawning a child hax session on a named profile: linear dispatch (spawn child,
+  run task, teardown), cancellation on parent abort, a dispatch timeout, and
+  child sessions that get their own MCP host (`registerDelegatedTools` /
+  `sendToolResult` are forwarded to the child). Profiles come from the
+  `subagents` config section, with defaults seeded from a codex model probe
+  whenever codex is usable; `ai-ezio doctor` surfaces the probe result.
+  Deferred scope is tracked in `docs/backlog/`.
+- **`@ai-ezio/session-hosts` — one factory for the session's host stack** —
+  `loadSessionHosts` builds the `DelegatedToolRegistry` (MCP host + subagent
+  host) for a Session, including the delegated-timeout backstop, so standalone
+  and mounted surfaces wire the same stack the same way.
+- **`DelegatedToolProvider` registry in the harness** — a provider interface +
+  `DelegatedToolRegistry` that owns delegated-tool routing and provider
+  lifecycle. `McpHost` and `SubagentHost` both implement it; the standalone
+  REPL now runs through the registry, and provider init failures are isolated
+  instead of taking the session down.
+- **Per-turn token usage from `Session.submitAndWait`** — the engine-reported
+  usage now propagates out of the harness turn API.
+
+### Security
+
+- Pinned transitive `hono` to `>=4.12.25` via a pnpm override.
+
+## [0.2.0-beta.5] — 2026-06-19
+
+### Added
+
+- **`/resume` + `/rename` slash commands** — switch the live session to a past
+  one (backed by `Session.resume`, which respawns headless hax with
+  `--resume=<id>` under a generation-stamped event pump so a stale child can
+  never corrupt the fresh session) and rename sessions via a title store that
+  the resume picker merges into its listing.
+- **Resume-picker pagination** — 15 sessions per page, `[` / `]` page
+  navigation, Ctrl+A to show all.
+
+### Changed
+
+- **README rewritten end-user-first** — install, provider wiring
+  (codex/OpenAI/OpenRouter/local), setup wizard, and MCP configuration now lead;
+  architecture and build-from-source follow.
+- hax submodule synced to upstream (2026-06-15 sync, base `4868d2c`).
+
+### Fixed
+
+- A resume issued while a turn holds the gate now reports **busy** (recoverable
+  `EngineBusyError`) instead of tearing the session down.
+- Standalone REPL: raw mode is restored after the `/resume` picker closes, the
+  picker receives input in whole chunks (arrow keys work), and the banner
+  re-renders after a resume respawn.
+
+### Security
+
+- Bumped `esbuild` to `^0.28.1` (GHSA-gv7w-rqvm-qjhr).
+
 ## [0.2.0-beta.4] — 2026-06-14
 
 ### Added
