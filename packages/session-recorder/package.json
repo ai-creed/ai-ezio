@@ -1,6 +1,7 @@
 {
 	"name": "@ai-ezio/session-recorder",
 	"version": "0.1.0",
+	"private": true,
 	"description": "ai-ezio session recorder: assemble turns from the protocol stream and feed cortex a Claude-format transcript",
 	"license": "MIT",
 	"type": "module",

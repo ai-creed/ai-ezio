@@ -1,6 +1,7 @@
 {
 	"name": "@ai-ezio/session-hosts",
 	"version": "0.1.0",
+	"private": true,
 	"description": "ai-ezio session host stack: build the delegated-tool registry (MCP + subagent) for a Session",
 	"license": "MIT",
 	"type": "module",

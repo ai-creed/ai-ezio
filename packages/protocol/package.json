@@ -1,6 +1,7 @@
 {
 	"name": "@ai-ezio/protocol",
 	"version": "0.1.0",
+	"private": true,
 	"description": "ai-ezio JSONL machine protocol: schema, codec, transport seam",
 	"license": "MIT",
 	"type": "module",

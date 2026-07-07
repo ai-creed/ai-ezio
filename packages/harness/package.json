@@ -1,6 +1,7 @@
 {
 	"name": "@ai-ezio/harness",
 	"version": "0.1.0",
+	"private": true,
 	"description": "ai-ezio harness: owns the hax child + session/turn lifecycle",
 	"license": "MIT",
 	"type": "module",

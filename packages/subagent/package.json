@@ -1,6 +1,7 @@
 {
 	"name": "@ai-ezio/subagent",
 	"version": "0.1.0",
+	"private": true,
 	"description": "ai-ezio subagent host: delegate a subtask to a child hax session on a different model/provider",
 	"license": "MIT",
 	"type": "module",
