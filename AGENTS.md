@@ -10,9 +10,10 @@ ai-ezio is a **hax-derived, workflow-native coding agent**. It is a **hybrid**:
   submodule under `vendor/hax`. This is the streaming / provider / tool core.
   **Do not reimplement it in TypeScript.**
 - a **TypeScript harness** — everything in `packages/`. The protocol client,
-  mount mode, generic MCP host, mounted-REPL surface, session recorder, skills
-  UX, and the `ai-ezio` CLI. (The ai-whisper adapter is **not** here — it was
-  retired at M5 and lives downstream in the ai-whisper repo.)
+  mount mode, generic MCP host, subagent host, mounted-REPL surface, session
+  recorder, skills UX, and the `ai-ezio` CLI. (The ai-whisper adapter is
+  **not** here — it was retired at M5 and lives downstream in the ai-whisper
+  repo.)
 
 The dividing rule: **engine work is C and lives in hax; product work is TS and
 lives in `packages/`.** When in doubt, push behavior into the TS harness; keep
@@ -37,9 +38,13 @@ ai-ezio/
     protocol/          JSONL schema + codec + transport seam
     harness/           spawn hax, own session/turn lifecycle, compaction, expose protocol
     mcp-host/          generic stdio MCP host (spawn/connect servers, policy, namespacing)
+    subagent/          subagent host: `subagent` delegated tool -> child hax session on a profile
+    session-hosts/     loadSessionHosts factory: delegated-tool registry (MCP + subagent)
     surface/           mounted-REPL rendering (banner, markdown, tool calls, usage)
     session-recorder/  transcript capture
     cli/               `ai-ezio` binary
+  packaging/           per-platform hax binary packages + the unscoped `ai-ezio` alias
+  scripts/             bundle / publish / smoke scripts
 ```
 
 > The ai-whisper adapter is **not** a package here. It was retired at M5 and now
@@ -49,8 +54,10 @@ ai-ezio/
 
 > Current state: shipped and published. `packages/` and the `vendor/hax`
 > submodule are fully wired; ai-ezio is on npm as `ai-ezio` /
-> `@ai-creed/ai-ezio` (`0.2.0-beta.4`), built through M11 (context compaction;
-> generic MCP host + unified terminal at M9) — see `docs/milestones.md`.
+> `@ai-creed/ai-ezio` (current version: see `CHANGELOG.md`), built through M11
+> (context compaction; generic MCP host + unified terminal at M9) plus
+> post-M11 work (subagent v0 delegated dispatch, the session-hosts registry,
+> per-turn transcript telemetry) — see `docs/milestones.md`.
 
 ## Working agreements for agents
 

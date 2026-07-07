@@ -9,7 +9,9 @@ name: Publish
 # stale pin. `ai-ezio@beta` still tracks the same version. Once a STABLE version
 # (no "-") ships, npm sets `latest` on publish and the extra step is a no-op.
 #
-# Release steps: bump the cli + four hax package versions, commit, then
+# Release steps: add a CHANGELOG.md entry, bump the cli + four hax package
+# versions, sync the package lists / current-state note in AGENTS.md and
+# README.md if packages or milestones changed, commit, then
 #   git tag v<version> && git push origin v<version>
 # Requires an `NPM_TOKEN` repo secret (npm automation token) and the public
 # `@ai-creed` scope on npm.

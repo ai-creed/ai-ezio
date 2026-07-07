@@ -269,6 +269,8 @@ ai-ezio (TypeScript monorepo, pnpm)        vendor/hax (C submodule + emitter pat
   packages/protocol         JSONL schema      src/protocol/emit.c  hooks turn on_event()
   packages/harness          spawn + lifecycle  --protocol-fd / --control-fd flags
   packages/mcp-host         generic MCP host   (small, isolated, rebaseable patch)
+  packages/subagent         subagent host (child hax sessions)
+  packages/session-hosts    session host stack (delegated-tool registry)
   packages/surface          REPL rendering
   packages/session-recorder transcript capture
   packages/cli              `ai-ezio` binary
