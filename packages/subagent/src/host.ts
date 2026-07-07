@@ -124,8 +124,9 @@ export class SubagentHost implements DelegatedToolProvider {
 		}
 	}
 
-	async stop(): Promise<void> {
+	stop(): Promise<void> {
 		this.inFlight?.cancel();
 		this.inFlight = undefined;
+		return Promise.resolve();
 	}
 }

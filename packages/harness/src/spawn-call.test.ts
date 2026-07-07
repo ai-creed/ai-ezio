@@ -29,7 +29,7 @@ describe("spawnHax launch layer", () => {
 
 	it("exports HAX_TRANSCRIPT on the real spawn call when transcriptPath is set", () => {
 		spawnMock.mockReturnValue({ stdio: [null, null, null, null, null] });
-		spawnHax({ binary: "/fake/hax", env: {} as NodeJS.ProcessEnv, transcriptPath: "/t/x.txt" });
+		spawnHax({ binary: "/fake/hax", env: {}, transcriptPath: "/t/x.txt" });
 		// `.at(-1)`: the mock is not reset between tests, so read THIS test's call.
 		const [, , opts] = spawnMock.mock.calls.at(-1) as [
 			string,
@@ -41,7 +41,7 @@ describe("spawnHax launch layer", () => {
 
 	it("omits HAX_TRANSCRIPT when no transcriptPath is set", () => {
 		spawnMock.mockReturnValue({ stdio: [null, null, null, null, null] });
-		spawnHax({ binary: "/fake/hax", env: {} as NodeJS.ProcessEnv });
+		spawnHax({ binary: "/fake/hax", env: {} });
 		const [, , opts] = spawnMock.mock.calls.at(-1) as [
 			string,
 			string[],

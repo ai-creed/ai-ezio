@@ -8,11 +8,11 @@ import {
 
 describe("resolvePager", () => {
 	it("uses $PAGER when set and non-empty", () => {
-		expect(resolvePager({ PAGER: "bat -p" } as NodeJS.ProcessEnv)).toBe("bat -p");
+		expect(resolvePager({ PAGER: "bat -p" })).toBe("bat -p");
 	});
 	it("falls back to 'less -R' when unset or blank", () => {
-		expect(resolvePager({} as NodeJS.ProcessEnv)).toBe("less -R");
-		expect(resolvePager({ PAGER: "   " } as NodeJS.ProcessEnv)).toBe("less -R");
+		expect(resolvePager({})).toBe("less -R");
+		expect(resolvePager({ PAGER: "   " })).toBe("less -R");
 	});
 });
 

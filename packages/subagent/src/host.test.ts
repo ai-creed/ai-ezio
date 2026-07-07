@@ -109,7 +109,7 @@ it("dispatches a subagent call and replies with the result", async () => {
 		catalog: catalogFromFixture(),
 		cwd: "/repo",
 		parentEnv: {},
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 	});
@@ -148,7 +148,7 @@ it("reports an elapsed + token-count summary from the child's usage", async () =
 		catalog: catalogFromFixture(),
 		cwd: "/repo",
 		parentEnv: {},
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 		report: (line) => reports.push(line),
@@ -207,7 +207,7 @@ it("omitted profile resolves to the catalog default", async () => {
 		catalog: catalogFromFixture(),
 		cwd: "/repo",
 		parentEnv: {},
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 	});
@@ -281,7 +281,7 @@ it("cancels the in-flight dispatch when the parent turn ends while running", asy
 		catalog: catalogFromFixture(),
 		cwd: "/repo",
 		parentEnv: {},
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 	});
@@ -321,7 +321,7 @@ it("handleToolCall dispatches and replies via the injected reply; observe(idle) 
 		catalog: catalogFromFixture(),
 		cwd: "/repo",
 		parentEnv: {},
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 	});
@@ -353,12 +353,12 @@ it("works behind the registry: a subagent call is routed + replied, never 'unkno
 		catalog: catalogFromFixture(),
 		cwd: "/repo",
 		parentEnv: {},
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 	});
 	const reg = new DelegatedToolRegistry([host]);
-	await reg.start(fx.session as never);
+	await reg.start(fx.session);
 	reg.handleEvent({
 		type: "tool_call_requested",
 		turnId: "t",

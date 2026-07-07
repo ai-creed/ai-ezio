@@ -20,12 +20,8 @@ function fakeEnv(): { env: NodeJS.ProcessEnv; write: (content: string) => void }
 
 describe("configFilePath", () => {
 	it("resolves under XDG_CONFIG_HOME, falling back to ~/.config", () => {
-		expect(configFilePath({ XDG_CONFIG_HOME: "/x" } as NodeJS.ProcessEnv)).toBe(
-			"/x/ai-ezio/config.json",
-		);
-		expect(configFilePath({ HOME: "/home/u" } as NodeJS.ProcessEnv)).toBe(
-			"/home/u/.config/ai-ezio/config.json",
-		);
+		expect(configFilePath({ XDG_CONFIG_HOME: "/x" })).toBe("/x/ai-ezio/config.json");
+		expect(configFilePath({ HOME: "/home/u" })).toBe("/home/u/.config/ai-ezio/config.json");
 	});
 });
 

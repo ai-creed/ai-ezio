@@ -1,12 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Environment } from "./detect.js";
-import {
-	type BackupResult,
-	type InitDeps,
-	parseInitArgs,
-	remediationFor,
-	runInit,
-} from "./init.js";
+import { type InitDeps, parseInitArgs, remediationFor, runInit } from "./init.js";
 
 const absent: Environment = {
 	isTTY: true,
@@ -33,7 +27,7 @@ function deps(env: Environment, over: Partial<InitDeps> = {}): InitDeps {
 		askYesNo: vi.fn(async () => true),
 		installPeer: vi.fn(() => ({ ok: true })),
 		classifyCortex: vi.fn(() => "missing"),
-		backupMalformedMcp: vi.fn(() => ({ ok: true, path: null }) as BackupResult),
+		backupMalformedMcp: vi.fn(() => ({ ok: true, path: null })),
 		applyCortex: vi.fn(() => true),
 		persistBridge: vi.fn(() => ({
 			action: "created" as const,
@@ -151,7 +145,7 @@ describe("runInit gating", () => {
 		const out = vi.fn();
 		const ask = vi.fn(async () => false); // would decline if asked — but it must NOT be asked
 		const applyCortex = vi.fn(() => true);
-		const backupMalformedMcp = vi.fn(() => ({ ok: true, path: "/c/mcp.json.bak" }) as BackupResult);
+		const backupMalformedMcp = vi.fn(() => ({ ok: true, path: "/c/mcp.json.bak" }));
 		const d = deps(present(), {
 			classifyCortex: () => "malformed",
 			backupMalformedMcp,
@@ -175,7 +169,7 @@ describe("runInit gating", () => {
 		// applyCortex returns false (skipped); the backup is a distinct step that succeeded.
 		const d = deps(present(), {
 			classifyCortex: () => "malformed",
-			backupMalformedMcp: vi.fn(() => ({ ok: true, path: "/c/mcp.json.bak" }) as BackupResult),
+			backupMalformedMcp: vi.fn(() => ({ ok: true, path: "/c/mcp.json.bak" })),
 			applyCortex: vi.fn(() => false),
 			out,
 		});
@@ -191,9 +185,7 @@ describe("runInit gating", () => {
 		const applyCortex = vi.fn(() => true);
 		const d = deps(present(), {
 			classifyCortex: () => "malformed",
-			backupMalformedMcp: vi.fn(
-				() => ({ ok: false, error: "EACCES: permission denied" }) as BackupResult,
-			),
+			backupMalformedMcp: vi.fn(() => ({ ok: false, error: "EACCES: permission denied" })),
 			applyCortex,
 			out,
 		});
@@ -212,7 +204,7 @@ describe("runInit gating", () => {
 
 	it("unreadable mcp.json degrades to guidance, skips wiring entirely — no backup/write/false claim (finding 1 §6)", async () => {
 		const out = vi.fn();
-		const backupMalformedMcp = vi.fn(() => ({ ok: true, path: null }) as BackupResult);
+		const backupMalformedMcp = vi.fn(() => ({ ok: true, path: null }));
 		const applyCortex = vi.fn(() => true);
 		const d = deps(present(), {
 			classifyCortex: () => "unreadable",

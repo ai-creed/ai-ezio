@@ -7,7 +7,7 @@ function deps(over: Partial<DetectDeps> = {}): DetectDeps {
 		versionOf: (b) => (b === "ai-cortex" ? "0.14.2" : null),
 		globalList: (m) => (m === "pnpm" ? ["ai-ezio", "ai-whisper"] : []),
 		isTTY: () => true,
-		env: {} as NodeJS.ProcessEnv,
+		env: {},
 		...over,
 	};
 }

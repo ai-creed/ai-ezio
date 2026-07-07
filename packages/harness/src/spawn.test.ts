@@ -24,24 +24,24 @@ describe("haxSpawnEnv (launch-path sets HAX_EXTRA_SKILLS_DIR)", () => {
 
 describe("haxSpawnEnv (transcript mirror)", () => {
 	it("sets HAX_TRANSCRIPT when a transcriptPath is given", () => {
-		const env = haxSpawnEnv({ FOO: "bar" } as NodeJS.ProcessEnv, "/state/transcripts/x.txt");
+		const env = haxSpawnEnv({ FOO: "bar" }, "/state/transcripts/x.txt");
 		expect(env.HAX_TRANSCRIPT).toBe("/state/transcripts/x.txt");
 		expect(env.FOO).toBe("bar"); // base env preserved
 	});
 
 	it("leaves HAX_TRANSCRIPT unset when no path is given", () => {
-		const env = haxSpawnEnv({ FOO: "bar" } as NodeJS.ProcessEnv);
+		const env = haxSpawnEnv({ FOO: "bar" });
 		expect(env.HAX_TRANSCRIPT).toBeUndefined();
 	});
 });
 
 describe("haxSpawnEnv (engine auto-compaction default)", () => {
 	it("off-defaults HAX_COMPACT_AUTO to 0 when the base does not set it", () => {
-		expect(haxSpawnEnv({} as NodeJS.ProcessEnv).HAX_COMPACT_AUTO).toBe("0");
+		expect(haxSpawnEnv({}).HAX_COMPACT_AUTO).toBe("0");
 	});
 
 	it("preserves an explicit HAX_COMPACT_AUTO and never overrides it", () => {
-		expect(haxSpawnEnv({ HAX_COMPACT_AUTO: "1" } as NodeJS.ProcessEnv).HAX_COMPACT_AUTO).toBe("1");
-		expect(haxSpawnEnv({ HAX_COMPACT_AUTO: "0" } as NodeJS.ProcessEnv).HAX_COMPACT_AUTO).toBe("0");
+		expect(haxSpawnEnv({ HAX_COMPACT_AUTO: "1" }).HAX_COMPACT_AUTO).toBe("1");
+		expect(haxSpawnEnv({ HAX_COMPACT_AUTO: "0" }).HAX_COMPACT_AUTO).toBe("0");
 	});
 });

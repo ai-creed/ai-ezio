@@ -49,7 +49,7 @@ describe("runStandaloneRepl", () => {
 		const surface = fakeSurface();
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			write: () => {},
 			slash: fakeSlash(),
 			...surface,
@@ -78,7 +78,7 @@ describe("runStandaloneRepl", () => {
 		};
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			write: () => {},
 			slash: fakeSlash(),
 			...fakeSurface(),
@@ -103,7 +103,7 @@ describe("runStandaloneRepl", () => {
 		const surface = fakeSurface();
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			write: () => {},
 			slash: fakeSlash(() => ({ action: "handled" })),
 			...surface,
@@ -130,7 +130,7 @@ describe("runStandaloneRepl", () => {
 		};
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			write: () => {},
 			slash: fakeSlash(() => ({ action: "exit" })),
 			...fakeSurface(),
@@ -155,7 +155,7 @@ describe("runStandaloneRepl", () => {
 		const surface = fakeSurface();
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			write: () => {},
 			slash: fakeSlash(),
 			...surface,
@@ -181,7 +181,7 @@ describe("runStandaloneRepl", () => {
 		const surface = fakeSurface();
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			write: () => {},
 			slash: fakeSlash(),
 			showTranscript: async () => void shown++,
@@ -207,7 +207,7 @@ describe("runStandaloneRepl", () => {
 		};
 		await runStandaloneRepl({
 			keys: keys(),
-			session: session as never,
+			session: session,
 			compactor: {
 				maybeAutoCompact: async () => {
 					order.push("auto-compact");

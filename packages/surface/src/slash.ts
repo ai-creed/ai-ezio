@@ -329,8 +329,8 @@ export interface ResumeFlowDeps {
 	runOverlay(
 		run: (io: {
 			keys: AsyncIterable<string>;
-			write(s: string): void;
-			setRawMode(on: boolean): void;
+			write: (s: string) => void;
+			setRawMode: (on: boolean) => void;
 		}) => Promise<void>,
 	): Promise<void>;
 	/** Engine respawn + post-respawn re-wiring (per-runtime). Rejects (engine left
@@ -340,7 +340,7 @@ export interface ResumeFlowDeps {
 	 * respawn failure: the old engine is already closed and cannot be revived, so per
 	 * spec §4 we "report and exit cleanly" with no fresh fallback. */
 	onFatal(): void;
-	now(): number;
+	now: () => number;
 }
 
 /** Shared `/resume` orchestration (§3): busy-guard → list+merge → exclude active
@@ -362,7 +362,7 @@ export async function runResumeFlow(deps: ResumeFlowDeps): Promise<void> {
 	let chosen: string | undefined;
 	await deps.runOverlay(async (io) => {
 		chosen = await runResumePicker({
-			listSessions: async () => JSON.stringify(rows), // already parsed+filtered; re-serialize for the picker
+			listSessions: () => Promise.resolve(JSON.stringify(rows)), // already parsed+filtered; re-serialize for the picker
 			keys: io.keys,
 			write: io.write,
 			now: deps.now,

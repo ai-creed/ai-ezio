@@ -21,7 +21,7 @@ function fakeClient(
 					properties: Object.fromEntries((t.props ?? []).map((p) => [p, { type: "string" }])),
 				},
 			})),
-		callTool: async (t, a) => onCall(t, a) as { output: string; status: "ok" | "error" },
+		callTool: async (t, a) => onCall(t, a),
 		close: async () => {},
 	};
 }
@@ -160,10 +160,7 @@ it("returns an error reply when a call exceeds the per-call timeout", async () =
 		callTimeoutMs: 20,
 		servers: [{ name: "cortex", command: "x", args: [] }],
 		connect: async () =>
-			fakeClient(
-				[{ name: "recall_memory", props: ["worktreePath"] }],
-				() => new Promise(() => {}) as Promise<never>,
-			),
+			fakeClient([{ name: "recall_memory", props: ["worktreePath"] }], () => new Promise(() => {})),
 	});
 	await host.init();
 	const { results, reply } = capture();
@@ -253,7 +250,7 @@ it("works behind the registry end to end (single merged registration + owner-onl
 			})),
 	});
 	const reg = new DelegatedToolRegistry([host]);
-	await reg.start(fx.session as never);
+	await reg.start(fx.session);
 	expect((fx.registered[0] as Array<{ name: string }>).map((d) => d.name)).toEqual([
 		"cortex__recall_memory",
 	]);

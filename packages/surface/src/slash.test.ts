@@ -383,7 +383,7 @@ import { runResumeFlow, type ResumeFlowDeps } from "./slash.js";
 function baseCtx(over: Partial<SlashContext> = {}): SlashContext {
 	const out: string[] = [];
 	return {
-		write: (s) => void (out as string[]).push(s),
+		write: (s) => void out.push(s),
 		session: {
 			newConversation: async () => {},
 			status: async () => ({ provider: "p", model: "m" }),

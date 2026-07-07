@@ -193,7 +193,7 @@ export function buildStandaloneKeySources(chunkSource: AsyncIterator<string>): {
 	const borrowChunks = (): AsyncIterable<string> => ({
 		[Symbol.asyncIterator]: () => ({
 			next: () => chunkSource.next(),
-			return: async () => ({ done: true as const, value: undefined }),
+			return: () => Promise.resolve({ done: true as const, value: undefined }),
 		}),
 	});
 	return { replKeys: codePoints(borrowChunks()), borrowChunks };

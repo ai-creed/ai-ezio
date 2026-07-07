@@ -56,7 +56,7 @@ function harness(over: Partial<BridgeDeps> = {}, initialText = "# rc\n") {
 		writeFile: (_p, s) => {
 			profile.text = s;
 		},
-		env: {} as NodeJS.ProcessEnv,
+		env: {},
 		...over,
 	};
 	return { deps, profile };
@@ -76,7 +76,7 @@ describe("persistBridge", () => {
 		expect(profile.text).toBe("export AI_EZIO_HAX_BIN=/my/own\n");
 	});
 	it("a transient process-env value does NOT suppress persistence (finding C)", () => {
-		const { deps, profile } = harness({ env: { AI_EZIO_HAX_BIN: "/tmp/x" } as NodeJS.ProcessEnv });
+		const { deps, profile } = harness({ env: { AI_EZIO_HAX_BIN: "/tmp/x" } });
 		const r = persistBridge(true, deps);
 		expect(r.action).toBe("created");
 		expect(r.transientEnvNote).toContain("temporary");

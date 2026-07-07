@@ -1,0 +1,17 @@
+{
+	"$schema": "https://json.schemastore.org/tsconfig",
+	// Lint-only program: one non-composite compile spanning every package
+	// INCLUDING tests (the per-package builds exclude *.test.ts, so type-aware
+	// ESLint needs its own project). Cross-package imports resolve through the
+	// workspace links to each package's built dist/ — run `pnpm build` first
+	// (CI already builds before linting).
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"composite": false,
+		"declaration": false,
+		"declarationMap": false,
+		"sourceMap": false,
+		"noEmit": true
+	},
+	"include": ["packages/*/src/**/*.ts"]
+}

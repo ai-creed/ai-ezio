@@ -93,7 +93,7 @@ describe("stdinChunks (resume picker → REPL stdin handoff)", () => {
 
 		// Picker selects/cancels → stop consuming. A default `for await` would
 		// destroy the stream here and EOF the REPL that mounts next.
-		await gen.return(undefined as never);
+		await gen.return(undefined);
 		expect(s.destroyed).toBe(false);
 
 		// The next consumer (the REPL) still receives keystrokes.
@@ -119,7 +119,7 @@ describe("mountStdio", () => {
 
 describe("launchEnv (CLI sets HAX_EXTRA_SKILLS_DIR)", () => {
 	it("adds HAX_EXTRA_SKILLS_DIR to the child env", () => {
-		const env = launchEnv({ XDG_CONFIG_HOME: "/xdg" } as NodeJS.ProcessEnv);
+		const env = launchEnv({ XDG_CONFIG_HOME: "/xdg" });
 		expect(env.HAX_EXTRA_SKILLS_DIR).toBe("/xdg/ai-ezio/skills");
 	});
 });

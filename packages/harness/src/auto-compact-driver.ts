@@ -33,7 +33,7 @@ export interface AutoCompactDriver {
 	handleEvent(event: ProtocolEvent): void;
 	/** True while a summarize/compact cycle runs — suppress your own relay/output
 	 * so the injected summarize turn is never delivered or rendered as a reply. */
-	compacting(): boolean;
+	compacting: () => boolean;
 	/** Manual `/compact`: runs regardless of the threshold. */
 	compactNow(): Promise<CompactOutcome>;
 	/** Imperative arming signal, for consumers that drive an await-loop instead

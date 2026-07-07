@@ -119,7 +119,7 @@ describe("doctor compaction diagnostics (M11)", () => {
 describe("doctor subagent diagnostics", () => {
 	it("includes subagent codex-probe notes in the report", () => {
 		const report = buildDoctorReport({
-			version: { ezioVersion: "0", haxBaseCommit: "x" } as never,
+			version: { ezioVersion: "0", haxBaseCommit: "x" },
 			hax: { ok: true, path: "/hax", source: "env", attempts: [] } as never,
 			dirs: [],
 			dirExists: () => false,

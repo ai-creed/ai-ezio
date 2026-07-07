@@ -103,8 +103,8 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 		const keyReturn = vi.fn(async () => ({ done: true as const, value: undefined }));
 		const chunkSource = { return: keyReturn } as unknown as AsyncGenerator<string>;
 		const deps = buildStandaloneResumeDeps({
-			session: fakeSession as never,
-			registry: fakeRegistry as never,
+			session: fakeSession,
+			registry: fakeRegistry,
 			titleStore: store,
 			rename,
 			chunkSource,
@@ -157,8 +157,8 @@ describe("standalone wiring: buildStandaloneResumeDeps (production resume path)"
 			stop: async () => {},
 		};
 		const deps = buildStandaloneResumeDeps({
-			session: session as never,
-			registry: registry as never,
+			session: session,
+			registry: registry,
 			titleStore: store,
 			rename,
 			chunkSource: {
@@ -189,7 +189,7 @@ describe("makeStandaloneOnEvent / makeOneShotOnEvent (onEvent tee fan-out)", () 
 			callId: "c",
 			name: "subagent",
 			args: {},
-		} as ProtocolEvent);
+		});
 		expect(seen).toContain("registry:tool_call_requested"); // FAILS if the tee omits registry.handleEvent
 		expect(seen).toContain("recorder:tool_call_requested");
 	});
@@ -200,7 +200,7 @@ describe("makeStandaloneOnEvent / makeOneShotOnEvent (onEvent tee fan-out)", () 
 			registry: { handleEvent: (e: ProtocolEvent) => seen.push(`registry:${e.type}`) },
 			recorder: { handleEvent: (e: ProtocolEvent) => seen.push(`recorder:${e.type}`) },
 		});
-		onEvent({ type: "idle" } as ProtocolEvent);
+		onEvent({ type: "idle" });
 		expect(seen).toEqual(["recorder:idle", "registry:idle"]);
 	});
 });
@@ -334,7 +334,7 @@ describe("startWithTranscript (pre-spawn ordering)", () => {
 					startedWith = o;
 					return {} as never;
 				},
-			} as never,
+			},
 			{
 				stateDir: "/state",
 				repoKey: "repo-x",
@@ -357,7 +357,7 @@ describe("startWithTranscript (pre-spawn ordering)", () => {
 					startedWith = o;
 					return {} as never;
 				},
-			} as never,
+			},
 			{
 				stateDir: "/s",
 				repoKey: "r",

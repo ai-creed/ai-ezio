@@ -82,7 +82,7 @@ describe.runIf(Boolean(HAX))("Session e2e over inherited fds (mock provider)", (
 		const session = new Session({ onEvent: (e) => events.push(e) });
 		await session.start({ binary: HAX, env: { ...baseEnv, HAX_MOCK_SCRIPT: script } });
 
-		session.submit("go");
+		await session.submit("go");
 		await session.waitForEvent("assistant_turn_started");
 		const t0 = Date.now();
 		session.interrupt();

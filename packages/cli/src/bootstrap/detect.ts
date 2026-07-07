@@ -30,7 +30,8 @@ const PKG: Record<PeerName, string> = { cortex: "ai-cortex", whisper: "ai-whispe
  * handle both shapes, else []. (init-cli wires execFileSync to this.) */
 export function parseGlobalList(jsonText: string): string[] {
 	try {
-		const parsed = JSON.parse(jsonText);
+		type ListEntry = { dependencies?: Record<string, unknown> } | null;
+		const parsed = JSON.parse(jsonText) as ListEntry | ListEntry[];
 		const entries = Array.isArray(parsed) ? parsed : [parsed];
 		const names = new Set<string>();
 		for (const e of entries) for (const k of Object.keys(e?.dependencies ?? {})) names.add(k);

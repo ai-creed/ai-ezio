@@ -145,7 +145,7 @@ export function renderMarkdown(md: string, opts?: { width?: number }): string {
 
 	let out: string;
 	try {
-		out = marked.parse(md, { async: false }) as string;
+		out = marked.parse(md, { async: false });
 	} catch {
 		// Robust by construction: never throw on malformed input.
 		return md;

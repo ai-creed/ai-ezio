@@ -257,7 +257,7 @@ describe("SessionRecorder trigger policy", () => {
 		vi.useRealTimers();
 	});
 
-	it("flushes and rotates the conversation id on new_conversation", () => {
+	it("flushes and rotates the conversation id on new_conversation", async () => {
 		const flush = vi.fn();
 		const rec = new SessionRecorder({
 			worktreePath: "/repo",
@@ -272,7 +272,7 @@ describe("SessionRecorder trigger policy", () => {
 			"new",
 		);
 		oneTurn(rec, 2);
-		rec.close();
+		await rec.close();
 		expect(flush).toHaveBeenLastCalledWith(
 			{ sessionId: "s1", conversationId: "s1-1", worktreePath: "/repo" },
 			"close",

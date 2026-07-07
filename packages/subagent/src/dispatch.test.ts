@@ -43,7 +43,7 @@ it("missing required key -> error result, no child spawned", async () => {
 		parentEnv: {},
 		timeoutMs: 1000,
 		makeSession: makeSession as never,
-		makeMcpHost: fakeMcp as never,
+		makeMcpHost: fakeMcp,
 	});
 	const r = await handle.promise;
 	expect(r.status).toBe("error");

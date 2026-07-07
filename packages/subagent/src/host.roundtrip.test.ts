@@ -30,7 +30,7 @@ it("services a parent delegated subagent call over a real Session", async () => 
 		catalog,
 		cwd: process.cwd(),
 		parentEnv: process.env,
-		dispatch: dispatch as never,
+		dispatch: dispatch,
 		makeSession: (() => ({})) as never,
 		makeMcpHost: (() => ({})) as never,
 	});

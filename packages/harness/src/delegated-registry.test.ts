@@ -59,7 +59,7 @@ describe("DelegatedToolRegistry", () => {
 		const mcp = fakeProvider("mcp", ["a__x"]);
 		const sub = fakeProvider("subagent", ["subagent"]);
 		const reg = new DelegatedToolRegistry([mcp, sub]);
-		await reg.start(fx.session as never);
+		await reg.start(fx.session);
 		expect(fx.registered.length).toBe(1); // one merged call
 		expect(fx.registered[0]!.map((d) => d.name).sort()).toEqual(["a__x", "subagent"]);
 
@@ -80,7 +80,7 @@ describe("DelegatedToolRegistry", () => {
 		const mcp = fakeProvider("mcp", ["a__x"]);
 		const sub = fakeProvider("subagent", ["subagent"]);
 		const reg = new DelegatedToolRegistry([mcp, sub]);
-		await reg.start(fx.session as never);
+		await reg.start(fx.session);
 		reg.handleEvent({ type: "idle" });
 		expect(mcp.observed).toEqual(["idle"]);
 		expect(sub.observed).toEqual(["idle"]);
@@ -92,7 +92,7 @@ describe("DelegatedToolRegistry", () => {
 		const a = fakeProvider("a", ["dup"]);
 		const b = fakeProvider("b", ["dup"]);
 		const reg = new DelegatedToolRegistry([a, b], warn);
-		await reg.start(fx.session as never);
+		await reg.start(fx.session);
 		expect(fx.registered[0]!.map((d) => d.name)).toEqual(["dup"]); // only one
 		expect(warn).toHaveBeenCalledWith(expect.stringMatching(/dup.*collides/));
 		reg.handleEvent({
@@ -135,10 +135,10 @@ describe("DelegatedToolRegistry", () => {
 			handleToolCall: (e, reply) => reply(e.callId, "ok", "ok"),
 		};
 		const reg = new DelegatedToolRegistry([p]);
-		await reg.start(fx.session as never);
+		await reg.start(fx.session);
 		expect(fx.registered[0]!.map((d) => d.name)).toEqual(["a__x", "a__y"]);
 		names = ["a__x"]; // a__y removed on the next (resume) start
-		await reg.start(fx.session as never);
+		await reg.start(fx.session);
 		expect(fx.registered[1]!.map((d) => d.name)).toEqual(["a__x"]);
 		reg.handleEvent({
 			type: "tool_call_requested",
@@ -155,7 +155,7 @@ describe("DelegatedToolRegistry", () => {
 		const a = fakeProvider("a", ["a__x"]);
 		const b = fakeProvider("b", ["b__y"]);
 		const reg = new DelegatedToolRegistry([a, b]);
-		await reg.start(fx.session as never);
+		await reg.start(fx.session);
 		await reg.stop();
 		expect(a.stopped).toBe(true);
 		expect(b.stopped).toBe(true);

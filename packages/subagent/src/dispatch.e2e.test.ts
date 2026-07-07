@@ -25,7 +25,7 @@ maybe(
 			parentEnv: { ...process.env, HAX_PROVIDER: "mock" },
 			timeoutMs: 30_000,
 			makeSession: (onEvent) => {
-				const s = new Session({ onEvent: onEvent as never });
+				const s = new Session({ onEvent: onEvent });
 				return {
 					start: (o) => s.start(o),
 					submitAndWait: (t) => s.submitAndWait(t),

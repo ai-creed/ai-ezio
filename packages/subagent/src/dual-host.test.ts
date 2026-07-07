@@ -38,7 +38,7 @@ it("registry routes a subagent call to the subagent host (MCP host never replies
 		makeMcpHost: (() => ({})) as never,
 	});
 	const reg = new DelegatedToolRegistry([mcp, subagentHost]);
-	await reg.start(session as never);
+	await reg.start(session);
 	reg.handleEvent({
 		type: "tool_call_requested",
 		turnId: "t",
