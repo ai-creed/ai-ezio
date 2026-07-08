@@ -19,7 +19,9 @@ jobs:
     steps:
       # No submodules / no hax C build: the harness's hax-dependent e2e tests are
       # gated with `describe.runIf(Boolean(HAX))`, so they skip when the engine
-      # binary is absent. The rest of the TS suite runs self-contained.
+      # binary is absent. The rest of the TS suite runs self-contained. The
+      # engine-backed run of the full suite (e2e specs included) happens in
+      # binaries.yml on every branch push, and in publish.yml on release tags.
       - uses: actions/checkout@v6
 
       - name: Install pnpm

@@ -5,6 +5,11 @@ on:
   push:
     branches: ["**"]
   workflow_dispatch:
+# Cancel an in-flight matrix when a newer commit lands on the same ref — four
+# native runners per push is too expensive to let stale runs finish.
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     strategy:
@@ -33,9 +38,18 @@ jobs:
           fi
       - name: Build hax for this target
         run: meson setup vendor/hax/build vendor/hax && meson compile -C vendor/hax/build
+      - name: Engine test suite
+        run: meson test -C vendor/hax/build --print-errorlogs
       - name: Stage binary into its platform package
         run: node scripts/stage-host-binary.mjs   # writes packaging/hax-${{ matrix.target }}/bin/hax
       - run: pnpm install && pnpm --filter ai-ezio build
+      # ci.yml runs the suite WITHOUT the engine (the runIf(HAX) e2e specs skip
+      # there); this is the only place the protocol/session/compaction/subagent
+      # e2e specs run in CI, so they must run on every branch push.
+      - name: Full TS suite against the built engine (e2e specs included)
+        run: pnpm build && pnpm test
+        env:
+          AI_EZIO_HAX_BIN: ${{ github.workspace }}/vendor/hax/build/hax
       - name: Single-package install smoke on this target
         run: node scripts/smoke-install.mjs
       - uses: actions/upload-artifact@v7
