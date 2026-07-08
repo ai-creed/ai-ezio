@@ -10,6 +10,10 @@ PTY input must yield identical bytes; the mock provider answers instantly so the
 time-based busy spinner never arms.
 
 Usage: repl-regression.py <baseline-hax> <patched-hax>
+
+Intentionally Python (unlike the sibling .mjs scripts): the byte-for-byte
+capture needs a real PTY, which is stdlib here (`pty`/`termios`) but a native
+dependency (node-pty) in Node.
 """
 import os
 import pty

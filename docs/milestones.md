@@ -192,6 +192,21 @@ the protocol; native behavior unchanged when no tools are registered. **Met.**
 (Mounted-mode adapter wiring — one `loadMcpHost` call — lands in the ai-whisper
 `adapter-ai-ezio`.)
 
+## Post-M11 (shipped after the milestone plan)
+
+The M1–M11 plan above is complete. Later work is tracked release-by-release in
+`CHANGELOG.md` and, for deferred scope, in `docs/backlog/`. Shipped so far:
+
+- **Subagent v0** (`@ai-ezio/subagent`, 0.3.0) — a `subagent` delegated tool
+  serviced by spawning a child hax session on a named profile (codex-probed
+  default profiles, cancel on parent abort, dispatch timeout). Deferred scope:
+  `docs/backlog/2026-06-27-ezio-subagent-v1-backlog.md`.
+- **Session host stack** (`@ai-ezio/session-hosts`, 0.3.0) — `loadSessionHosts`
+  builds the delegated-tool registry (MCP host + subagent host) for a Session,
+  one factory across both run modes.
+- **Per-turn telemetry** (0.4.0) — ISO timestamp + engine-reported model on
+  every `.record.jsonl` row.
+
 ## Open study questions (carried from the plan)
 
 - How much hax core (if any) needs splitting for clean protocol hooks beyond the
