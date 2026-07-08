@@ -44,6 +44,18 @@ describe("TurnGate", () => {
 		expect(log).toEqual(["two", "three"]);
 	});
 
+	it("release is idempotent: a double release cannot corrupt held for a later holder", async () => {
+		const gate = new TurnGate();
+		const r1 = await gate.acquire();
+		r1();
+		r1(); // second call must be a no-op
+		expect(gate.held).toBe(false);
+		const r2 = await gate.acquire();
+		expect(gate.held).toBe(true); // would be false if the double release double-decremented
+		r2();
+		expect(gate.held).toBe(false);
+	});
+
 	it("a held gate blocks until released", async () => {
 		const gate = new TurnGate();
 		const r1 = await gate.acquire();

@@ -371,6 +371,10 @@ export class Session {
 				turnError = new TurnError(e.message, e.turnId); // keep draining to idle
 			} else if (e.type === "idle") {
 				if (turnError) throw turnError;
+				// Deliberate: an interrupted turn settles at idle WITHOUT ever
+				// producing assistant_turn_finished (see docs/protocol.md), so an
+				// empty handback — not a throw — is the correct outcome: the turn
+				// ended cleanly, there is just no content to hand back.
 				return result ?? { turnId: "", content: "" };
 			}
 		}

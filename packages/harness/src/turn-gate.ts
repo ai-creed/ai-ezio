@@ -13,12 +13,18 @@ export class TurnGate {
 		return this.heldCount > 0;
 	}
 
-	/** Resolves with a release function once every earlier acquirer released. */
+	/** Resolves with a release function once every earlier acquirer released.
+	 * The release is idempotent: calling it twice must not double-decrement
+	 * `heldCount` (a corrupted count would report `held === false` while a
+	 * later acquirer still holds the gate). */
 	acquire(): Promise<() => void> {
 		this.heldCount += 1;
 		let release!: () => void;
 		const held = new Promise<void>((r) => {
+			let released = false;
 			release = () => {
+				if (released) return;
+				released = true;
 				this.heldCount -= 1;
 				r();
 			};
