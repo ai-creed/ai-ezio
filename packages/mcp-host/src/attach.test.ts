@@ -41,6 +41,36 @@ it("builds a no-op host (no servers) when config is empty", async () => {
 	expect(registered).toEqual([]);
 });
 
+it("forwards config-level injectArgs to the host", async () => {
+	let seen: Record<string, unknown> = {};
+	const client: McpClient = {
+		listTools: async () => [
+			{
+				name: "read",
+				description: "",
+				parametersSchema: { type: "object", properties: { path: { type: "string" } } },
+			},
+		],
+		callTool: async (_t, a) => {
+			seen = a;
+			return { output: "", status: "ok" };
+		},
+		close: async () => {},
+	};
+	const host = createMcpHost(
+		{
+			servers: [{ name: "fs", command: "x", args: [] }],
+			toolPolicy: {},
+			hostPrivateTools: [],
+			injectArgs: [],
+		},
+		{ mode: "mounted", cwd: "/repo", connect: async () => client },
+	);
+	await host.init();
+	await host.callHostTool("fs__read", { path: "/keep" });
+	expect(seen.path).toBe("/keep"); // config disabled injection entirely
+});
+
 describe("createMcpHost host-private default", () => {
 	it("keeps cortex__capture_session OUT of the delegated set by default", async () => {
 		const registered: DelegatedToolDef[][] = [];

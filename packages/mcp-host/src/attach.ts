@@ -22,6 +22,7 @@ export function createMcpHost(cfg: HostConfig, opts: CreateHostOptions): McpHost
 		servers: cfg.servers,
 		toolPolicy: cfg.toolPolicy,
 		hostPrivateTools: [...new Set([...DEFAULT_HOST_PRIVATE, ...cfg.hostPrivateTools])],
+		injectArgs: cfg.injectArgs,
 		confirm: opts.confirm,
 		connect: opts.connect,
 	});

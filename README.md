@@ -211,7 +211,8 @@ ezio is a **generic MCP host**. Register servers in
 ```json
 {
   "mcpServers": {
-    "cortex": { "command": "ai-cortex", "args": ["mcp"] }
+    "cortex": { "command": "ai-cortex", "args": ["mcp"] },
+    "fs": { "command": "mcp-server-filesystem", "injectArgs": [] }
   },
   "toolPolicy": {
     "cortex__purge_memory": "deny",
@@ -222,12 +223,20 @@ ezio is a **generic MCP host**. Register servers in
 }
 ```
 
-- **`mcpServers`** — each entry is `{ command, args, env? }`, spawned over stdio.
+- **`mcpServers`** — each entry is `{ command, args, env?, injectArgs? }`,
+  spawned over stdio.
 - **`toolPolicy`** — per-tool permission keyed by the namespaced tool name:
   `"allow"`, `"deny"`, or `"confirm"` (prompt the human). In mounted mode, where
   there's no human to ask, `"confirm"` is treated as `"deny"`.
 - **`hostPrivateTools`** — tools hidden from the model but still callable by the
   harness itself.
+- **`injectArgs`** — repo-root argument names the host forces to the session's
+  working directory on every call (drift-proof: a model-supplied value never
+  wins). The default is `["worktreePath", "path"]` — the ai-* convention — and
+  only applies to arguments a tool's own schema declares. For a generic server
+  whose `path` argument means something else (e.g. a filesystem server's
+  file-to-read), opt that server out with a per-server `"injectArgs": []`, or
+  set a top-level `"injectArgs"` to change the default for all servers.
 
 Tools are namespaced `<server>__<tool>` to avoid collisions across servers. A
 few destructive ai-cortex tools (`purge_memory`, `trash_memory`,
@@ -290,6 +299,10 @@ are documented in [`UPSTREAM.md`](./UPSTREAM.md).
 ## Build from source
 
 For working on ezio itself (npm users don't need any of this):
+
+> Note: `vendor/hax` points at the **private** `ai-creed/hax` fork, so building
+> from source currently requires repo access — it is a maintainer path. npm
+> installs ship the prebuilt engine and need none of this.
 
 ```sh
 # System dependencies for the hax engine

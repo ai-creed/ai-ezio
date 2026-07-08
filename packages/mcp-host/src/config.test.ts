@@ -17,6 +17,21 @@ describe("config", () => {
 	it("returns empty config for missing/blank input", () => {
 		expect(parseConfig(undefined).servers).toEqual([]);
 	});
+	it("parses global + per-server injectArgs (absent stays undefined)", () => {
+		const cfg = parseConfig(
+			JSON.stringify({
+				mcpServers: {
+					fs: { command: "mcp-fs", injectArgs: [] },
+					cortex: { command: "ai-cortex" },
+				},
+				injectArgs: ["worktreePath"],
+			}),
+		);
+		expect(cfg.injectArgs).toEqual(["worktreePath"]);
+		expect(cfg.servers.find((s) => s.name === "fs")?.injectArgs).toEqual([]);
+		expect(cfg.servers.find((s) => s.name === "cortex")?.injectArgs).toBeUndefined();
+		expect(parseConfig(undefined).injectArgs).toBeUndefined();
+	});
 	it("derives path from XDG_CONFIG_HOME or HOME", () => {
 		expect(configPath({ XDG_CONFIG_HOME: "/x" })).toBe("/x/ai-ezio/mcp.json");
 		expect(configPath({ HOME: "/home/u" })).toBe("/home/u/.config/ai-ezio/mcp.json");

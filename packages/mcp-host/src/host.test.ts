@@ -117,6 +117,52 @@ it("does NOT add an injected arg the tool's schema lacks", async () => {
 	expect("path" in seen).toBe(false);
 });
 
+it("per-server injectArgs: [] disables injection; unset servers keep the default", async () => {
+	const seen: Record<string, Record<string, unknown>> = {};
+	const host = new McpHost({
+		mode: "mounted",
+		cwd: "/repo",
+		toolPolicy: {},
+		servers: [
+			{ name: "fs", command: "x", args: [], injectArgs: [] },
+			{ name: "cortex", command: "x", args: [] },
+		],
+		connect: async (server) =>
+			fakeClient([{ name: "read", props: ["path"] }], (_t, a) => {
+				seen[server.name] = a;
+				return { output: "ok", status: "ok" };
+			}),
+	});
+	await host.init();
+	await host.handleToolCall(call("fs__read", { path: "/data/file.txt" }), capture().reply);
+	await host.handleToolCall(call("cortex__read", { path: "/evil" }), capture().reply);
+	expect(seen.fs?.path).toBe("/data/file.txt"); // untouched: injection disabled for this server
+	expect(seen.cortex?.path).toBe("/repo"); // ai-* convention still applies
+});
+
+it("a global injectArgs option replaces the built-in default", async () => {
+	let seen: Record<string, unknown> = {};
+	const host = new McpHost({
+		mode: "mounted",
+		cwd: "/repo",
+		toolPolicy: {},
+		injectArgs: ["worktreePath"],
+		servers: [{ name: "stub", command: "x", args: [] }],
+		connect: async () =>
+			fakeClient([{ name: "read", props: ["path", "worktreePath"] }], (_t, a) => {
+				seen = a;
+				return { output: "ok", status: "ok" };
+			}),
+	});
+	await host.init();
+	await host.handleToolCall(
+		call("stub__read", { path: "/keep", worktreePath: "/evil" }),
+		capture().reply,
+	);
+	expect(seen.path).toBe("/keep"); // "path" no longer in the inject list
+	expect(seen.worktreePath).toBe("/repo");
+});
+
 it("denies a policy-blocked tool without calling the server", async () => {
 	const onCall = vi.fn(() => ({ output: "x", status: "ok" as const }));
 	const host = new McpHost({

@@ -9,12 +9,18 @@ export interface ServerConfig {
 	command: string;
 	args: string[];
 	env?: Record<string, string>;
+	/** Per-server override of the repo-root args forced to cwd ([] disables
+	 * injection for this server entirely). Unset → the global/default list. */
+	injectArgs?: string[];
 }
 
 export interface HostConfig {
 	servers: ServerConfig[];
 	toolPolicy: Record<string, ToolPolicy>;
 	hostPrivateTools: string[];
+	/** Global override of the repo-root args forced to cwd. Unset → the host's
+	 * built-in ai-* default (worktreePath/path). */
+	injectArgs?: string[];
 }
 
 /** `${XDG_CONFIG_HOME:-$HOME/.config}/ai-ezio/mcp.json` — matches the skills-dir convention. */
@@ -26,20 +32,26 @@ export function configPath(env: NodeJS.ProcessEnv = process.env): string {
 export function parseConfig(text: string | undefined): HostConfig {
 	if (!text || !text.trim()) return { servers: [], toolPolicy: {}, hostPrivateTools: [] };
 	const raw = JSON.parse(text) as {
-		mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
+		mcpServers?: Record<
+			string,
+			{ command: string; args?: string[]; env?: Record<string, string>; injectArgs?: string[] }
+		>;
 		toolPolicy?: Record<string, ToolPolicy>;
 		hostPrivateTools?: string[];
+		injectArgs?: string[];
 	};
 	const servers: ServerConfig[] = Object.entries(raw.mcpServers ?? {}).map(([name, s]) => ({
 		name,
 		command: s.command,
 		args: s.args ?? [],
 		env: s.env,
+		injectArgs: s.injectArgs,
 	}));
 	return {
 		servers,
 		toolPolicy: raw.toolPolicy ?? {},
 		hostPrivateTools: raw.hostPrivateTools ?? [],
+		injectArgs: raw.injectArgs,
 	};
 }
 

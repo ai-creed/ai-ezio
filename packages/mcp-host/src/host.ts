@@ -14,8 +14,12 @@ export interface McpHostOptions {
 	cwd: string;
 	servers: ServerConfig[];
 	toolPolicy: Record<string, ToolPolicy>;
-	/** Repo-root arg names forced to cwd (default ["worktreePath","path"] — the
-	 * ai-* convention). Drift-proof: overrides model-supplied values. */
+	/** Repo-root arg names forced to cwd (default DEFAULT_INJECT_ARGS — the ai-*
+	 * convention). Drift-proof: overrides model-supplied values. A server's own
+	 * `ServerConfig.injectArgs` wins over this; [] disables injection. NOTE the
+	 * default deliberately includes "path": cortex rehydration (callHostTool with
+	 * `{}`) relies on the host filling it. Generic servers whose `path` means
+	 * something else must opt out per server. */
 	injectArgs?: string[];
 	/** Namespaced tool names that must NOT be advertised to the model (excluded from
 	 * registerDelegatedTools) but remain callable by the harness via callHostTool.
@@ -31,15 +35,21 @@ export interface McpHostOptions {
 	confirm?: (name: string) => Promise<boolean>;
 }
 
+/** The ai-* convention: repo-root argument names the host forces to cwd. */
+export const DEFAULT_INJECT_ARGS = ["worktreePath", "path"];
+
 export class McpHost implements DelegatedToolProvider {
 	readonly id = "mcp";
 	private routes = new RouteMap(); // reassignable for idempotent init()
 	private readonly clients = new Map<string, McpClient>();
+	private readonly serversByName: Map<string, ServerConfig>;
 	/** Namespaced name → def (for schema-aware cwd injection). */
 	private readonly defsByName = new Map<string, DelegatedToolDef>();
 	private advertised: DelegatedToolDef[] = [];
 
-	constructor(private readonly opts: McpHostOptions) {}
+	constructor(private readonly opts: McpHostOptions) {
+		this.serversByName = new Map(opts.servers.map((s) => [s.name, s]));
+	}
 
 	/** Connect servers + list tools, building the route map and advertised defs.
 	 * Idempotent: tears down any prior connection state before reconnecting, so a
@@ -128,16 +138,22 @@ export class McpHost implements DelegatedToolProvider {
 		);
 	}
 
-	/** Force repo-root args (worktreePath/path) to the session cwd. Overrides any
-	 * model-supplied value (drift-proof) AND fills when omitted — but ONLY for args
-	 * the tool's own schema declares, so we never add a property the server would
-	 * reject and never clobber an unrelated `path`. */
+	/** Force repo-root args (worktreePath/path by default) to the session cwd.
+	 * Overrides any model-supplied value (drift-proof) AND fills when omitted —
+	 * but ONLY for args the tool's own schema declares, so we never add a
+	 * property the server would reject. The list resolves per server:
+	 * `ServerConfig.injectArgs` ?? the host-level option ?? the ai-* default
+	 * ([] at either level disables injection). */
 	private injectCwd(name: string, args: Record<string, unknown>): Record<string, unknown> {
 		const schema = this.defsByName.get(name)?.parametersSchema as
 			| { properties?: Record<string, unknown> }
 			| undefined;
 		const props = schema?.properties ?? {};
-		const injectArgs = this.opts.injectArgs ?? ["worktreePath", "path"];
+		const server = this.routes.resolve(name)?.server;
+		const injectArgs =
+			(server !== undefined ? this.serversByName.get(server)?.injectArgs : undefined) ??
+			this.opts.injectArgs ??
+			DEFAULT_INJECT_ARGS;
 		const out = { ...args };
 		for (const arg of injectArgs) if (arg in props) out[arg] = this.opts.cwd;
 		return out;
