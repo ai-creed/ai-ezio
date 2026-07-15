@@ -39,7 +39,14 @@ jobs:
       - name: Build hax for this target
         run: meson setup vendor/hax/build vendor/hax && meson compile -C vendor/hax/build
       - name: Engine test suite
-        run: meson test -C vendor/hax/build --print-errorlogs
+        # Retry once: upstream's tools/bash suite has a rare kill-race flake on
+        # loaded runners (EOF-collapse SIGKILL vs. clean child exit recorded as
+        # "[signal 9]", seen on linux-arm64 2026-07-15; upstream is actively
+        # fixing this family, e.g. hax 74ab9e9). A deterministic regression
+        # still fails both passes; drop the retry once upstream's fix lands.
+        run: >
+          meson test -C vendor/hax/build --print-errorlogs ||
+          meson test -C vendor/hax/build --print-errorlogs
       - name: Stage binary into its platform package
         run: node scripts/stage-host-binary.mjs   # writes packaging/hax-${{ matrix.target }}/bin/hax
       - run: pnpm install && pnpm --filter ai-ezio build
