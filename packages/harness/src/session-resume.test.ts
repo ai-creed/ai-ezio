@@ -191,7 +191,9 @@ function listSessions(
 		});
 		c.stdout?.on("data", (d: Buffer) => void (out += d.toString("utf8")));
 		c.on("error", () => resolve([]));
-		c.on("exit", () => {
+		// "close", not "exit": exit can fire while stdout chunks are still in
+		// flight, and parsing the truncated JSON would drop rows silently.
+		c.on("close", () => {
 			try {
 				resolve(JSON.parse(out));
 			} catch {
