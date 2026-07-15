@@ -7,6 +7,26 @@ All notable changes to ai-ezio are documented here. The format is based on
 Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
 `latest`: `npm i -g @ai-creed/ai-ezio@beta` (or the unscoped `ai-ezio@beta`).
 
+## [0.4.1] — 2026-07-15
+
+### Changed
+
+- **Engine sync (hax fork rebased onto upstream `74ab9e9`, 2026-07-15)** —
+  brings upstream's per-request cost accounting with tier pricing and
+  transcript usage footers, the `reasoning_effort` → `effort` setting rename,
+  native subagent presets and per-run selection CLI flags
+  (`--provider/--model/--effort/--preset`), the unified busy spinner, and
+  `/session` stats with turn timing. Downstream seams were re-anchored where
+  upstream's API drifted (M7 per-turn usage staging, `compact_context_limit`
+  signature); the fork's non-UTF-8 bash-test fix was dropped — upstream adopted
+  the identical `\377` octal fix independently. Protocol surface is unchanged.
+
+### Fixed
+
+- **Flaky session-resume test** — the `--list-sessions` test helper parsed the
+  child's stdout on `exit`, which can fire while chunks are still in flight;
+  truncated JSON silently read as “no sessions.” It now parses on `close`.
+
 ## [0.4.0] — 2026-07-01
 
 ### Added
