@@ -53,9 +53,11 @@ describe("createSpinnerModel", () => {
 	it("never flashes a short tool burst's label", () => {
 		let m = turnStart(0, createSpinnerModel({ utf8: true }));
 		m = toolStart(3000, m, "read"); // thinking settled first
-		m = toolEnd(3300, m); // 300ms read burst
-		// During and right after the burst: still the settled "thinking…".
+		// WHILE the burst is live (tool state active, 100ms in): still the
+		// settled "thinking…" — a flash here is the regression this guards.
 		expect(m.frame(3100, 0, 80)).toBe("⠋ thinking…");
+		m = toolEnd(3300, m); // 300ms read burst ends
+		// Right after the burst: still "thinking…".
 		expect(m.frame(3400, 0, 80)).toBe("⠋ thinking…");
 	});
 
