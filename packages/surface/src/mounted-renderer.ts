@@ -1,11 +1,11 @@
 /**
  * Mounted ezio pane renderer. Owns ALL presentation for a mounted ezio session —
- * banner, thinking spinner, markdown (at turn end), tool calls (invocation +
- * output preview + colored diffs), usage line, prompt, errors — driven entirely
- * by protocol events (engine stays protocol-native; no PTY, no scraping). Pure
- * unit: feed it events via `handle()`, it writes ANSI to stdout. Timer + UTF-8
- * detection are injectable seams so spinner idle-safety and the prompt fallback
- * are deterministically testable.
+ * banner, turn-long tool-aware spinner, markdown (at turn end), tool calls
+ * (invocation + output preview + colored diffs), duration-led stats line, prompt,
+ * errors — driven entirely by protocol events (engine stays protocol-native; no
+ * PTY, no scraping). Pure unit: feed it events via `handle()`, it writes ANSI to
+ * stdout. Timer + UTF-8 detection are injectable seams so spinner idle-safety
+ * and the prompt fallback are deterministically testable.
  */
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import stringWidth from "string-width";

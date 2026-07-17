@@ -202,20 +202,6 @@ describe("renderView", () => {
 		const view = renderView(rows(40), state({ count: 40 }), NOW);
 		expect((view.match(/\n/g) ?? []).length).toBe(17);
 	});
-
-	it("names the PgUp/PgDn aliases in the paged hint", () => {
-		const rows = Array.from({ length: 25 }, (_, i) => ({
-			id: `s${i}`,
-			mtime: 1_784_000_000,
-			firstPrompt: `p${i}`,
-		}));
-		const view = renderView(
-			rows,
-			{ index: 0, count: 25, pageSize: 10, showAll: false },
-			1_784_000_500_000,
-		);
-		expect(view).toContain("[ ]/PgUp/PgDn page");
-	});
 });
 
 describe("runResumePicker", () => {

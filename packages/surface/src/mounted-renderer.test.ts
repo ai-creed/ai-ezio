@@ -348,15 +348,13 @@ describe("createMountedRenderer", () => {
 	});
 });
 
-// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 const TOOL_START: ProtocolEvent = {
 	type: "tool_call_started",
 	turnId: "t1",
 	callId: "c1",
 	name: "bash",
 	args: "ls",
-} as ProtocolEvent;
-// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+};
 const TOOL_END: ProtocolEvent = {
 	type: "tool_call_finished",
 	turnId: "t1",
@@ -364,12 +362,12 @@ const TOOL_END: ProtocolEvent = {
 	name: "bash",
 	status: "ok",
 	output: "ok",
-} as ProtocolEvent;
+};
 
 describe("spinner row discipline", () => {
 	it("keeps spinning during a tool run, parked below the tool header", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.tick(); // spinner visible
 		t.r.handle(TOOL_START); // content write must clear the spinner row first
 		const afterHeader = t.writes.length;
@@ -381,7 +379,7 @@ describe("spinner row discipline", () => {
 
 	it("keeps spinning through tool finish and returns to thinking once settled", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.setNow(2500); // thinking settled
 		t.r.handle(TOOL_START);
 		t.setNow(4500); // tool held SETTLE_MS
@@ -397,25 +395,25 @@ describe("spinner row discipline", () => {
 
 	it("stops the interval when the turn ends", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
+		t.r.handle({ type: "idle" });
 		expect(t.clear).toHaveBeenCalled();
 	});
 
-	it("renders no usage line at idle when the turn reported no usage (Task 2 contract)", () => {
-		// Pins Task 2's usage-only idle branch: usageLine is never called with
-		// undefined. Task 3's duration-led statsLine supersedes the branch but
-		// keeps this assertion true (a duration-only line contains no "context").
+	it("renders no context figure at idle when the turn reported no usage", () => {
+		// A turn with no usage still renders a duration-only statsLine (e.g. "3s");
+		// this pins that the duration-only line never carries a "context" figure,
+		// not that no stats line renders at all.
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-		t.r.handle({ type: "assistant_turn_finished", turnId: "t1", content: "" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
+		t.r.handle({ type: "assistant_turn_finished", turnId: "t1", content: "" });
+		t.r.handle({ type: "idle" });
 		expect(t.out()).not.toContain("context ");
 	});
 
 	it("renders the elapsed counter on a long turn", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.setNow(31_000);
 		t.tick();
 		expect(t.out()).toContain("31s · thinking…");
@@ -423,16 +421,16 @@ describe("spinner row discipline", () => {
 });
 
 describe("stats line", () => {
-	const finish = (usage?: object): ProtocolEvent =>
-		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-		({ type: "assistant_turn_finished", turnId: "t1", content: "", usage }) as ProtocolEvent;
+	const finish = (
+		usage?: import("@ai-ezio/protocol").AssistantTurnFinishedEvent["usage"],
+	): ProtocolEvent => ({ type: "assistant_turn_finished", turnId: "t1", content: "", usage });
 
 	it("renders duration-led narrow→wide with an unlabeled gauge when the limit is known", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.setNow(42_000);
 		t.r.handle(finish({ contextTokens: 9114, contextLimit: 262144 }));
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "idle" });
 		expect(t.out()).toContain("42s · 8.9k / 256k (3%)");
 		expect(t.out()).not.toContain("context 8.9k");
 		expect(t.out()).not.toContain("out ");
@@ -441,29 +439,29 @@ describe("stats line", () => {
 
 	it("labels the context figure when the limit is unknown", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.setNow(5_000);
 		t.r.handle(finish({ contextTokens: 9114 }));
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "idle" });
 		expect(t.out()).toContain("5s · context 8.9k");
 	});
 
 	it("renders duration alone when the turn reported no usage", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.setNow(3_000);
 		t.r.handle(finish(undefined));
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "idle" });
 		expect(t.out()).toContain("3s");
 	});
 
 	it("suppresses the stats line for an errored turn", () => {
 		const t = setup();
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.setNow(4_000);
-		t.r.handle({ type: "error", turnId: "t1", message: "boom" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "error", turnId: "t1", message: "boom" });
 		t.r.handle(finish({ contextTokens: 9114, contextLimit: 262144 }));
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "idle" });
 		expect(t.out()).not.toContain("8.9k / 256k");
 		expect(t.out()).not.toContain("4s ·");
 	});
@@ -494,7 +492,7 @@ describe("content writes clear the live spinner row", () => {
 	// spec, every content path must clear, not only terminal events whose
 	// stopSpinnerInterval clears as a side effect.
 	const begin = (t: ReturnType<typeof setup>) => {
-		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
 		t.tick(); // spinner row visible
 	};
 
@@ -517,26 +515,24 @@ describe("content writes clear the live spinner row", () => {
 	it("markdown at turn end", () => {
 		const t = setup();
 		begin(t);
-		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 		t.r.handle({
 			type: "assistant_turn_finished",
 			turnId: "t1",
 			content: "done",
-		} as ProtocolEvent);
+		});
 		expectClearedBeforeMarker(t.writes, "done");
 	});
 
 	it("stats line and prompt at idle", () => {
 		const t = setup();
 		begin(t);
-		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 		t.r.handle({
 			type: "assistant_turn_finished",
 			turnId: "t1",
 			content: "",
 			usage: { contextTokens: 9114, contextLimit: 262144 },
-		} as ProtocolEvent);
-		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		});
+		t.r.handle({ type: "idle" });
 		// "8.9k / 256k" appears in both the Task 2 (old) and Task 3 (new) formats.
 		expectClearedBeforeMarker(t.writes, "8.9k / 256k");
 		expectClearedBeforeMarker(t.writes, "❯");
@@ -545,7 +541,7 @@ describe("content writes clear the live spinner row", () => {
 	it("error line", () => {
 		const t = setup();
 		begin(t);
-		t.r.handle({ type: "error", turnId: "t1", message: "boom" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "error", turnId: "t1", message: "boom" });
 		expectClearedBeforeMarker(t.writes, "boom");
 	});
 });

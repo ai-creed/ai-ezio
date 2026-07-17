@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { ProtocolEvent } from "@ai-ezio/protocol";
 import {
 	CHURN_MS,
 	COUNTER_MS,
@@ -10,25 +9,18 @@ import {
 } from "./spinner-model.js";
 
 const turnStart = (t: number, m: SpinnerModel) =>
-	m.reduce(
-		{ type: "user_turn_started", turnId: "t1" } as ProtocolEvent, // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-		t,
-	);
+	m.reduce({ type: "user_turn_started", turnId: "t1" }, t);
 const toolStart = (t: number, m: SpinnerModel, name = "bash") =>
-	m.reduce(
-		{ type: "tool_call_started", turnId: "t1", callId: "c1", name } as ProtocolEvent, // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-		t,
-	);
+	m.reduce({ type: "tool_call_started", turnId: "t1", callId: "c1", name }, t);
 const toolEnd = (t: number, m: SpinnerModel) =>
 	m.reduce(
-		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 		{
 			type: "tool_call_finished",
 			turnId: "t1",
 			callId: "c1",
 			name: "bash",
 			status: "ok",
-		} as ProtocolEvent,
+		},
 		t,
 	);
 
@@ -90,14 +82,13 @@ describe("createSpinnerModel", () => {
 		let m = turnStart(0, createSpinnerModel({ utf8: true }));
 		m = toolStart(35_000, m);
 		m = m.reduce(
-			// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 			{
 				type: "tool_call_finished",
 				turnId: "t1",
 				callId: "c1",
 				name: "bash",
 				status: "ok",
-			} as ProtocolEvent,
+			},
 			40_000,
 		);
 		expect(m.frame(41_000, 0, 80)).toContain("41s · ");
@@ -118,34 +109,13 @@ describe("createSpinnerModel", () => {
 	});
 
 	it("hides on turn end, idle, and error; unknown events are no-ops", () => {
-		// eslint-disable-next-line prefer-const
-		let m = turnStart(0, createSpinnerModel({ utf8: true }));
-		const finished = m.reduce(
-			{ type: "assistant_turn_finished", turnId: "t1", content: "" } as ProtocolEvent, // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-			1000,
-		);
+		const m = turnStart(0, createSpinnerModel({ utf8: true }));
+		const finished = m.reduce({ type: "assistant_turn_finished", turnId: "t1", content: "" }, 1000);
 		expect(finished.frame(1000, 0, 80)).toBeNull();
-		expect(
-			m
-				.reduce(
-					{ type: "idle" } as ProtocolEvent, // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-					1000,
-				)
-				.frame(1000, 0, 80),
-		).toBeNull();
-		expect(
-			m
-				.reduce(
-					{ type: "error", message: "boom" } as ProtocolEvent, // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-					1000,
-				)
-				.frame(1000, 0, 80),
-		).toBeNull();
+		expect(m.reduce({ type: "idle" }, 1000).frame(1000, 0, 80)).toBeNull();
+		expect(m.reduce({ type: "error", message: "boom" }, 1000).frame(1000, 0, 80)).toBeNull();
 		// Unknown/other events change nothing.
-		const same = m.reduce(
-			{ type: "assistant_delta", turnId: "t1", text: "x" } as ProtocolEvent, // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
-			500,
-		);
+		const same = m.reduce({ type: "assistant_delta", turnId: "t1", text: "x" }, 500);
 		expect(same.frame(500, 0, 80)).toBe("⠋ thinking…");
 	});
 
