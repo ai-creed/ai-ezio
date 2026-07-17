@@ -202,7 +202,7 @@ describe("createMountedRenderer", () => {
 		expect(e.out()).toContain("[31m"); // red error status
 	});
 
-	it("usage line begins on its own line (M7 glue-bug fix)", () => {
+	it("stats line begins on its own line (M7 glue-bug fix)", () => {
 		const t = setup();
 		t.r.handle({
 			type: "assistant_turn_finished",
@@ -212,8 +212,8 @@ describe("createMountedRenderer", () => {
 		});
 		t.r.handle({ type: "idle" });
 		const out = t.out();
-		expect(out).toMatch(/context 8\.7k \/ 256k \(3%\)/);
-		expect(out).toMatch(/\n[^\n]*context 8\.7k/); // a newline precedes the usage line
+		expect(out).toMatch(/8\.7k \/ 256k \(3%\)/);
+		expect(out).toMatch(/\n[^\n]*8\.7k \/ 256k/); // a newline precedes the stats line
 	});
 
 	it("prompt parity: ❯ under UTF-8, > fallback otherwise", () => {
@@ -419,6 +419,53 @@ describe("spinner row discipline", () => {
 		t.setNow(31_000);
 		t.tick();
 		expect(t.out()).toContain("31s · thinking…");
+	});
+});
+
+describe("stats line", () => {
+	const finish = (usage?: object): ProtocolEvent =>
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+		({ type: "assistant_turn_finished", turnId: "t1", content: "", usage }) as ProtocolEvent;
+
+	it("renders duration-led narrow→wide with an unlabeled gauge when the limit is known", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.setNow(42_000);
+		t.r.handle(finish({ contextTokens: 9114, contextLimit: 262144 }));
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expect(t.out()).toContain("42s · 8.9k / 256k (3%)");
+		expect(t.out()).not.toContain("context 8.9k");
+		expect(t.out()).not.toContain("out ");
+		expect(t.out()).not.toContain("cached ");
+	});
+
+	it("labels the context figure when the limit is unknown", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.setNow(5_000);
+		t.r.handle(finish({ contextTokens: 9114 }));
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expect(t.out()).toContain("5s · context 8.9k");
+	});
+
+	it("renders duration alone when the turn reported no usage", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.setNow(3_000);
+		t.r.handle(finish(undefined));
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expect(t.out()).toContain("3s");
+	});
+
+	it("suppresses the stats line for an errored turn", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.setNow(4_000);
+		t.r.handle({ type: "error", turnId: "t1", message: "boom" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle(finish({ contextTokens: 9114, contextLimit: 262144 }));
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expect(t.out()).not.toContain("8.9k / 256k");
+		expect(t.out()).not.toContain("4s ·");
 	});
 });
 

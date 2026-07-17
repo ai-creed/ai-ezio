@@ -10,7 +10,7 @@
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import stringWidth from "string-width";
 import { renderMarkdown } from "./render-markdown.js";
-import { createSpinnerModel } from "./spinner-model.js";
+import { createSpinnerModel, fmtDuration } from "./spinner-model.js";
 import { BOLD, BRIGHT_MAGENTA, CYAN, DIM, ESC, FG_DEFAULT, GREEN, RED, RESET } from "./style.js";
 
 // Cell width of the `▌ ` stripe (box glyph + space) — body wraps after it.
@@ -58,9 +58,6 @@ export function createMountedRenderer(input: {
 	let bannerRendered = false;
 	let lastUsage: UsageT | undefined;
 	let turnStartAt = -1;
-	// Recorded here but not read until Task 3's duration-capable statsLine
-	// consumes it at idle; Task 2's idle branch stays usage-only.
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	let lastElapsedMs = -1;
 	let turnErrored = false;
 	// spinner — state lives in the pure model; this block owns only the
@@ -121,17 +118,21 @@ export function createMountedRenderer(input: {
 		writeContent(`${CYAN}▌${RESET} ${BOLD}ezio${RESET} ${DIM}› ${tail}${RESET}\n`);
 	};
 
-	const usageLine = (u: UsageT): string => {
+	// Per-turn stats, narrow→wide (upstream 8a32185): this turn's wall time,
+	// then the window gauge. out/cached moved to the transcript's per-request
+	// footers; /usage keeps the full payload. A figure is labeled only when
+	// nothing else identifies it — the gauge shape self-identifies, a bare
+	// count does not (upstream abc0831).
+	const statsLine = (u: UsageT | undefined, elapsedMs: number): string => {
 		const parts: string[] = [];
-		if (typeof u.contextTokens === "number") {
-			let s = `context ${fmtTokens(u.contextTokens)}`;
+		if (elapsedMs >= 0) parts.push(fmtDuration(elapsedMs));
+		if (u && typeof u.contextTokens === "number") {
 			if (typeof u.contextLimit === "number" && u.contextLimit > 0)
-				s += ` / ${fmtTokens(u.contextLimit)} (${Math.floor((u.contextTokens * 100) / u.contextLimit)}%)`;
-			parts.push(s);
+				parts.push(
+					`${fmtTokens(u.contextTokens)} / ${fmtTokens(u.contextLimit)} (${Math.floor((u.contextTokens * 100) / u.contextLimit)}%)`,
+				);
+			else parts.push(`context ${fmtTokens(u.contextTokens)}`);
 		}
-		if (typeof u.outputTokens === "number") parts.push(`out ${fmtTokens(u.outputTokens)}`);
-		if (typeof u.cachedTokens === "number" && u.cachedTokens > 0)
-			parts.push(`cached ${fmtTokens(u.cachedTokens)}`);
 		return parts.length > 0 ? `${DIM}${parts.join(" · ")}${RESET}` : "";
 	};
 
@@ -282,12 +283,8 @@ export function createMountedRenderer(input: {
 					break;
 				case "idle":
 					stopSpinnerInterval();
-					// Task 2 keeps the OLD usageLine helper and a usage-only guard so this
-					// commit typechecks and passes the package gate on its own; Task 3
-					// replaces both the helper and this condition with the
-					// duration-capable statsLine.
-					if (!turnErrored && lastUsage !== undefined) {
-						const u = usageLine(lastUsage);
+					if (!turnErrored && (lastUsage !== undefined || lastElapsedMs >= 0)) {
+						const u = statsLine(lastUsage, lastElapsedMs);
 						if (u) writeContent(`\n${u}`);
 					}
 					lastUsage = undefined;
