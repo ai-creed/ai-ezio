@@ -161,10 +161,14 @@ New default form, narrow→wide (upstream `8a32185`):
 ### 5. Verification tasks (no code unless they fail)
 
 - **B3 — transcript footers**: one real turn on the 0.4.1 engine per
-  surface; confirm the dim per-request stats footer
-  (`42s · ~$0.19 · in … · out …`) appears in Ctrl+T / `/transcript`. The
-  mirror is plain text, so failure is not expected; if a footer is missing,
-  that is an engine/transcript-wiring bug to triage, not a renderer change.
+  surface; confirm each completed request's per-request stats footer line
+  (`42s · ~$0.19 · in … · out …`) appears in Ctrl+T / `/transcript` as
+  plain text, placed after that request's items. The `HAX_TRANSCRIPT`
+  mirror is deliberately color-off (`transcript.c` renders it with color
+  off), so the pass condition is footer **content and placement only** —
+  the dim treatment exists solely in hax's own TUI and is not observable
+  here. If a footer is missing, that is an engine/transcript-wiring bug to
+  triage, not a renderer change.
 - **F1 — tmux flicker**: open the resume picker under tmux without DEC 2026
   support, page rapidly. Only if an intermediate blank frame reproduces,
   reorder that repaint to draw-before-clear (upstream `7af8415`'s rule) as a
