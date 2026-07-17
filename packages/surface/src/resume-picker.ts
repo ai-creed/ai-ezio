@@ -97,8 +97,8 @@ export function decodeChunk(s: string): KeyToken {
 	if (s === "\x1b[B" || s === "\x1bOB" || s === "j") return "down";
 	if (s === "\r" || s === "\n") return "enter";
 	if (s === "\x1b" || s === "\x03" || s === "\x04" || s === "q") return "cancel";
-	if (s === "[") return "pageprev";
-	if (s === "]") return "pagenext";
+	if (s === "[" || s === "\x1b[5~") return "pageprev";
+	if (s === "]" || s === "\x1b[6~") return "pagenext";
 	if (s === "\x01") return "toggleall"; // Ctrl+A
 	return "other";
 }
@@ -146,7 +146,7 @@ export function applyKey(state: PickerState, token: KeyToken): KeyResult {
 	}
 }
 
-const HINTS_PAGED = "↑/↓ move · [ ] page · Ctrl+A all · Enter select · Esc cancel";
+const HINTS_PAGED = "↑/↓ move · [ ]/PgUp/PgDn page · Ctrl+A all · Enter select · Esc cancel";
 const HINTS_SINGLE = "↑/↓ move · Ctrl+A all · Enter select · Esc cancel";
 const HINTS_ALL = "↑/↓ move · Ctrl+A pages · Enter select · Esc cancel";
 

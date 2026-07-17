@@ -99,6 +99,11 @@ describe("decodeChunk", () => {
 		expect(decodeChunk("]")).toBe("pagenext");
 		expect(decodeChunk("\x01")).toBe("toggleall"); // Ctrl+A
 	});
+	it("maps PageUp/PageDown CSI sequences to page tokens", () => {
+		expect(decodeChunk("\x1b[5~")).toBe("pageprev");
+		expect(decodeChunk("\x1b[6~")).toBe("pagenext");
+	});
+
 	it("falls through to other (digit-jump removed)", () => {
 		expect(decodeChunk("3")).toBe("other");
 		expect(decodeChunk("z")).toBe("other");
@@ -168,7 +173,7 @@ describe("renderView", () => {
 		expect(view).toContain("30. "); // last row on page 1
 		expect(view).not.toContain("31. "); // page 2's rows are not rendered
 		expect(view).not.toContain(" 1. "); // page 0's rows are not rendered
-		expect(view).toContain("[ ] page");
+		expect(view).toContain("[ ]/PgUp/PgDn page");
 		// cursor (❯) sits on the row matching state.index (index 20 → global row 21), nowhere
 		// else. oneLine renders the cursor as "\x1b[36m❯\x1b[0m", so the raw text is
 		// "❯\x1b[0m 21." — strip the SGR color codes first, then assert on plain text.
@@ -196,6 +201,20 @@ describe("renderView", () => {
 	it("a full page frame is header + 15 rows + footer = 17 newlines (drives the redraw climb)", () => {
 		const view = renderView(rows(40), state({ count: 40 }), NOW);
 		expect((view.match(/\n/g) ?? []).length).toBe(17);
+	});
+
+	it("names the PgUp/PgDn aliases in the paged hint", () => {
+		const rows = Array.from({ length: 25 }, (_, i) => ({
+			id: `s${i}`,
+			mtime: 1_784_000_000,
+			firstPrompt: `p${i}`,
+		}));
+		const view = renderView(
+			rows,
+			{ index: 0, count: 25, pageSize: 10, showAll: false },
+			1_784_000_500_000,
+		);
+		expect(view).toContain("[ ]/PgUp/PgDn page");
 	});
 });
 
