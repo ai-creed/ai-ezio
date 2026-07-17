@@ -100,8 +100,55 @@ form — including the real PgUp/PgDn escape sequences, live-verifying Task
 4's aliases and the `[ ]/PgUp/PgDn page` hint. Zero of 40 captures showed a
 blank or hint-less frame.
 
-**F1 verdict: flicker did not reproduce under the mandated no-DEC-2026
-condition → per the spec's conditional, no repaint change is made.**
+**F1 verdict (snapshot layer): flicker did not reproduce under the mandated
+no-DEC-2026 condition.**
+
+### Intermediate-frame observation (closing the snapshot-sampling gap)
+
+Post-keypress snapshots observe only settled screens, so two further layers
+establish that an *intermediate* blank frame cannot occur and was not
+observed:
+
+**Layer 1 — write-boundary atomicity at the source.** The real
+`runResumePicker` driven directly with an instrumented `deps.write` and 40
+rapid paging keys (`]`, `[`, and the PgUp/PgDn CSI sequences). Every repaint
+is emitted as `reset + view` in a single `write()`
+(`resume-picker.ts:216-220`); the analysis asserts destructive bytes
+(cursor-up + clear-to-end) never appear in a write that lacks the full
+replacement frame:
+
+```
+write() calls total: 42
+repaint writes (contain cursor-up+clear-to-end): 40
+repaint writes MISSING their replacement frame in the same write: 0
+F1-WRITE-BOUNDARY PASS: clear and replacement frame are atomic in every repaint write
+```
+
+No flush boundary ever separates a clear from its repaint, so no terminal —
+with or without DEC 2026 — has an intermediate blank state to display.
+
+**Layer 2 — attached no-sync client, continuous byte trace.** A real client
+attached (inside a PTY) to the empty-`terminal-features` server, ~33
+pagings/second driven while every byte chunk the client receives is recorded
+with a timestamp — a continuous terminal trace, not sampling:
+
+```
+server terminal-features: 'terminal-features' (empty = sync/DEC-2026 unsupported)
+attached-client trace: 44 read chunks, 31229 bytes, continuous (50ms poll, timestamps per chunk)
+chunks containing erase sequences (ED/EL): 43
+erase chunks WITHOUT replacement content in the same chunk: 1
+  split at chunk 0: gap to next content chunk = 0.29ms
+F1-ATTACHED-TRACE PASS: all splits closed within the stated gaps
+```
+
+Of 43 erase-bearing chunks, every paging repaint carried its replacement
+content in the same client read; the single split was chunk 0 — the initial
+attach redraw, before the picker's first paint — closed in 0.29 ms.
+
+**F1 verdict: under the mandated no-DEC-2026 condition, no intermediate
+blank frame is producible (source-atomic repaints) nor was any observed at
+an attached client's continuous byte stream → per the spec's conditional,
+no repaint change is made.**
 
 ## Short-burst label guard (spec §1)
 
