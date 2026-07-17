@@ -14,13 +14,23 @@ function setup(opts?: { utf8?: boolean; columns?: number }) {
 		return 1 as never;
 	});
 	const clear = vi.fn();
+	let nowMs = 0;
 	const r = createMountedRenderer({
 		stdout,
 		utf8: opts?.utf8 ?? true,
 		setInterval: set,
 		clearInterval: clear,
+		now: () => nowMs,
 	});
-	return { r, out: () => writes.join(""), writes, set, clear, tick: () => cb?.() };
+	return {
+		r,
+		out: () => writes.join(""),
+		writes,
+		set,
+		clear,
+		tick: () => cb?.(),
+		setNow: (t: number) => (nowMs = t),
+	};
 }
 
 const STATUS: ProtocolEvent = {
@@ -335,5 +345,160 @@ describe("createMountedRenderer", () => {
 		expect(typeof t.r.echoUserInput).toBe("function");
 		expect(typeof t.r.echoSubmittedInput).toBe("function");
 		expect(typeof t.r.renderPrompt).toBe("function");
+	});
+});
+
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+const TOOL_START: ProtocolEvent = {
+	type: "tool_call_started",
+	turnId: "t1",
+	callId: "c1",
+	name: "bash",
+	args: "ls",
+} as ProtocolEvent;
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+const TOOL_END: ProtocolEvent = {
+	type: "tool_call_finished",
+	turnId: "t1",
+	callId: "c1",
+	name: "bash",
+	status: "ok",
+	output: "ok",
+} as ProtocolEvent;
+
+describe("spinner row discipline", () => {
+	it("keeps spinning during a tool run, parked below the tool header", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.tick(); // spinner visible
+		t.r.handle(TOOL_START); // content write must clear the spinner row first
+		const afterHeader = t.writes.length;
+		t.tick(); // spinner re-parks BELOW the header: first frame opens a new row
+		const reopened = t.writes.slice(afterHeader).join("");
+		expect(reopened.startsWith("\n")).toBe(true); // new row before the frame
+		expect(reopened).toContain("thinking…"); // young tool phase keeps settled label
+	});
+
+	it("keeps spinning through tool finish and returns to thinking once settled", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.setNow(2500); // thinking settled
+		t.r.handle(TOOL_START);
+		t.setNow(4500); // tool held SETTLE_MS
+		t.tick();
+		expect(t.out()).toContain("[bash] running…");
+		t.r.handle(TOOL_END); // tool finished — the spinner must stay alive
+		expect(t.clear).not.toHaveBeenCalled(); // interval NOT stopped by tool finish
+		t.setNow(6500); // post-tool thinking (since 4500) settles again
+		t.tick();
+		// The frame drawn AFTER tool finish proves post-tool liveness.
+		expect(t.writes[t.writes.length - 1]).toContain("thinking…");
+	});
+
+	it("stops the interval when the turn ends", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expect(t.clear).toHaveBeenCalled();
+	});
+
+	it("renders no usage line at idle when the turn reported no usage (Task 2 contract)", () => {
+		// Pins Task 2's usage-only idle branch: usageLine is never called with
+		// undefined. Task 3's duration-led statsLine supersedes the branch but
+		// keeps this assertion true (a duration-only line contains no "context").
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "assistant_turn_finished", turnId: "t1", content: "" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expect(t.out()).not.toContain("context ");
+	});
+
+	it("renders the elapsed counter on a long turn", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.setNow(31_000);
+		t.tick();
+		expect(t.out()).toContain("31s · thinking…");
+	});
+});
+
+const CLEAR = "\r\x1b[2K";
+
+/** Assert the content write carrying `marker` was preceded — after the last
+ * live spinner frame — by a clear-line chunk. Proves THAT content path
+ * cleared the spinner row (not an unrelated earlier clear: the scan starts
+ * at the last frame drawn before the content). */
+function expectClearedBeforeMarker(writes: string[], marker: string) {
+	const contentIdx = writes.findIndex((s) => s.includes(marker));
+	expect(contentIdx).toBeGreaterThan(-1);
+	let lastFrameIdx = -1;
+	for (let i = 0; i < contentIdx; i++) {
+		const s = writes[i] ?? "";
+		if (s.includes("thinking…") || s.includes("working…") || s.includes("running…"))
+			lastFrameIdx = i;
+	}
+	expect(lastFrameIdx).toBeGreaterThan(-1); // spinner was live before the content
+	expect(writes.slice(lastFrameIdx + 1, contentIdx).join("")).toContain(CLEAR);
+}
+
+describe("content writes clear the live spinner row", () => {
+	// Each test makes the spinner row visible FIRST (tick), then dispatches one
+	// content-producing event and asserts THAT path cleared the row — per the
+	// spec, every content path must clear, not only terminal events whose
+	// stopSpinnerInterval clears as a side effect.
+	const begin = (t: ReturnType<typeof setup>) => {
+		t.r.handle({ type: "user_turn_started", turnId: "t1" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		t.tick(); // spinner row visible
+	};
+
+	it("tool header", () => {
+		const t = setup();
+		begin(t);
+		t.r.handle(TOOL_START);
+		expectClearedBeforeMarker(t.writes, "⏺ bash");
+	});
+
+	it("tool output preview", () => {
+		const t = setup();
+		begin(t);
+		t.r.handle(TOOL_START);
+		t.tick(); // spinner re-parked below the header — live again
+		t.r.handle(TOOL_END); // output preview renders "  ok"
+		expectClearedBeforeMarker(t.writes, "  ok");
+	});
+
+	it("markdown at turn end", () => {
+		const t = setup();
+		begin(t);
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({
+			type: "assistant_turn_finished",
+			turnId: "t1",
+			content: "done",
+		} as ProtocolEvent);
+		expectClearedBeforeMarker(t.writes, "done");
+	});
+
+	it("stats line and prompt at idle", () => {
+		const t = setup();
+		begin(t);
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+		t.r.handle({
+			type: "assistant_turn_finished",
+			turnId: "t1",
+			content: "",
+			usage: { contextTokens: 9114, contextLimit: 262144 },
+		} as ProtocolEvent);
+		t.r.handle({ type: "idle" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		// "8.9k / 256k" appears in both the Task 2 (old) and Task 3 (new) formats.
+		expectClearedBeforeMarker(t.writes, "8.9k / 256k");
+		expectClearedBeforeMarker(t.writes, "❯");
+	});
+
+	it("error line", () => {
+		const t = setup();
+		begin(t);
+		t.r.handle({ type: "error", turnId: "t1", message: "boom" } as ProtocolEvent); // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+		expectClearedBeforeMarker(t.writes, "boom");
 	});
 });

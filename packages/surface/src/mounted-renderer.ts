@@ -10,6 +10,7 @@
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import stringWidth from "string-width";
 import { renderMarkdown } from "./render-markdown.js";
+import { createSpinnerModel } from "./spinner-model.js";
 import { BOLD, BRIGHT_MAGENTA, CYAN, DIM, ESC, FG_DEFAULT, GREEN, RED, RESET } from "./style.js";
 
 // Cell width of the `▌ ` stripe (box glyph + space) — body wraps after it.
@@ -18,7 +19,6 @@ const STRIPE_COLS = 2;
 const PROMPT_CELLS = 2;
 const CLEAR_LINE = `\r${ESC}[2K`;
 const CURSOR_UP = `${ESC}[1A`;
-const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const PREVIEW_LINES = 4;
 const ARG_MAX = 80;
 
@@ -45,49 +45,80 @@ export function createMountedRenderer(input: {
 	utf8?: boolean;
 	setInterval?: (cb: () => void, ms: number) => unknown;
 	clearInterval?: (handle: unknown) => void;
+	/** Injectable clock (tests); defaults to Date.now. */
+	now?: () => number;
 }) {
 	const utf8 = input.utf8 ?? true;
 	const setI = input.setInterval ?? ((cb, ms) => globalThis.setInterval(cb, ms));
 	const clrI = input.clearInterval ?? ((h) => globalThis.clearInterval(h as never));
+	const nowFn = input.now ?? (() => Date.now());
 	const w = (s: string) => input.stdout.write(s);
 	const prompt = utf8 ? `${BRIGHT_MAGENTA}${BOLD}❯${RESET} ` : "> ";
 
 	let bannerRendered = false;
 	let lastUsage: UsageT | undefined;
-	// spinner
+	let turnStartAt = -1;
+	// Recorded here but not read until Task 3's duration-capable statsLine
+	// consumes it at idle; Task 2's idle branch stays usage-only.
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	let lastElapsedMs = -1;
+	let turnErrored = false;
+	// spinner — state lives in the pure model; this block owns only the
+	// interval, the visible-row bookkeeping, and the parked-row discipline.
+	let model = createSpinnerModel({ utf8 });
 	let spinHandle: unknown = null;
 	let spinFrame = 0;
 	let spinVisible = false;
-	let spinRunning = false;
+	let spinnerRowOpen = false;
 
-	const stopSpinner = () => {
-		if (spinHandle !== null) {
-			clrI(spinHandle);
-			spinHandle = null;
-		}
-		spinRunning = false;
+	const clearSpinnerRow = () => {
 		if (spinVisible) {
 			w(CLEAR_LINE);
 			spinVisible = false;
 		}
 	};
+	// Every content write goes through this guard: the spinner row is cleared
+	// first and marked closed, so the next tick re-parks one line below the
+	// new content instead of overwriting it.
+	const writeContent = (s: string) => {
+		clearSpinnerRow();
+		spinnerRowOpen = false;
+		w(s);
+	};
 	const tick = () => {
-		if (!spinRunning) return; // idle-safety: a stale interval writes nothing
-		w(`${CLEAR_LINE}${DIM}${SPIN[spinFrame++ % SPIN.length]} thinking…${RESET}`);
+		const cols = (input.stdout as NodeJS.WriteStream).columns ?? 80;
+		const row = model.frame(nowFn(), spinFrame++, cols);
+		if (row === null) {
+			clearSpinnerRow();
+			return; // idle-safety: a stale interval draws nothing
+		}
+		if (!spinnerRowOpen) {
+			w("\n"); // park one line below the last content (upstream's rule)
+			spinnerRowOpen = true;
+		}
+		w(`${CLEAR_LINE}${DIM}${row}${RESET}`);
 		spinVisible = true;
 	};
-	const startSpinner = () => {
+	const startSpinnerInterval = () => {
+		if (spinHandle !== null) return;
 		spinFrame = 0;
-		spinRunning = true;
 		tick();
 		spinHandle = setI(tick, 80);
+	};
+	const stopSpinnerInterval = () => {
+		if (spinHandle !== null) {
+			clrI(spinHandle);
+			spinHandle = null;
+		}
+		clearSpinnerRow();
+		spinnerRowOpen = false;
 	};
 
 	const renderBanner = (provider: string, model: string, effort: string) => {
 		// Banner uses hax's dim `›` (matches `hax › codex · …`); the magenta `❯`
 		// is reserved for the input prompt below.
 		const tail = effort ? `${provider} · ${model} · ${effort}` : `${provider} · ${model}`;
-		w(`${CYAN}▌${RESET} ${BOLD}ezio${RESET} ${DIM}› ${tail}${RESET}\n`);
+		writeContent(`${CYAN}▌${RESET} ${BOLD}ezio${RESET} ${DIM}› ${tail}${RESET}\n`);
 	};
 
 	const usageLine = (u: UsageT): string => {
@@ -106,7 +137,7 @@ export function createMountedRenderer(input: {
 
 	const renderToolStart = (name: string, args?: string) => {
 		const tail = args ? ` · ${truncate(args)}` : "";
-		w(`\n${DIM}⏺ ${name}${tail}${RESET}`);
+		writeContent(`\n${DIM}⏺ ${name}${tail}${RESET}`);
 	};
 
 	const renderToolFinish = (status: "ok" | "error", output?: string, isDiff?: boolean) => {
@@ -114,18 +145,20 @@ export function createMountedRenderer(input: {
 			for (const line of output.split("\n")) {
 				if (line.length === 0) continue;
 				const color = line.startsWith("+") ? GREEN : line.startsWith("-") ? RED : DIM;
-				w(`\n${color}${line}${RESET}`);
+				writeContent(`\n${color}${line}${RESET}`);
 			}
 			return;
 		}
 		const color = status === "error" ? RED : DIM;
 		const lines = (output ?? "").split("\n").filter((l) => l.length > 0);
 		if (lines.length === 0) {
-			if (status === "error") w(`\n${RED}  (error)${RESET}`);
+			if (status === "error") writeContent(`\n${RED}  (error)${RESET}`);
 			return;
 		}
-		for (const l of lines.slice(0, PREVIEW_LINES)) w(`\n${color}  ${truncate(l, 120)}${RESET}`);
-		if (lines.length > PREVIEW_LINES) w(`\n${DIM}  …(+${lines.length - PREVIEW_LINES})${RESET}`);
+		for (const l of lines.slice(0, PREVIEW_LINES))
+			writeContent(`\n${color}  ${truncate(l, 120)}${RESET}`);
+		if (lines.length > PREVIEW_LINES)
+			writeContent(`\n${DIM}  …(+${lines.length - PREVIEW_LINES})${RESET}`);
 	};
 
 	// Re-render a just-submitted operator line as hax's bright-magenta `▌ ` stripe
@@ -158,7 +191,7 @@ export function createMountedRenderer(input: {
 		}
 		if (row !== "" || rows.length === 0) rows.push(row);
 		const block = rows.map((r) => `${BRIGHT_MAGENTA}${stripe}${r}${FG_DEFAULT}`).join("\n");
-		w(`${block}\n`);
+		writeContent(`${block}\n`);
 	};
 
 	// Total cell width of a string (wide CJK/emoji = 2, combining marks = 0).
@@ -192,19 +225,20 @@ export function createMountedRenderer(input: {
 		const rows = echoRows(text, cols);
 		let erase = CLEAR_LINE;
 		for (let i = 1; i < rows; i++) erase += `${CURSOR_UP}${CLEAR_LINE}`;
-		w(erase);
+		writeContent(erase);
 		echoUserInput(text, cols);
 	};
 
 	// Draw a fresh input prompt on its own line. Used by the runtime after a
 	// locally-handled slash command (no idle event follows to draw it).
-	const renderPrompt = (): void => void w(`\n${prompt}`);
+	const renderPrompt = (): void => void writeContent(`\n${prompt}`);
 
 	return {
 		echoUserInput,
 		echoSubmittedInput,
 		renderPrompt,
 		handle(event: ProtocolEvent): void {
+			model = model.reduce(event, nowFn());
 			switch (event.type) {
 				case "ready":
 					// A fresh `ready` signals a new (or respawned) hax process. Reset the
@@ -221,39 +255,49 @@ export function createMountedRenderer(input: {
 					}
 					break;
 				case "user_turn_started":
-					startSpinner();
+					turnStartAt = nowFn();
+					turnErrored = false;
+					lastElapsedMs = -1;
+					startSpinnerInterval();
 					break;
 				case "assistant_delta":
 					// Suppressed from the pane — markdown renders at turn end. (The
 					// live-session still forwards deltas to onProviderOutput.)
 					break;
 				case "tool_call_started":
-					stopSpinner();
 					renderToolStart(event.name, event.args);
 					break;
 				case "tool_call_finished":
 					renderToolFinish(event.status, event.output, event.isDiff);
 					break;
 				case "assistant_turn_finished":
-					stopSpinner();
+					stopSpinnerInterval();
 					lastUsage = event.usage;
+					if (turnStartAt >= 0) lastElapsedMs = nowFn() - turnStartAt;
+					turnStartAt = -1;
 					if (event.content)
-						w(
+						writeContent(
 							`\n${renderMarkdown(event.content, { width: (input.stdout as NodeJS.WriteStream).columns })}\n`,
 						);
 					break;
 				case "idle":
-					stopSpinner();
-					if (lastUsage) {
+					stopSpinnerInterval();
+					// Task 2 keeps the OLD usageLine helper and a usage-only guard so this
+					// commit typechecks and passes the package gate on its own; Task 3
+					// replaces both the helper and this condition with the
+					// duration-capable statsLine.
+					if (!turnErrored && lastUsage !== undefined) {
 						const u = usageLine(lastUsage);
-						if (u) w(`\n${u}`);
-						lastUsage = undefined;
+						if (u) writeContent(`\n${u}`);
 					}
+					lastUsage = undefined;
+					lastElapsedMs = -1;
 					renderPrompt();
 					break;
 				case "error":
-					stopSpinner();
-					w(`\n${RED}▌ ${event.message}${RESET}`);
+					stopSpinnerInterval();
+					if (event.turnId) turnErrored = true;
+					writeContent(`\n${RED}▌ ${event.message}${RESET}`);
 					// A turn-scoped error (carries turnId) still drains to
 					// assistant_turn_finished → idle, and idle draws the prompt — so
 					// drawing one here too would double it. A non-turn / fatal error
