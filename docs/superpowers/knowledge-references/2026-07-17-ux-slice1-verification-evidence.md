@@ -60,19 +60,36 @@ Footer present, plain text, placed after the assistant item.
 **B3 verdict: PASS on both surfaces.** (A missing footer would have been an
 engine/transcript-wiring bug to triage; none found.)
 
-## F1 — rapid picker paging under tmux
+## F1 — rapid picker paging under tmux without DEC 2026 support
 
-Method: tmux 3.6a, detached 100×40 session, 25 seeded sessions in the cwd
-store (PAGE_SIZE = 15 → two pages; an earlier attempt with exactly 15
+The no-DEC-2026 condition is established two ways, both recorded in the run
+output below:
+
+1. **Server-side**: a dedicated tmux server (`-L f1nosync`, started with
+   `-f /dev/null`) with `terminal-features` set to the empty list — the
+   `sync` feature (tmux's DEC 2026 support) is therefore unsupported for
+   every terminal on that server. The setting is echoed in the run output.
+2. **App-side**: the picker/renderer sources emit no `\e[?2026` sequence at
+   all (grep over `packages/surface/src` + `packages/cli/src`: zero
+   matches; repaints are plain cursor-up + clear-line). There is no
+   synchronized-update protection in play on either side.
+
+Method: detached 100×40 session on that server, 25 seeded sessions in the
+cwd store (PAGE_SIZE = 15 → two pages; an earlier attempt with exactly 15
 sessions was discarded — it filled one page and paging was inert). The
 resume picker (`ai-ezio --resume`) paged rapidly 40 times mixing `[` / `]`
 and real PageUp/PageDown keys (`PPage`/`NPage`), with a `capture-pane`
-snapshot after every keypress. A snapshot missing the picker frame/hints
-line would count as an intermediate blank frame.
+snapshot after every keypress — sampling tmux's screen model, which applies
+inner-app bytes immediately (no client-side batching), the strictest
+observation point for intermediate states. A snapshot missing the picker
+frame/hints line counts as an intermediate blank frame.
 
 Result (verbatim run output):
 
 ```
+tmux: tmux 3.6a, dedicated server -L f1nosync, started with -f /dev/null
+terminal-features setting: 'terminal-features' (empty list = sync/DEC-2026 unsupported for every terminal)
+app-side: zero \e[?2026 emissions in packages/surface+cli sources (picker repaints via cursor-up + clear-line only)
 initial-paged-hint: PgUp/PgDn page
 captures=40 framesMissingPagedHints=0
 first-row-sequence:  17.  2.  2.  17.  17.  17.  2.  2.  17.  2.  2.  17.  17.  17.  2.  2.  17.  2.  2.  17.  17.  17.  2.  2.  17.  2.  2.  17.  17.  17.  2.  2.  17.  2.  2.  17.  17.  17.  2.  2.
@@ -83,8 +100,8 @@ form — including the real PgUp/PgDn escape sequences, live-verifying Task
 4's aliases and the `[ ]/PgUp/PgDn page` hint. Zero of 40 captures showed a
 blank or hint-less frame.
 
-**F1 verdict: flicker did not reproduce → per the spec's conditional, no
-repaint change is made.**
+**F1 verdict: flicker did not reproduce under the mandated no-DEC-2026
+condition → per the spec's conditional, no repaint change is made.**
 
 ## Short-burst label guard (spec §1)
 
