@@ -23,9 +23,15 @@ control round-trip for the on-demand command) and renders both.
 
 1. Stats line gains the session's running spend as its widest-scope item:
    `42s · 8.9k / 256k (3%) · $0.042` (`~$` when any component is
-   estimated). Both surfaces, via the shared renderer.
-2. `/session` slash command on both surfaces, engine-backed: user turns,
-   requests, tool calls, token totals, worked time, spend.
+   estimated). Implemented once in the shared renderer; the standalone
+   surface ships it in this arc, and the mounted surface picks it up when
+   the adapter rebuilds against this release (no adapter code change; its
+   acceptance evidence rides the follow-up named in Non-goals).
+2. `/session` slash command, engine-backed (user turns, requests, tool
+   calls, token totals, worked time, spend), implemented in the shared
+   surface package and wired on the standalone surface in this arc. The
+   mounted surface gains it via the tracked adapter follow-up (Non-goals);
+   the capability seam is designed here so that wiring is one line.
 3. `/usage` shows the richer per-turn payload (cache-write tokens, turn
    cost) when present.
 
@@ -38,24 +44,52 @@ control round-trip for the on-demand command) and renders both.
 - Historical totals across `/resume` — upstream's `session_stats` is
   per-sitting by design (`/new` zeroes it, `/resume` does not restore);
   the protocol mirrors that semantic exactly.
-- ai-whisper adapter wiring (downstream repo, follow-up as in every slice).
+- ai-whisper adapter wiring (downstream repo) — a tracked follow-up with
+  defined content, not an implied one: pass `sessionStats: () =>
+  session.sessionStats()` into the adapter's `SlashContext` and capture
+  the mounted acceptance evidence (a real-provider turn through
+  `whisper collab mount ezio` showing the spend-bearing stats line and a
+  non-empty `/session`). Until it lands, mounted `/session` prints the
+  designed `session stats unavailable` fallback — a defined state, not a
+  gap.
 - Protocol version bump: both changes are additive-optional, consistent
   with M7/M8/M11; `AI_EZIO_PROTOCOL_VERSION` stays `0.1.0`.
 
 ## §1 Protocol: per-turn usage fields
 
-`assistant_turn_finished.usage` gains six optional fields (M7 omission
-discipline: a field the engine reports as `-1` is omitted; an empty `usage`
-object is omitted entirely; booleans appear only beside their value field):
+`assistant_turn_finished` fires once per **user turn**, but a tool-using
+turn makes several model round-trips and usage arrives per round-trip
+(`turn_usage_make` is per-request). The M7 fields already aggregate
+(`outputTokens` sums across round-trips, `cachedTokens` is last-round);
+the six new fields get an explicit per-user-turn aggregation the same way:
 
-| Field | Type | Source (engine) |
+| Field | Type | Per-user-turn value |
 | --- | --- | --- |
-| `cacheWriteTokens?` | number | `stream_usage.cache_write_tokens` |
-| `cacheWrite1hTokens?` | number | `stream_usage.cache_write_1h_tokens` |
-| `costTotal?` | number (USD) | `turn_usage.cost_total` (exact or estimate) |
-| `costEstimated?` | boolean | `turn_usage.cost_estimated`; only with `costTotal` |
-| `sessionSpend?` | number (USD) | `spend_total(&stats.spend, &approx)` after this turn is accounted |
-| `sessionSpendEstimated?` | boolean | that call's `approx`; only with `sessionSpend` |
+| `cacheWriteTokens?` | number | sum of `stream_usage.cache_write_tokens` over round-trips that reported it |
+| `cacheWrite1hTokens?` | number | sum of `stream_usage.cache_write_1h_tokens` over round-trips that reported it |
+| `costTotal?` | number (USD) | this user turn's spend: a turn-local `struct spend_totals` fed by `spend_account()` per round-trip, read with `spend_total()` at turn end |
+| `costEstimated?` | boolean | that `spend_total()` call's `approx`; only beside `costTotal` |
+| `sessionSpend?` | number (USD) | `agent_session_spend(&stats, &approx)` read at turn end, after every round-trip is accounted |
+| `sessionSpendEstimated?` | boolean | that call's `approx`; only beside `sessionSpend` |
+
+Reusing `spend_account`/`spend_total` for the turn cost keeps the engine's
+single definition of the reported-vs-estimated split
+(vendor/hax/src/agent_core.c): a round-trip with an exact provider charge
+(including an explicit `$0`) adds to the reported sum; one with tokens but
+no charge becomes a record priced lazily against the catalog at read; a
+mixed turn therefore prices to exact + estimate with `approx = 1` (any
+record at all makes the figure inexact — upstream's rule); an unpriceable
+record (no catalog identity, model unknown to the catalog) contributes
+nothing and still sets `approx = 1`.
+
+Presence rules: the two token fields follow M7 discipline — absent until
+some round-trip reports them (`-1` seed), a reported zero then shows as
+`0`; an empty `usage` object is omitted entirely; booleans appear only
+beside their value field. The cost/spend fields instead use upstream's own
+display gate: present iff the figure is `> 0`, the same `spend > 0` rule
+the engine's stats line and `/session` apply (agent_core.c, slash.c). An
+explicit all-$0.00 free-tier turn therefore omits them, exactly as
+upstream renders nothing for that state.
 
 ## §2 Protocol: `session_stats` control + event
 
@@ -73,10 +107,21 @@ Event (engine → harness):
  "spend":0.042,"spendEstimated":true}
 ```
 
-All fields from `struct session_stats` accumulators; token fields and
-`spend` follow the same omit-when-unreported rule (`-1`/never-reported →
-omitted; counters `turns/requests/toolCalls/workedMs` are always present —
-zero is a real value there). Semantics are per-sitting (see Non-goals).
+Counters (`turns`, `requests`, `toolCalls`, `workedMs`) are always
+present — zero is a real value there. The token fields and `spend` come
+from plain accumulators that start at zero and deliberately keep no
+"was reported" state (vendor/hax/src/agent.h: "a zero can also mean 'the
+backend never said'"), and `spend_total()` returns `0` both for no priced
+data and an explicit provider-reported `$0.00` — so a
+never-reported-vs-explicit-zero distinction is not implementable from the
+engine's data, and upstream does not draw it either. The event therefore
+adopts upstream's display gates as the wire rule: each token field is
+present iff its accumulator is `> 0`, and `spend` is present iff
+`spend_total() > 0` (`spendEstimated` only beside it) — the exact `> 0`
+gates `slash_run_session` and the stats line apply. A fresh session thus
+answers with counters only, and an all-free-tier session (explicit $0.00
+charges) omits `spend`, matching upstream's rendering of the same state.
+Semantics are per-sitting (see Non-goals).
 
 Both additions are documented in `docs/protocol.md` in the same commit that
 implements them (protocol-is-the-contract).
@@ -85,19 +130,38 @@ implements them (protocol-is-the-contract).
 
 - **Staging** (`src/protocol/emit.{c,h}`): keep `emit_set_usage` as is; add
   `emit_set_turn_costs(struct emit_state *es, const struct emit_turn_costs *tc)`
-  taking a small struct (the six §1 values, `-1`/`-1.0` = absent). Staged
-  values are consumed and cleared by the next `assistant_turn_finished`
-  emission, exactly like the M7 fields.
-- **Call site** (`src/agent.c`): at the existing usage-staging point, fill
-  `emit_turn_costs` from the freshly built `turn_usage` and
-  `spend_total(&st->stats.spend, &approx)` (call after the turn is
-  accounted so the running total includes it).
+  taking a small struct (the six §1 values, `-1`/`-1.0` = absent; the
+  emitter additionally applies the §1 `> 0` gate to the cost/spend
+  fields). Staged values are consumed and cleared by the next
+  `assistant_turn_finished` emission, exactly like the M7 fields.
+- **Call site** (`src/agent.c`, the user-turn loop): aggregate per
+  round-trip beside the existing M7 turn-locals (`user_turn_out` et al.) —
+  two cache-write sums (seeded `-1`, add on report) and a turn-local
+  `struct spend_totals` fed by the same `spend_account(...)` call the
+  session accumulator uses; both run at the existing accounting point,
+  which sits before the error/interrupt branches, so a
+  truncated-but-billed response counts. At the existing M7 staging point
+  (just before `on_turn_finished`), read `spend_total(&turn_spend, ...)`
+  and `agent_session_spend(&state.stats, ...)`, fill `emit_turn_costs`,
+  then `spend_free(&turn_spend)` (it owns heap records).
+  Errored/interrupted user turns stage whatever was accounted, matching
+  the M7 fields' current behavior.
 - **Control** (the dispatch that handles `status`/`effort` controls): add
   `session_stats` → handler reads `st->stats`, calls `spend_total`, emits
   via a new `emit_session_stats(...)` in emit.c.
 - **Tests** (meson, `HAX_PROVIDER=mock`): extend the usage protocol test
-  for the six fields' presence/omission; new `tests/protocol/
-  test_session_stats.c` driving the control and asserting the event.
+  for single-request presence/omission of the six fields, plus two
+  adversarial cases: (a) a **two-request tool turn** — first response
+  makes a tool call and reports an exact cost, second reports tokens
+  only — asserting `cacheWriteTokens` sums across both requests,
+  `costTotal` covers both (exact + catalog estimate), and
+  `costEstimated` is true for the mixed turn; (b) an **explicit-zero**
+  turn (provider reports `cost: 0`) asserting `costTotal` and
+  `sessionSpend` are omitted under the `> 0` gate. New
+  `tests/protocol/test_session_stats.c` driving the control: a
+  fresh-session case (counters present at zero; token and spend fields
+  absent) and an after-a-mock-turn case (accumulated fields present and
+  consistent with the per-turn event).
 - **Discipline**: run the UPSTREAM.md freshness check before implementation
   (last sync 2026-07-15; the cadence rule requires a pre-feature sync when
   the fork is touched at a notable level); `clang-format -i` on touched C
@@ -128,23 +192,34 @@ implements them (protocol-is-the-contract).
   order using data the surface already has plus the event: `provider`
   (provider · model · effort, from the last `status` event), `user turns`,
   `requests`, `tool calls`, token totals, `worked` (`fmtDuration`),
-  `spend` (`fmtCost`, `~` when estimated). Rows whose numbers were never
-  reported are dropped, not zero-filled (upstream's rule).
+  `spend` (`fmtCost`, `~` when estimated). Rows whose fields are absent
+  from the event are dropped, not zero-filled (the event's `> 0` gate
+  mirrors upstream's row gating); the `tool calls` row is additionally
+  dropped at zero — the event always carries the counter, but upstream's
+  renderer gates that row on `> 0` and we match it.
 - **`/usage`**: include cache-write tokens and turn cost lines when the
   new fields are present.
 - **Wiring**: standalone runtime passes `sessionStats: () =>
-  session.sessionStats()` into the slash context. The ai-whisper adapter
-  gains the same one-liner downstream (follow-up, out of this repo's arc).
+  session.sessionStats()` into the slash context. The mounted surface is
+  wired by the tracked ai-whisper follow-up (Non-goals); until it lands,
+  mounted `/session` prints the `session stats unavailable` fallback by
+  design.
 
 ## §6 Verification
 
-- **C**: the two protocol tests above green in `meson test`.
-- **TS**: codec round-trip tests; `statsLine` spend rendering (present /
+- **C**: the §3 protocol tests (extended usage cases, including the
+  two-request and explicit-zero regressions, plus `test_session_stats`)
+  green in `meson test`.
+- **TS**: codec round-trip tests (including a counters-only fresh-session
+  `session_stats` event); `statsLine` spend rendering (present /
   estimated / absent / errored-turn suppression); `fmtCost` threshold
   table matching `format_cost`; `/session` render test (full payload +
   dropped-row case + unavailable fallback); harness `sessionStats()` test
   against a scripted event stream.
-- **Acceptance (real engine)**: one real-provider turn per surface —
-  stats line shows `· $…` (or `· ~$…`), `/session` returns non-zero
+- **Acceptance (real engine, this repo — standalone surface)**: one
+  real-provider turn whose stats line shows `· $…` (or `· ~$…`), plus a
+  tool-using turn (≥ 2 requests) after which `/session` returns non-zero
   turns/requests and a spend consistent with the transcript footers.
-  Evidence committed as an artifact per the slice-1 practice.
+  Evidence committed as an artifact per the slice-1 practice. Mounted
+  acceptance (the same checks through `whisper collab mount ezio`)
+  belongs to the adapter follow-up's brief (Non-goals), not this arc.
