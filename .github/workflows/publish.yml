@@ -70,7 +70,14 @@ jobs:
       - name: Build hax
         run: meson setup vendor/hax/build vendor/hax && meson compile -C vendor/hax/build
       - name: Engine test suite
-        run: meson test -C vendor/hax/build --print-errorlogs
+        # Retry once — same guard as binaries.yml: upstream's tools/bash suite
+        # has a rare kill-race flake on loaded runners (EOF-collapse SIGKILL
+        # recorded as "[signal 9]"; it broke the v0.4.2 publish on linux-arm64
+        # 2026-07-18). A deterministic regression still fails both passes; drop
+        # the retry together with binaries.yml's once upstream's fix lands.
+        run: >
+          meson test -C vendor/hax/build --print-errorlogs ||
+          meson test -C vendor/hax/build --print-errorlogs
       - name: Stage the binary into its platform package
         run: node scripts/stage-host-binary.mjs
       - name: Build + single-package install smoke
