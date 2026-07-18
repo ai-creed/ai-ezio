@@ -234,10 +234,16 @@ export function createMountedRenderer(input: {
 	// locally-handled slash command (no idle event follows to draw it).
 	const renderPrompt = (): void => void writeContent(`\n${prompt}`);
 
+	// Out-of-band host notice (e.g. subagent report lines) — routed through the
+	// same guard as event content so it can never land on a live spinner row.
+	// Callers pass newline-terminated lines; the string is written verbatim.
+	const notify = (line: string): void => void writeContent(line);
+
 	return {
 		echoUserInput,
 		echoSubmittedInput,
 		renderPrompt,
+		notify,
 		handle(event: ProtocolEvent): void {
 			model = model.reduce(event, nowFn());
 			switch (event.type) {

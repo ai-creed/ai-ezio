@@ -339,12 +339,13 @@ describe("createMountedRenderer", () => {
 		expect(out).toContain("[95m");
 	});
 
-	it("exposes the public API (handle + echoUserInput + echoSubmittedInput + renderPrompt)", () => {
+	it("exposes the public API (handle + echoUserInput + echoSubmittedInput + renderPrompt + notify)", () => {
 		const t = setup();
 		expect(typeof t.r.handle).toBe("function");
 		expect(typeof t.r.echoUserInput).toBe("function");
 		expect(typeof t.r.echoSubmittedInput).toBe("function");
 		expect(typeof t.r.renderPrompt).toBe("function");
+		expect(typeof t.r.notify).toBe("function");
 	});
 });
 
@@ -543,5 +544,43 @@ describe("content writes clear the live spinner row", () => {
 		begin(t);
 		t.r.handle({ type: "error", turnId: "t1", message: "boom" });
 		expectClearedBeforeMarker(t.writes, "boom");
+	});
+
+	it("notify (out-of-band host notice)", () => {
+		const t = setup();
+		begin(t);
+		t.r.notify("✔ subagent codex-mini 2s\n");
+		expectClearedBeforeMarker(t.writes, "✔ subagent");
+	});
+});
+
+describe("notify (out-of-band host notices, e.g. subagent report lines)", () => {
+	it("writes the line verbatim with no spinner-frame bytes on its row", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
+		t.tick(); // spinner row live
+		t.r.notify("▸ subagent codex-mini running…\n");
+		// The notify chunk itself is exactly the line — the frame was cleared in
+		// a preceding chunk, never concatenated onto the notice's row.
+		const idx = t.writes.findIndex((s) => s.includes("▸ subagent"));
+		expect(t.writes[idx]).toBe("▸ subagent codex-mini running…\n");
+	});
+
+	it("re-parks the spinner on a fresh row below the notice (bookkeeping stays synced)", () => {
+		const t = setup();
+		t.r.handle({ type: "user_turn_started", turnId: "t1" });
+		t.tick();
+		t.r.notify("▸ subagent codex-mini running…\n");
+		const afterNotice = t.writes.length;
+		t.tick(); // next frame must open a NEW row, not overwrite the notice
+		const reopened = t.writes.slice(afterNotice).join("");
+		expect(reopened.startsWith("\n")).toBe(true);
+		expect(reopened).toContain("thinking…");
+	});
+
+	it("writes the line plainly when no spinner is live (idle)", () => {
+		const t = setup();
+		t.r.notify("✔ subagent codex-mini 2s\n");
+		expect(t.out()).toBe("✔ subagent codex-mini 2s\n");
 	});
 });
