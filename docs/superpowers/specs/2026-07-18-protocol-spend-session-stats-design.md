@@ -170,21 +170,38 @@ implements them (protocol-is-the-contract).
   additionally reads config `mock.catalog_id` (mirroring the existing
   `mock.script` read) and sets `provider->catalog_id` when present. This
   two-line, test-only seam is what makes the estimate path exercisable
-  under `HAX_PROVIDER=mock`: with rates supplied through the hermetic
+  under `HAX_PROVIDER=mock`: with rates supplied through the
   `catalog.models` config tier (`fill_from_config`,
-  vendor/hax/src/catalog.c — no network), a token-only mock response
-  prices to a real catalog estimate. Without it the mock has no catalog
-  identity, `spend_rec_price()` returns `-1`, and a mixed
-  exact-plus-estimate turn cannot be asserted. The mock script already
-  supports every other fixture knob needed (`cost=`, `cache_write=`,
-  `cache_write_1h=`).
+  vendor/hax/src/catalog.c), a token-only mock response prices to a real
+  catalog estimate. Without it the mock has no catalog identity,
+  `spend_rec_price()` returns `-1`, and a mixed exact-plus-estimate turn
+  cannot be asserted. Two obligations ride the seam:
+  - *Hermeticity is part of the fixture, not an assumption.* A
+    catalog-mapped provider triggers `catalog_prefetch()` on the first
+    user turn, which spawns a background HTTP fetch whenever
+    `catalog.url` is nonempty (the default). Every test using
+    `mock.catalog_id` must therefore set `catalog.url` to `""` in the
+    child's config — the documented no-fetch opt-out
+    (vendor/hax/src/catalog.c, `catalog_prefetch`) — so the regression
+    reads only the config tier and can never silently depend on network
+    behavior.
+  - *The patch-surface budget moves with the footprint.*
+    `src/providers/mock.c` sits outside UPSTREAM.md's exact permitted
+    file list, so the implementation commit that introduces the seam
+    must extend the "Patch-surface budget" section in the same commit:
+    add the file as a thin seam scoped to the two config-read lines in
+    `mock_provider_new`, so a future sync conflict there is in-contract
+    and its resolution rule is documented.
+  The mock script already supports every other fixture knob needed
+  (`cost=`, `cache_write=`, `cache_write_1h=`).
 - **Control** (the dispatch that handles `status`/`effort` controls): add
   `session_stats` → handler reads `st->stats`, calls `spend_total`, emits
   via a new `emit_session_stats(...)` in emit.c.
 - **Tests** (meson, `HAX_PROVIDER=mock`): extend the usage protocol test
   for single-request presence/omission of the six fields, plus three
   adversarial cases: (a) a **two-request tool turn**, run with
-  `mock.catalog_id` set and rates in `catalog.models` — first response
+  `mock.catalog_id` set, rates in `catalog.models`, and `catalog.url`
+  empty (the hermetic fixture above) — first response
   makes a tool call and reports an exact `cost=`, second reports tokens
   only (`in=`/`out=`/`cache_write=`) — asserting `cacheWriteTokens` sums
   across both requests, `costTotal` equals the exact charge plus the
@@ -208,7 +225,9 @@ implements them (protocol-is-the-contract).
   files; keep the production-source delta inside the emitter/controls
   patch surface plus the named two-line mock catalog-id seam above — no
   other engine sources (new tests and their meson registration are, of
-  course, expected).
+  course, expected) — and land the UPSTREAM.md patch-surface-budget
+  extension in the same commit as the mock seam, so the documented
+  contract never lags the actual footprint.
 
 ## §4 TS harness
 
@@ -253,7 +272,12 @@ implements them (protocol-is-the-contract).
 - **C**: the §3 protocol tests (extended usage cases, including the
   two-request mixed exact-plus-estimate, explicit-zero, and
   auto-compaction frame-split regressions, plus `test_session_stats`)
-  green in `meson test`.
+  green in `meson test`; the mixed-cost fixture runs with `catalog.url`
+  empty (no prefetch spawned, §3).
+- **Fork governance**: UPSTREAM.md's "Patch-surface budget" lists the
+  `src/providers/mock.c` catalog-id seam in the same commit that adds
+  it (§3) — verified as part of the implementation review, alongside
+  the protocol.md update §2 already requires.
 - **TS**: codec round-trip tests (including a counters-only fresh-session
   `session_stats` event); `statsLine` spend rendering (present /
   estimated / absent / errored-turn suppression); `fmtCost` threshold
