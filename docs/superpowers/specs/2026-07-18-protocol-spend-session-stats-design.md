@@ -61,7 +61,24 @@ control round-trip for the on-demand command) and renders both.
 turn makes several model round-trips and usage arrives per round-trip
 (`turn_usage_make` is per-request). The M7 fields already aggregate
 (`outputTokens` sums across round-trips, `cachedTokens` is last-round);
-the six new fields get an explicit per-user-turn aggregation the same way:
+the six new fields get an explicit per-user-turn aggregation the same way
+(table below).
+
+**Turn frame.** The per-turn fields cover the user turn's *conversational*
+round-trips — the prompt and its tool loop. Compaction requests are
+deliberately excluded, including engine auto-compaction, which runs inside
+the user turn just before `assistant_turn_finished` (reachable in shipped
+subagent sessions via `HAX_COMPACT_AUTO=1`): `compact_on_event` accounts
+into `struct session_stats` only, the existing M7 fields already exclude
+it, and upstream's own `worked_ms` accrues before the in-turn auto-compact
+runs — the engine consistently treats compaction as session overhead, not
+turn work. So a compaction round-trip never contributes to `costTotal` /
+`cacheWriteTokens` / `cacheWrite1hTokens`, while `sessionSpend` — read at
+the staging point, which sits *after* the in-turn auto-compact — does
+include it (as do the `session_stats` totals and `requests` counter). This
+also keeps attribution mode-invariant: harness-driven compaction (the M11
+TS auto-compact driver) runs between turns, where no per-turn frame exists
+at all, and both compaction paths land identically in the session figures.
 
 | Field | Type | Per-user-turn value |
 | --- | --- | --- |
@@ -143,21 +160,44 @@ implements them (protocol-is-the-contract).
   truncated-but-billed response counts. At the existing M7 staging point
   (just before `on_turn_finished`), read `spend_total(&turn_spend, ...)`
   and `agent_session_spend(&state.stats, ...)`, fill `emit_turn_costs`,
-  then `spend_free(&turn_spend)` (it owns heap records).
-  Errored/interrupted user turns stage whatever was accounted, matching
-  the M7 fields' current behavior.
+  then `spend_free(&turn_spend)` (it owns heap records). The staging
+  point sits after the in-turn auto-compaction call, so the session
+  figures include compaction while the turn-locals — fed only by the
+  main-loop accounting point, never by `compact_on_event` — exclude it
+  by construction (§1 turn frame). Errored/interrupted user turns stage
+  whatever was accounted, matching the M7 fields' current behavior.
+- **Mock catalog seam** (`src/providers/mock.c`): `mock_provider_new`
+  additionally reads config `mock.catalog_id` (mirroring the existing
+  `mock.script` read) and sets `provider->catalog_id` when present. This
+  two-line, test-only seam is what makes the estimate path exercisable
+  under `HAX_PROVIDER=mock`: with rates supplied through the hermetic
+  `catalog.models` config tier (`fill_from_config`,
+  vendor/hax/src/catalog.c — no network), a token-only mock response
+  prices to a real catalog estimate. Without it the mock has no catalog
+  identity, `spend_rec_price()` returns `-1`, and a mixed
+  exact-plus-estimate turn cannot be asserted. The mock script already
+  supports every other fixture knob needed (`cost=`, `cache_write=`,
+  `cache_write_1h=`).
 - **Control** (the dispatch that handles `status`/`effort` controls): add
   `session_stats` → handler reads `st->stats`, calls `spend_total`, emits
   via a new `emit_session_stats(...)` in emit.c.
 - **Tests** (meson, `HAX_PROVIDER=mock`): extend the usage protocol test
-  for single-request presence/omission of the six fields, plus two
-  adversarial cases: (a) a **two-request tool turn** — first response
-  makes a tool call and reports an exact cost, second reports tokens
-  only — asserting `cacheWriteTokens` sums across both requests,
-  `costTotal` covers both (exact + catalog estimate), and
-  `costEstimated` is true for the mixed turn; (b) an **explicit-zero**
-  turn (provider reports `cost: 0`) asserting `costTotal` and
-  `sessionSpend` are omitted under the `> 0` gate. New
+  for single-request presence/omission of the six fields, plus three
+  adversarial cases: (a) a **two-request tool turn**, run with
+  `mock.catalog_id` set and rates in `catalog.models` — first response
+  makes a tool call and reports an exact `cost=`, second reports tokens
+  only (`in=`/`out=`/`cache_write=`) — asserting `cacheWriteTokens` sums
+  across both requests, `costTotal` equals the exact charge plus the
+  config-tier catalog estimate, and `costEstimated` is true for the
+  mixed turn, at the real `agent.c` staging layer; (b) an
+  **explicit-zero** turn (provider reports `cost=0`) asserting
+  `costTotal` and `sessionSpend` are omitted under the `> 0` gate;
+  (c) an **auto-compaction** turn (`HAX_COMPACT_AUTO=1` over the
+  existing compact protocol-test setup, the compaction response
+  reporting usage and a cost) asserting the intentional frame split:
+  the finishing turn's `costTotal`/`cacheWriteTokens` exclude the
+  compaction request while its `sessionSpend` — and the subsequent
+  `session_stats` event's totals and `requests` — include it. New
   `tests/protocol/test_session_stats.c` driving the control: a
   fresh-session case (counters present at zero; token and spend fields
   absent) and an after-a-mock-turn case (accumulated fields present and
@@ -165,7 +205,10 @@ implements them (protocol-is-the-contract).
 - **Discipline**: run the UPSTREAM.md freshness check before implementation
   (last sync 2026-07-15; the cadence rule requires a pre-feature sync when
   the fork is touched at a notable level); `clang-format -i` on touched C
-  files; keep the delta inside the emitter/controls patch surface.
+  files; keep the production-source delta inside the emitter/controls
+  patch surface plus the named two-line mock catalog-id seam above — no
+  other engine sources (new tests and their meson registration are, of
+  course, expected).
 
 ## §4 TS harness
 
@@ -208,7 +251,8 @@ implements them (protocol-is-the-contract).
 ## §6 Verification
 
 - **C**: the §3 protocol tests (extended usage cases, including the
-  two-request and explicit-zero regressions, plus `test_session_stats`)
+  two-request mixed exact-plus-estimate, explicit-zero, and
+  auto-compaction frame-split regressions, plus `test_session_stats`)
   green in `meson test`.
 - **TS**: codec round-trip tests (including a counters-only fresh-session
   `session_stats` event); `statsLine` spend rendering (present /
