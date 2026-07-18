@@ -7,6 +7,39 @@ All notable changes to ai-ezio are documented here. The format is based on
 Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
 `latest`: `npm i -g @ai-creed/ai-ezio@beta` (or the unscoped `ai-ezio@beta`).
 
+## [0.4.2] — 2026-07-18
+
+### Added
+
+- **Turn-long tool-aware spinner (UX slice 1).** The busy spinner now runs the
+  whole turn, tools included: settle-hysteresis labels (`thinking…`,
+  `[bash] running…`, demoting to `working…` under rapid churn), an elapsed
+  counter once a turn passes 30 s (`⠋ 42s · thinking…`), and parked-row
+  discipline — the spinner re-parks one line below each content block instead
+  of freezing while tools run. Adapted from upstream hax's spinner unification.
+- **PageUp/PageDown paging in the resume picker**, aliasing `[` / `]`, on both
+  the standalone `--resume` picker and the mounted `/resume` overlay; hint
+  strings updated.
+
+### Changed
+
+- **Stats line is duration-led, narrow→wide** — `42s · 8.9k / 256k (3%)`: this
+  turn's wall time first, then the context gauge. The `out`/`cached` figures
+  moved to the transcript's per-request usage footers (Ctrl+T or
+  `/transcript`); `/usage` keeps the full payload. Errored turns render no
+  stats line.
+
+### Fixed
+
+- **Subagent report lines no longer corrupt the live spinner row.** The
+  `▸ subagent … running` / `✔ subagent …` progress lines were written straight
+  to stdout mid-tool-call, landing on the spinner row; they now route through
+  a renderer `notify` seam behind the same guard as event content.
+
+Engine source unchanged since 0.4.1 (same fork commit); the `@ai-creed/hax-*`
+platform packages republish at 0.4.2 in lockstep with binaries rebuilt from
+that same commit.
+
 ## [0.4.1] — 2026-07-15
 
 ### Changed

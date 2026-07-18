@@ -1,6 +1,6 @@
 {
 	"name": "@ai-creed/ai-ezio",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "ai-ezio: hax-derived, workflow-native coding agent",
 	"license": "MIT",
 	"type": "module",
