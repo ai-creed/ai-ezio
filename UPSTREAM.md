@@ -116,10 +116,13 @@ with upstream MUST follow these rules.
 - **Weekly:** rebase `emitter` onto the latest upstream `master` once a week.
   Drift never exceeds a handful of upstream commits, so each sync stays a
   minutes-sized, mechanical job.
-- **Exceptionally, before major fork-touching work:** any ezio feature expected
-  to change the hax fork at a notable level (touching multiple files) starts
-  from a fresh sync, so new downstream commits are never authored against a
-  stale base.
+- **Before major fork-touching work:** any ezio feature expected to change the
+  hax fork at a notable level (touching multiple files) starts from a fresh
+  base — but the weekly cadence is the only sync trigger. If the pre-feature
+  drift check fires mid-week, the feature is PARKED until the next scheduled
+  sync; an early sync is never run for it (owner decision 2026-07-18, after
+  the 3a arc hit this gate). AGENTS.md carries the last-sync marker to check
+  against.
 
 ### Patch-surface budget (the conflict firewall)
 

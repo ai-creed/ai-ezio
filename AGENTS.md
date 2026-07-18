@@ -72,6 +72,13 @@ ai-ezio/
    not upstream), so every C change must stay localized so the fork can keep
    syncing with upstream hax. If a change to hax grows beyond a tiny generic seam,
    stop and reconsider — it probably belongs in the harness.
+   - **Upstream sync cadence is weekly — never more often.** Last sync:
+     **2026-07-15** (upstream base `74ab9e9`). Update this line as part of every
+     sync. Before starting fork-touching work, check drift against the seam
+     files (`git -C vendor/hax log --oneline emitter..hax-upstream/master --
+     src/agent.c src/agent_core.c src/agent_core.h src/protocol/ src/slash.c`);
+     if the gate fires, PARK the feature until the next scheduled weekly sync —
+     do not trigger an early sync for it.
 4. **Protocol is the contract.** Do not infer readiness or response text from
    terminal chrome. Emit/consume explicit JSONL events. Any new event or control
    must be documented in `docs/protocol.md` first.
