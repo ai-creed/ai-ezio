@@ -49,6 +49,24 @@ export function subagentReportLine(write: (s: string) => void): (line: string) =
 	return (line) => write(line.endsWith("\n") ? line : `${line}\n`);
 }
 
+/** Late-bindable sink for subagent report lines. `report` must be handed to
+ * loadSessionHosts before the renderer exists; once `bind(renderer.notify)`
+ * runs, lines route through the renderer's content guard instead of the raw
+ * fallback writer — a raw write under a live spinner lands on the spinner row
+ * and corrupts it. */
+export function buildReportSink(fallback: (s: string) => void): {
+	report: (line: string) => void;
+	bind: (notify: (line: string) => void) => void;
+} {
+	let sink = fallback;
+	return {
+		report: subagentReportLine((s) => sink(s)),
+		bind: (notify) => {
+			sink = notify;
+		},
+	};
+}
+
 /** Options for the main mounted Session — always pins engine auto-compaction OFF
  * (HAX_COMPACT_AUTO=0) so no start/resume path can leak an inherited =1. The harness
  * owns compaction for the main session; subagent children pin =1 via profileEnv. */
@@ -334,10 +352,13 @@ export function buildStandaloneResumeDeps(input: StandaloneResumeDepsInput): {
 /** Run the interactive standalone REPL. Returns the process exit code. */
 export async function runStandalone(opts: StandaloneOptions = {}): Promise<number> {
 	const cwd = process.cwd();
+	// Report lines are late-bound to the renderer's notify guard below —
+	// loadSessionHosts needs the callback before the renderer can exist.
+	const reportSink = buildReportSink((s) => void process.stdout.write(s));
 	const { registry, mcpHost } = loadSessionHosts({
 		mode: "standalone",
 		cwd,
-		report: subagentReportLine((s) => process.stdout.write(s)),
+		report: reportSink.report,
 	});
 	const stateDir = ezioStateDir();
 	const repoKey = repoKeyForPath(cwd);
@@ -346,6 +367,7 @@ export async function runStandalone(opts: StandaloneOptions = {}): Promise<numbe
 	// except for the injected CortexSessionSink (inside createRecorder).
 	const recorder = createRecorder({ worktreePath: cwd, host: mcpHost, stateDir, repoKey });
 	const renderer = createMountedRenderer({ stdout: process.stdout });
+	reportSink.bind(renderer.notify);
 	let lastContent = "";
 	let lastUsage: AssistantTurnFinishedEvent["usage"];
 	// Compaction (M11): wired after the session exists (it needs runExclusive),

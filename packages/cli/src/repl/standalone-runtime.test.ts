@@ -3,6 +3,7 @@ import { createRenameController, createSessionTitleStore } from "@ai-ezio/harnes
 import { decodeChunk } from "@ai-ezio/surface";
 import type { ProtocolEvent } from "@ai-ezio/protocol";
 import {
+	buildReportSink,
 	buildStandaloneKeySources,
 	buildStandaloneResumeDeps,
 	makeOneShotOnEvent,
@@ -23,6 +24,33 @@ describe("subagentReportLine", () => {
 		const report = subagentReportLine((s) => lines.push(s));
 		report("✔ subagent [cheap] 12.3s · 4.2k tok");
 		expect(lines).toEqual(["✔ subagent [cheap] 12.3s · 4.2k tok\n"]);
+	});
+});
+
+describe("buildReportSink (late-bound subagent report routing)", () => {
+	it("falls back to the raw writer before the renderer exists", () => {
+		const raw: string[] = [];
+		const sink = buildReportSink((s) => raw.push(s));
+		sink.report("▸ subagent codex-mini running…");
+		expect(raw).toEqual(["▸ subagent codex-mini running…\n"]);
+	});
+
+	it("routes through the bound notify after bind — never the fallback", () => {
+		const raw: string[] = [];
+		const notified: string[] = [];
+		const sink = buildReportSink((s) => raw.push(s));
+		sink.bind((line) => notified.push(line));
+		sink.report("✔ subagent codex-mini 2s");
+		expect(notified).toEqual(["✔ subagent codex-mini 2s\n"]);
+		expect(raw).toEqual([]);
+	});
+
+	it("keeps subagentReportLine's newline normalization without doubling", () => {
+		const notified: string[] = [];
+		const sink = buildReportSink(() => {});
+		sink.bind((line) => notified.push(line));
+		sink.report("already terminated\n");
+		expect(notified).toEqual(["already terminated\n"]);
 	});
 });
 
