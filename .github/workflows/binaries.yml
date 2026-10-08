@@ -32,9 +32,9 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y libcurl4-openssl-dev libjansson-dev meson ninja-build pkg-config
+            sudo apt-get install -y libcurl4-openssl-dev libjansson-dev meson ninja-build pkg-config tmux
           else
-            brew install jansson meson ninja pkg-config   # libcurl ships with macOS
+            brew install jansson meson ninja pkg-config tmux   # libcurl ships with macOS
           fi
       - name: Build hax for this target
         run: meson setup vendor/hax/build vendor/hax && meson compile -C vendor/hax/build

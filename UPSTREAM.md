@@ -191,7 +191,10 @@ unit-test block — keep that block in step when upstream changes it. The `sessi
 function (`session_list_json`) plus its declaration — additive, so a rebase sees
 no overlap with existing session logic. In the meson files we own only list
 entries (`sources`, `test_sources`, `e2e_sources`) and the small e2e foreach —
-never structural build logic.
+never structural build logic. (The former `hax_commit` git lookup + `c_args`
+block is gone since 2026-10-08: the `ready` event's `haxBaseCommit` now carries
+upstream's `HAX_VERSION` from the generated `version.h`, so builds without git —
+upstream's Alpine/Arch/Debian/BSD CI containers — configure cleanly.)
 
 During a sync, a conflict in any file outside this list is a red flag: stop and
 redesign the downstream change toward the TS harness instead of widening the
@@ -249,7 +252,18 @@ The submodule pointer must always reference a commit pushed to `origin`
    (real `whisper collab mount ezio`, relay handoff, M8 tool + table rendering)
    and `e2e:ai-ezio-workflow` (full SDD run, ezio implementer + claude
    reviewer). Same hardcoded-path caveat as step 3.
-6. `clang-format --dry-run --Werror` on every C file touched during resolution.
+6. `make lint` in `vendor/hax` — upstream's full gate: clang-format, the
+   `scripts/lint_style.py` conventions, and clang-tidy (needs Homebrew llvm:
+   `scripts/install_deps.sh lint`). Upstream's CI matrix runs it on every push
+   to the fork, so the downstream files must satisfy it: quote-includes are
+   plain paths under `src/` or `tests/` (never `../`), include lines carry no
+   comments, block-comment delimiters sit beside text, tests use `t_tempdir()`
+   instead of raw `mkdtemp`, every header a file uses is included directly.
+7. `BUILD_DIR=build-asan make tests` and `BUILD_DIR=build-tsan scripts/check.sh
+   test protocol/...` — the same matrix runs ASAN/UBSAN/TSAN; every
+   `emit_state_init` in a test needs its `emit_state_free`, and e2e drains must
+   wait for EOF, not a fixed quiet window (sanitized exits are slow).
+   (Kept as the quick per-file check; step 6 supersedes it.)
    Feed the file list through `xargs` (or `${=files}` in zsh): zsh does not
    word-split an unquoted `$files`, so `clang-format $files` sees ONE bogus
    newline-joined path, prints "No such file" and checks nothing. Stage 1 of

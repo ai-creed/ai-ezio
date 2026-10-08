@@ -38,7 +38,7 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 
 | `type`                     | Fields                                   | Meaning |
 | -------------------------- | ---------------------------------------- | ------- |
-| `ready`                    | `sessionId`, `protocol`, `haxBaseCommit` | Engine up, idle, ready for controls. |
+| `ready`                    | `sessionId`, `protocol`, `haxBaseCommit` | Engine up, idle, ready for controls. `haxBaseCommit` is the engine build identity: since the 2026-10-08 sync it is hax's own `git describe` string (e.g. `v0.5.0-44-g05729b9`, the hash is the suffix after `g`), the project version with no git. Treat it as opaque. |
 | `user_turn_started`        | `turnId`                                 | A submitted user turn was accepted. |
 | `assistant_turn_started`   | `turnId`                                 | Model began responding. |
 | `assistant_delta`          | `turnId`, `text`                         | Streamed text chunk (optional for consumers that only want final). |
@@ -71,7 +71,7 @@ support. Add fields backward-compatibly; bump major only on breaking changes.
 Example stream:
 
 ```json
-{"type":"ready","sessionId":"s_01","protocol":"0.1.0","haxBaseCommit":"8fd139b"}
+{"type":"ready","sessionId":"s_01","protocol":"0.1.0","haxBaseCommit":"v0.5.0-44-g05729b9"}
 {"type":"user_turn_started","turnId":"turn_1"}
 {"type":"assistant_turn_started","turnId":"turn_1"}
 {"type":"assistant_delta","turnId":"turn_1","text":"Looking at the repo..."}
