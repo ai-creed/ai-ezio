@@ -14,7 +14,7 @@ does not depend on it ever being merged.
 | Downstream fork (hax)| `git@github.com:ai-creed/hax.git` (private) — carries `emitter` |
 | Sync source (orig.)  | `https://github.com/OleksandrChekhovskyi/hax` (read-only) |
 | Downstream product   | `ai-creed/ai-ezio` (private)                              |
-| Base commit          | `189816f` = v0.4.0 (upstream base; emitter tip `3a850da`; synced 2026-10-08, staged catch-up — v0.5.0 and master still pending; original derivation `8fd139b`, 2026-05-29) |
+| Base commit          | `95e0179` = v0.5.0 (upstream base; emitter tip `81fb7d0`; synced 2026-10-08, staged catch-up — stage 3 to `master` still pending; original derivation `8fd139b`, 2026-05-29) |
 
 ## How hax is consumed
 
@@ -55,7 +55,10 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
   — a general runtime registry so any embedder can add `/`-commands;
 - **`HAX_EXTRA_SKILLS_DIR`** (M4): `agent_env.c` enumerates one additional skills
   directory (from the env var) into the model prompt — a general "extra skills
-  dir" knob.
+  dir" knob. Since v0.5.0 it sits in `append_skills` beside upstream's own
+  roots (nearest-first project walk, `$XDG_CONFIG_HOME/hax/skills`,
+  `~/.agents/skills`); the downstream `/skills` lister in
+  `src/protocol/skills_cmd.c` still enumerates its own three dirs.
 - **`--list-sessions`** (ezio REPL resume): a non-interactive subcommand that
   prints the cwd's saved sessions as a JSON array — `session_list_json()` in
   `session.c` (a self-contained, append-only function reusing the existing
@@ -223,6 +226,11 @@ The submodule pointer must always reference a commit pushed to `origin`
    and `e2e:ai-ezio-workflow` (full SDD run, ezio implementer + claude
    reviewer). Same hardcoded-path caveat as step 3.
 6. `clang-format --dry-run --Werror` on every C file touched during resolution.
+   Feed the file list through `xargs` (or `${=files}` in zsh): zsh does not
+   word-split an unquoted `$files`, so `clang-format $files` sees ONE bogus
+   newline-joined path, prints "No such file" and checks nothing. Stage 1 of
+   the 2026-10-08 sync shipped 18 violations exactly this way; stage 2 fixed
+   them. Treat a gate whose output you did not read as a gate that did not run.
 
 If a major upstream change redesigns the event model itself (the seam the
 emitter rides), expect a real, but localized, port — re-anchor `emit.c` to the
