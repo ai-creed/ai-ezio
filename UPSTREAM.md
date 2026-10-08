@@ -14,7 +14,7 @@ does not depend on it ever being merged.
 | Downstream fork (hax)| `git@github.com:ai-creed/hax.git` (private) — carries `emitter` |
 | Sync source (orig.)  | `https://github.com/OleksandrChekhovskyi/hax` (read-only) |
 | Downstream product   | `ai-creed/ai-ezio` (private)                              |
-| Base commit          | `95e0179` = v0.5.0 (upstream base; emitter tip `81fb7d0`; synced 2026-10-08, staged catch-up — stage 3 to `master` still pending; original derivation `8fd139b`, 2026-05-29) |
+| Base commit          | `2834c2c` (upstream master as of 2026-10-07; emitter tip `05729b9`; synced 2026-10-08 — catch-up complete; original derivation `8fd139b`, 2026-05-29) |
 
 ## How hax is consumed
 
@@ -95,7 +95,11 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
   branch (`dispatch_delegated_call`). Boundaries, log flushing and abort repair
   are upstream's job now — the downstream `agent.c` footprint shrank. `isDiff`
   comes from `tool_output_is_diff()` in `agent_dispatch.c` (upstream dropped
-  the `output_is_diff` flag);
+  the `output_is_diff` flag). Upstream later removed the loop's `turn_end`
+  hook and derives all stats from the record (`agent_stats`), so the M7
+  `assistant_turn_finished.usage` is derived the same way:
+  `turn_usage_from_record()` sums this turn's `TURN_USAGE` footers (output
+  summed, cached from the last footer, compaction footers skipped);
 - **M7 (mounted REPL parity):** `emit_status` carries an `effort` field;
   `emit_set_usage` stages a turn's token counts that `obs_on_turn_finished`
   attaches to `assistant_turn_finished` (fields omitted when the backend reports
@@ -107,8 +111,22 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
 - **M11 (compaction):** `agent_session_compact` (drop window + keep window +
   summary swap, `agent_core.{c,h}`), the `compact` control / `compacted` event
   (parse-time validation + turn-less error, `emit.{c,h}`), and the
-  `agent_compact` handler + transcript/session-log re-seed in `agent.{c,h}` —
-  still confined to the documented seam files; tests in `tests/protocol/`.
+  `agent_compact_hosted` handler + transcript/session-log rotate-and-re-seed
+  in `agent.{c,h}` — still confined to the documented seam files; tests in
+  `tests/protocol/`.
+  **Deferred (2026-10-08 sync):** upstream's session files are append-only now
+  ("never shrink"; /undo appends an undo record and retires items, compaction
+  appends a `COMPACT_SEED` user message and `agent_session_context` serves
+  only what follows the newest seed, /session spend is derived from the
+  record). The hosted compact still rotates to a fresh session file and
+  re-seeds it — correct for `--resume`/`--continue` (covered by
+  `protocol/compact_e2e`) and within the API (`session_log_reset` serves
+  `/new`), but the summarized turns' spend leaves `/session` stats. Revisit:
+  express `dropLastTurns` as `agent_session_retire` + `session_log_undo` and
+  the summary as an appended compaction seed, so no rotation is needed. The
+  `keepLastTurns` window needs a seed placed *before* the kept turns, which
+  the append-only file order cannot express today — that is the open design
+  question, and the reason this was not done inside the catch-up sync.
 - **M8 (mounted display fidelity):** the emitter now also emits **tool events from
   the `agent.c` dispatch seam** — `emit_tool_started` carries a human-readable
   `args` summary (via a small `tool_display_arg` helper in `agent_dispatch.{c,h}`
@@ -166,7 +184,10 @@ plus thin seam lines in shared files (`agent.c`, `agent_core.{c,h}`,
 `cli.{c,h}`, `provider.h`, `tool_schema.c`, the two meson files,
 `tests/test_slash.c`, `tests/test_agent_dispatch.c`, `tests/test_session.c`).
 `cli.{c,h}`, `provider.h` and `tool_schema.c` joined the list at the v0.4.0
-sync (2026-10-08) when upstream moved option parsing and the tool-schema model. The `session.{c,h}` footprint is one append-only
+sync (2026-10-08) when upstream moved option parsing and the tool-schema model.
+In `tests/meson.build` the downstream e2e executables link `test_support_dep`
+(the compiled test harness) and run under `test_env`, mirroring upstream's own
+unit-test block — keep that block in step when upstream changes it. The `session.{c,h}` footprint is one append-only
 function (`session_list_json`) plus its declaration — additive, so a rebase sees
 no overlap with existing session logic. In the meson files we own only list
 entries (`sources`, `test_sources`, `e2e_sources`) and the small e2e foreach —
@@ -210,7 +231,10 @@ The submodule pointer must always reference a commit pushed to `origin`
 ### Validation gate (all green before the pointer bump)
 
 1. `meson test -C build --print-errorlogs` — full engine suite, including the
-   downstream `protocol/` tests.
+   downstream `protocol/` tests. Known upstream flakes under the full parallel
+   run (as of 2834c2c): `system/browser` and `system/git` wait on detached
+   helpers with a bounded window and fail on pristine upstream too; rerun them
+   in isolation before blaming the sync.
 2. `pnpm -r build && pnpm -r test` — the TS harness against the new engine.
 3. `pnpm run smoke:cli-mount` and `pnpm run smoke:proto` — one real mounted
    turn and the protocol lifecycle/interrupt path. Both scripts hardcode

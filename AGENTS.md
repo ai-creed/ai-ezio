@@ -73,8 +73,7 @@ ai-ezio/
    syncing with upstream hax. If a change to hax grows beyond a tiny generic seam,
    stop and reconsider — it probably belongs in the harness.
    - **Upstream sync cadence is weekly — never more often.** Last sync:
-     **2026-10-08** (upstream base `95e0179` = v0.5.0; staged catch-up, stage 3
-     to master pending). Update this line as part of every
+     **2026-10-08** (upstream base `2834c2c`, master as of 2026-10-07). Update this line as part of every
      sync. Before starting fork-touching work, check drift against the seam
      files (`git -C vendor/hax log --oneline emitter..hax-upstream/master --
      src/agent.c src/agent_core.c src/agent_core.h src/protocol/ src/slash.c`);
