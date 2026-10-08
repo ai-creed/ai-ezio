@@ -14,7 +14,7 @@ does not depend on it ever being merged.
 | Downstream fork (hax)| `git@github.com:ai-creed/hax.git` (private) — carries `emitter` |
 | Sync source (orig.)  | `https://github.com/OleksandrChekhovskyi/hax` (read-only) |
 | Downstream product   | `ai-creed/ai-ezio` (private)                              |
-| Base commit          | `2834c2c` (upstream master as of 2026-10-07; emitter tip `05729b9`; synced 2026-10-08 — catch-up complete; original derivation `8fd139b`, 2026-05-29) |
+| Base commit          | `2834c2c` (upstream master as of 2026-10-07; emitter tip `d6d61bd`; synced 2026-10-08 — catch-up complete; original derivation `8fd139b`, 2026-05-29) |
 
 ## How hax is consumed
 
