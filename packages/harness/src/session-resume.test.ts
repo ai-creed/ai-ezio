@@ -205,7 +205,11 @@ function listSessions(
 
 describe.runIf(haxBuilt)("Session.resume (real hax, mock provider)", () => {
 	it("replays seeded history, accepts post-resume turns, and resets latches across repeated resumes", async () => {
-		const env = { ...process.env, HAX_PROVIDER: "mock" };
+		// Upstream hax's `no_session` defaults to "auto", which turns session
+		// recording OFF for internal providers (mock included) — picked up by the
+		// 2026-10-08 fork sync. The session file IS the test subject, so opt back
+		// in explicitly (the C compaction e2e does the same).
+		const env = { ...process.env, HAX_PROVIDER: "mock", HAX_NO_SESSION: "0" };
 
 		// 1. Seed a session: one turn so hax materializes the session file + id.
 		const a = new Session();
