@@ -14,7 +14,7 @@ does not depend on it ever being merged.
 | Downstream fork (hax)| `git@github.com:ai-creed/hax.git` (private) — carries `emitter` |
 | Sync source (orig.)  | `https://github.com/OleksandrChekhovskyi/hax` (read-only) |
 | Downstream product   | `ai-creed/ai-ezio` (private)                              |
-| Base commit          | `74ab9e9` (upstream base; emitter tip `7fa974e`; synced 2026-07-15; original derivation `8fd139b`, 2026-05-29) |
+| Base commit          | `189816f` = v0.4.0 (upstream base; emitter tip `3a850da`; synced 2026-10-08, staged catch-up — v0.5.0 and master still pending; original derivation `8fd139b`, 2026-05-29) |
 
 ## How hax is consumed
 
@@ -60,7 +60,15 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
   prints the cwd's saved sessions as a JSON array — `session_list_json()` in
   `session.c` (a self-contained, append-only function reusing the existing
   `session_list` / `session_first_prompt`), printed and exited early in `main.c`
-  before any provider work. A generic host-facing seam so an embedder (ai-ezio)
+  before any provider work. Since the v0.4.0 sync the flag (and the three
+  protocol/mount flags) are parsed in upstream's `cli.c` / `cli.h`, where all
+  option parsing now lives — `main.c` only keeps the early exit.
+- **`tool_def.parameters_schema_json`** (v0.4.0 sync): upstream replaced the
+  tool-schema string with a typed `tool_param` array serialized by
+  `tool_schema.c`. Host-delegated (MCP) tools arrive with arbitrary JSON
+  Schemas, so `provider.h` gains one optional field and `tool_schema_build`
+  one early branch that passes a verbatim schema through. NULL for every
+  native tool; generic enough to upstream. A generic host-facing seam so an embedder (ai-ezio)
   can render its own resume picker without re-deriving hax's private on-disk
   session layout.
 
@@ -74,6 +82,17 @@ churn. It has two parts — an **upstreamable seam** and a **downstream emitter*
   the slash seam (lists the honored skill dirs);
 - the M4 control integration points in `agent.c` (`new_conversation` →
   `agent_new_conversation`, `status` → `emit_status`) and `meson.build` lines;
+- **agent_loop hooks (v0.4.0 sync):** upstream extracted the inner turn loop
+  into `agent_loop.c`, driven by `struct agent_loop_hooks`. The emitter now
+  rides those hooks from `agent.c`'s `repl_loop_*` adapters instead of an
+  inlined loop: `observe` mirrors stream events, `tick` polls the protocol
+  `interrupt`, `checkpoint` turns it into an abort, `turn_begin` fires
+  `assistant_turn_started` per round-trip, `turn_end` stages M7 usage, and
+  `tool_call` wraps M8 tool events around dispatch and hosts the M9 delegated
+  branch (`dispatch_delegated_call`). Boundaries, log flushing and abort repair
+  are upstream's job now — the downstream `agent.c` footprint shrank. `isDiff`
+  comes from `tool_output_is_diff()` in `agent_dispatch.c` (upstream dropped
+  the `output_is_diff` flag);
 - **M7 (mounted REPL parity):** `emit_status` carries an `effort` field;
   `emit_set_usage` stages a turn's token counts that `obs_on_turn_finished`
   attaches to `assistant_turn_finished` (fields omitted when the backend reports
@@ -116,6 +135,17 @@ with upstream MUST follow these rules.
 - **Weekly:** rebase `emitter` onto the latest upstream `master` once a week.
   Drift never exceeds a handful of upstream commits, so each sync stays a
   minutes-sized, mechanical job.
+- **Catch-up after a lapse:** when drift has grown past a release boundary
+  (the 2026-10-08 sync was 263 commits / 12 missed weeks behind), stage the
+  rebase one upstream tag at a time (`v0.4.0`, then `v0.5.0`, then `master`),
+  running the validation gate at each stop, and rebase the downstream change as
+  ONE squashed commit (the granular history stays on the archive branch).
+  Replaying every downstream commit across a structural upstream refactor
+  re-conflicts the same hunks repeatedly.
+- **Audit `rerere` resolutions.** `rerere.enabled` is on in the fork. It silently
+  "resolved" `main.c` at the 2026-10-08 sync by dropping all four downstream CLI
+  flags (upstream had moved parsing to `cli.c`). After any rebase stop, diff
+  every rerere-resolved file against the upstream base before trusting it.
 - **Before major fork-touching work:** any ezio feature expected to change the
   hax fork at a notable level (touching multiple files) starts from a fresh
   base — but the weekly cadence is the only sync trigger. If the pre-feature
@@ -130,8 +160,10 @@ The downstream footprint is exactly the documented change surface above:
 wholly-owned files (`src/agent_observer.h`, `src/protocol/`, `tests/protocol/`)
 plus thin seam lines in shared files (`agent.c`, `agent_core.{c,h}`,
 `agent_dispatch.{c,h}`, `agent_env.c`, `session.{c,h}`, `slash.{c,h}`, `main.c`,
-the two meson files, `tests/test_slash.c`, `tests/test_agent_dispatch.c`,
-`tests/test_session.c`). The `session.{c,h}` footprint is one append-only
+`cli.{c,h}`, `provider.h`, `tool_schema.c`, the two meson files,
+`tests/test_slash.c`, `tests/test_agent_dispatch.c`, `tests/test_session.c`).
+`cli.{c,h}`, `provider.h` and `tool_schema.c` joined the list at the v0.4.0
+sync (2026-10-08) when upstream moved option parsing and the tool-schema model. The `session.{c,h}` footprint is one append-only
 function (`session_list_json`) plus its declaration — additive, so a rebase sees
 no overlap with existing session logic. In the meson files we own only list
 entries (`sources`, `test_sources`, `e2e_sources`) and the small e2e foreach —
@@ -177,8 +209,20 @@ The submodule pointer must always reference a commit pushed to `origin`
 1. `meson test -C build --print-errorlogs` — full engine suite, including the
    downstream `protocol/` tests.
 2. `pnpm -r build && pnpm -r test` — the TS harness against the new engine.
-3. `pnpm run smoke:cli-mount` — one real mounted turn end to end.
-4. `clang-format --dry-run --Werror` on every C file touched during resolution.
+3. `pnpm run smoke:cli-mount` and `pnpm run smoke:proto` — one real mounted
+   turn and the protocol lifecycle/interrupt path. Both scripts hardcode
+   `vendor/hax/build/hax`; while the sync is still in the scratch worktree,
+   run copies pointed at the worktree's build or they test the OLD binary.
+4. **Standalone human REPL:** `scripts/repl-regression.py <pristine-upstream-hax>
+   <synced-hax>` — the no-fd interactive path must stay byte-for-byte identical
+   to a pristine build of the same upstream tag (build one in a detached
+   worktree). Plus `ai-ezio -p` and `ai-ezio doctor` through
+   `packages/cli/bin/ai-ezio.mjs` with `AI_EZIO_HAX_BIN` set.
+5. **Whisper collab mode:** in the sibling ai-whisper repo, `e2e:ai-ezio-mount`
+   (real `whisper collab mount ezio`, relay handoff, M8 tool + table rendering)
+   and `e2e:ai-ezio-workflow` (full SDD run, ezio implementer + claude
+   reviewer). Same hardcoded-path caveat as step 3.
+6. `clang-format --dry-run --Werror` on every C file touched during resolution.
 
 If a major upstream change redesigns the event model itself (the seam the
 emitter rides), expect a real, but localized, port — re-anchor `emit.c` to the
