@@ -7,6 +7,48 @@ All notable changes to ai-ezio are documented here. The format is based on
 Prerelease (`-beta.N`) versions publish to npm under the `beta` dist-tag, not
 `latest`: `npm i -g @ai-creed/ai-ezio@beta` (or the unscoped `ai-ezio@beta`).
 
+## [0.4.3] — 2026-10-09
+
+### Changed
+
+- **Engine sync (hax fork rebased onto upstream `2834c2c`, master as of
+  2026-10-07; fork tip `d6d61bd`)** — a three-stage catch-up (v0.4.0 → v0.5.0 →
+  master, 263 upstream commits) that brings upstream hax 0.4.0, 0.5.0 and the
+  unreleased work after it: Tab completion of `/` commands and arguments with
+  argument placeholders, `/provider` / `/model` / `/effort` taking an argument
+  directly, `/session` per-model token rows and totals that survive resume,
+  append-only session files, per-directory prompt history, the `hax --json`
+  one-shot JSONL stream, graceful SIGINT/SIGTERM for one-shot runs, OpenCode
+  Zen/Go and DeepSeek providers, codex browser `/login`, FreeBSD/OpenBSD
+  builds, and upstream's fixes since July. Downstream seams were re-anchored
+  onto upstream's new agent-loop hooks and `cli.c`; the protocol surface is
+  unchanged except as noted below.
+- **Upstream breaking config change (hax 0.4.0):** provider settings now live
+  in `providers.<id>` blocks of hax's `config.json` and no longer leak between
+  providers. Flat per-provider keys from older configs need moving under their
+  provider block — see upstream hax's `CHANGELOG.md` for the mapping.
+- **`ready.haxBaseCommit` now carries the engine's `git describe` string**
+  (e.g. `v0.5.0-47-gd6d61bd`; the hash is the suffix after `g`) instead of a
+  bare short hash, and is the project version in builds without git. Consumers
+  should treat it as opaque. `ai-ezio --version --json` and `doctor` keep
+  reporting the pinned full fork commit from the package manifest.
+- **Mock-provider sessions record nothing by default** (upstream's
+  `no_session=auto` disables recording for internal providers). Tests and
+  scripts that read a mock session file set `HAX_NO_SESSION=0` explicitly.
+
+### Fixed
+
+- **Harness resume test** opted back into session recording for the reason
+  above; it failed against the new engine with resume id `unknown`.
+- **Release workflows install tmux** on every platform: upstream's REPL e2e
+  scenarios drive the binary through it, and the macOS runners lacked it.
+
+Engine source: fork commit `d6d61bd` (upstream `2834c2c` + one squashed
+downstream patch + the CI-hygiene follow-ups that make upstream's full CI
+matrix — Alpine, Arch, Debian, FreeBSD, OpenBSD, ASAN, TSAN, macOS lint — pass
+on the fork). The `@ai-creed/hax-*` platform packages republish at 0.4.3 with
+binaries built from that commit.
+
 ## [0.4.2] — 2026-07-18
 
 ### Added

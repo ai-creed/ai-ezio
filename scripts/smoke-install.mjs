@@ -84,7 +84,7 @@ try {
 	fail(`--version --json did not emit JSON: ${versionOut}`);
 }
 if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(info.ezioVersion ?? "")) fail(`bad ezioVersion: ${versionOut}`);
-if (info.haxBaseCommit !== "2d98651a617ad520b7d8b4da46c185b54b8f190c") {
+if (info.haxBaseCommit !== "d6d61bd591ef4ea89f702dad3a3da0569a47786b") {
 	fail(`bad haxBaseCommit: ${versionOut}`);
 }
 

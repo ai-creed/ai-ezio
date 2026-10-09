@@ -1,6 +1,6 @@
 {
 	"name": "@ai-creed/ai-ezio",
-	"version": "0.4.2",
+	"version": "0.4.3",
 	"description": "ai-ezio: hax-derived, workflow-native coding agent",
 	"license": "MIT",
 	"type": "module",
@@ -8,7 +8,7 @@
 		"ai-ezio": "bin/ai-ezio.mjs",
 		"ezio": "bin/ai-ezio.mjs"
 	},
-	"haxBaseCommit": "2d98651a617ad520b7d8b4da46c185b54b8f190c",
+	"haxBaseCommit": "d6d61bd591ef4ea89f702dad3a3da0569a47786b",
 	"exports": {
 		".": {
 			"types": "./dist/cli.d.ts",

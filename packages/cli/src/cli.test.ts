@@ -128,6 +128,6 @@ describe("readVersionInfo", () => {
 	it("reports the ezio version and the pinned hax base commit", () => {
 		const info = readVersionInfo();
 		expect(info.ezioVersion).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/); // allow prerelease (e.g. 0.1.0-beta.0)
-		expect(info.haxBaseCommit).toBe("2d98651a617ad520b7d8b4da46c185b54b8f190c");
+		expect(info.haxBaseCommit).toBe("d6d61bd591ef4ea89f702dad3a3da0569a47786b");
 	});
 });
