@@ -12,8 +12,8 @@ ai-ezio is a **hax-derived, workflow-native coding agent**. It is a **hybrid**:
 - a **TypeScript harness** — everything in `packages/`. The protocol client,
   mount mode, generic MCP host, subagent host, mounted-REPL surface, session
   recorder, skills UX, and the `ai-ezio` CLI. (The ai-whisper adapter is
-  **not** here — it was retired at M5 and lives downstream in the ai-whisper
-  repo.)
+  **not** here — it lives downstream in the ai-whisper repo as
+  `packages/adapter-ai-ezio`; the harness stays workflow-agnostic.)
 
 The dividing rule: **engine work is C and lives in hax; product work is TS and
 lives in `packages/`.** When in doubt, push behavior into the TS harness; keep
@@ -46,11 +46,6 @@ ai-ezio/
   packaging/           per-platform hax binary packages + the unscoped `ai-ezio` alias
   scripts/             bundle / publish / smoke scripts
 ```
-
-> The ai-whisper adapter is **not** a package here. It was retired at M5 and now
-> lives in the ai-whisper repo as `packages/adapter-ai-ezio` (it imports
-> `@ai-ezio/harness`). Workflow glue lives downstream; the harness stays
-> workflow-agnostic.
 
 > Current state: shipped and published. `packages/` and the `vendor/hax`
 > submodule are fully wired; ai-ezio is on npm as `ai-ezio` /
@@ -115,7 +110,7 @@ any C file you touch. Build/test with meson (`meson compile -C vendor/hax/build`
 > baseline), vendored C uses 4 spaces (hax's enforced style). Never reformat
 > hax sources to the TS style — it would wreck upstream rebases.
 
-## Build, test (planned — wired at Milestone 1)
+## Build, test
 
 ```sh
 pnpm install                      # TS deps
